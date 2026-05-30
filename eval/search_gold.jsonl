@@ -1,0 +1,3 @@
+{"query":"why was vector search delayed","expected_paths":["wiki/decisions/delay-vector-search.md"],"min_score":0.5,"notes":"Should retrieve the decision explaining why vector search was delayed."}
+{"query":"how does Zurvan protect raw files","expected_paths":["wiki/note-raw-folder-protection.md","AGENTS.md"],"min_score":0.5,"notes":"Should retrieve raw immutability/security rules."}
+{"query":"what is the extraction reliability gauntlet","expected_paths":["docs/extraction_test_matrix.md"],"min_score":0.5,"notes":"Should retrieve the reliability test matrix."}
