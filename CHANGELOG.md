@@ -2,6 +2,17 @@
 
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 7: Comprehensive Documentation Audit
+- **Summary:** Conducted a full audit of documentation. Fixed markdown errors in README, decoupled technical guides into specific files (`SETUP.md`, `ARCHITECTURE.md`, `API.md`, `ENVIRONMENT.md`, `TESTING.md`, `TROUBLESHOOTING.md`, `DEPLOYMENT.md`). Addressed duplicate chunk_id in `open-questions.md` breaking hybrid search tests.
+- **Files Changed:**
+  - `README.md`
+  - `docs/SETUP.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/ENVIRONMENT.md`, `docs/TESTING.md`, `docs/TROUBLESHOOTING.md`, `docs/DEPLOYMENT.md`
+  - `wiki/open-questions.md`
+- **Verification:** Ran `check.sh` quality gate, passing all unit tests, reliability gauntlet, audits, index rebuilding, retrieval evaluation, and MCP E2E tests.
+- **Follow-ups:** Maintain these documentation invariants as the project expands.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Local MCP Server for Agent Integration (Phase 6)
 - **Summary:** Added MCP SDK based server to expose Zurvan memory securely via stdio. Added tools, resources, and prompts wrappers over existing Zurvan functions. Implemented `mcp_security.py` to enforce read-only defaults, path validation, and block arbitrary file reads/execution.
 - **Files Changed:**
