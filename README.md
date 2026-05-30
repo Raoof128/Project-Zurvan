@@ -1,5 +1,7 @@
 # Local-first LLM Wiki Knowledge Engine
 
+*Inspired by [Andrej Karpathy's gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).*
+
 A local, Markdown-based wiki knowledge engine that uses LLMs (to be plugged in) to ingest raw sources, extract claims, entities, and concepts, and generate a linked Markdown wiki.
 
 ## Goals
