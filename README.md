@@ -138,6 +138,62 @@ zurvan graph export --format markdown
 zurvan graph export --format dot
 ```
 
+### 6. Local MCP Server for Agent Integration (Phase 6)
+Zurvan can act as a local Model Context Protocol (MCP) server over `stdio`, providing tools, resources, and prompts to Claude Code, Cursor, and other compatible agents. By default, it operates in a strict **read-only mode**.
+
+#### Running the server
+You can start the server manually for testing:
+```bash
+export ZURVAN_MCP_READONLY=1
+export ZURVAN_MCP_TRANSPORT=stdio
+export ZURVAN_MCP_ALLOW_RAW_READ=0
+python scripts/mcp_server.py
+```
+
+#### Claude Code Config Example
+Add this to your `claude.json` or MCP configuration to let Claude use Zurvan as its memory:
+
+**Read-only mode (Default & Recommended)**
+```json
+{
+  "mcpServers": {
+    "zurvan": {
+      "command": "python",
+      "args": ["scripts/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": ".",
+        "ZURVAN_MCP_READONLY": "1",
+        "ZURVAN_MCP_TRANSPORT": "stdio",
+        "ZURVAN_MCP_ALLOW_RAW_READ": "0",
+        "ZURVAN_EMBED_PROVIDER": "mock"
+      }
+    }
+  }
+}
+```
+
+**Write mode (Trusted Repositories Only)**
+```json
+{
+  "mcpServers": {
+    "zurvan": {
+      "command": "python",
+      "args": ["scripts/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": ".",
+        "ZURVAN_MCP_READONLY": "0"
+      }
+    }
+  }
+}
+```
+
+#### Security Notes
+- **No shell execution:** MCP cannot run arbitrary shell commands.
+- **Path boundaries:** Absolute paths and directory traversal (`../`) are blocked.
+- **Raw protection:** Reading `raw/` files is blocked unless `ZURVAN_MCP_ALLOW_RAW_READ=1`.
+- **Read-only default:** Write tools (`zurvan_remember`, `zurvan_decision_add`, etc.) are disabled by default.
+
 ### Querying
 ## LLM Providers
 Zurvan supports multiple extraction providers via environment variables.

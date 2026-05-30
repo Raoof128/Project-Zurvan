@@ -12,6 +12,11 @@
 
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Local MCP Server for Agent Integration (Phase 6)
+- **Summary:** Added `mcp_server.py` and tools/resources/prompts to expose Zurvan via the Model Context Protocol (stdio). Implemented strict safety rules including a read-only mode by default and no arbitrary file reads/execution.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
 - **Scope:** LLM Provider & PDF Stress Testing
 - **Summary:** Added real LLM provider support and PDF extraction. Do not add vector search yet! Ensure basic extractions are robust first.
 
