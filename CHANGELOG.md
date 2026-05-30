@@ -2,6 +2,17 @@
 
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
+- **Scope:** E2E Smoke Test (Phase 5.5 Finalization)
+- **Summary:** Created full E2E test script (`scripts/e2e_smoke.sh`) and fixed exit codes in `scripts/cli.py` and `scripts/memory.py` so memory actions failing return correctly. The E2E tests fully simulate the entire Zurvan pipeline.
+- **Files Changed:**
+  - `scripts/e2e_smoke.sh` (Created)
+  - `scripts/cli.py`, `scripts/memory.py` (Fixed return values)
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** Script executed successfully from beginning to end with all features active.
+- **Follow-ups:** Prepare for Phase 6: MCP Server for Agent Integration.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Graph-Assisted Context Expansion (Phase 5.5)
 - **Summary:** Upgraded `zurvan context` to support `--graph` which pairs hybrid search results with related graph nodes up to a specified depth. Added grouping by node type (Decisions, Claims, etc.).
 - **Files Changed:**

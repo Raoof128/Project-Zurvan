@@ -54,3 +54,8 @@
 **Raouf:**
 - **Scope:** Quality Gate (Test-Creator)
 - **Summary:** Added `scripts/check.sh` to enforce testing invariants (pytest, gauntlet, audit) sequentially.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
+- **Scope:** E2E Smoke Test (Phase 5.5 Finalization)
+- **Summary:** Created full E2E test script (`scripts/e2e_smoke.sh`) and fixed exit codes in `scripts/cli.py` and `scripts/memory.py` so memory actions failing return correctly. The E2E tests fully simulate the entire Zurvan pipeline.
