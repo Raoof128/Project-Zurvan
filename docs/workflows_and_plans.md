@@ -89,3 +89,13 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
 3. **Safety**: `safe_write.py` intercepts path traversal attempts and refuses to write to `raw/`.
 4. **Verification**: `claim add` will read the source file to verify the `evidence` string exists before creating the claim.
 5. **Context**: `context` creates an LLM-friendly Markdown bundle of matched documents.
+
+## Phase 6 Local MCP Server Workflow
+1. **Trigger**: An MCP-compatible client (e.g. Claude Code) spawns `python scripts/mcp_server.py` over `stdio`.
+2. **Read-only Default**: By default, `ZURVAN_MCP_READONLY=1` is enforced. Write tools will return descriptive error messages if invoked.
+3. **Write Mode**: Setting `ZURVAN_MCP_READONLY=0` allows agents to use write tools (like `zurvan_remember` or `zurvan_decision_add`). This should only be enabled in trusted local repositories.
+4. **Safety & Threat Model**:
+   - The server performs strict path validation: absolute paths and `../` traversal are always blocked.
+   - The `raw/` directory cannot be read through MCP unless `ZURVAN_MCP_ALLOW_RAW_READ=1` is explicitly set. Writing to `raw/` is never allowed.
+   - The server is purely a thin wrapper around existing CLI and python scripts. It does not introduce arbitrary execution boundaries or new shell subprocess inputs.
+   - `stdio` transport prevents external network requests from directly addressing the server. Future upgrades may introduce HTTP transport only after proper authentication layers are added.

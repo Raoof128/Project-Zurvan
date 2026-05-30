@@ -44,3 +44,17 @@
 - **2026-05-30T17:01:47.960200**: Decision Added - E2E smoke decision
 - **2026-05-30T17:01:48.009003**: Claim Added - Claim 5f9a7a02 from raw/notes/e2e_smoke_note.txt
 - **2026-05-30T17:01:49.677500**: Note Added - Test Note
+- **2026-05-30T17:10:17.777044**: Note Added - Test Note
+- **2026-05-30T17:10:34.321737**: Note Added - Test Note
+- **2026-05-30T17:15:45.049807**: Note Added - Test Note
+- **2026-05-30T17:15:58.699517**: Note Added - MCP test
+- **2026-05-30T17:18:39.896103**: Note Added - Test Note
+- **2026-05-30T17:18:53.406059**: Note Added - MCP test
+- **2026-05-30T17:18:57.713982**: Note Added - MCP test
+- **2026-05-30T17:22:14.347836**: Note Added - MCP E2E write mode smoke
+- **2026-05-30T17:22:14.352553**: Question Added - Should MCP write mode stay disabled by default?
+- **2026-05-30T17:22:30.778242**: Note Added - Test Note
+- **2026-05-30T17:22:44.555790**: Note Added - MCP test
+- **2026-05-30T17:22:49.031058**: Note Added - MCP test
+- **2026-05-30T17:22:53.436051**: Note Added - MCP E2E write mode smoke
+- **2026-05-30T17:22:53.440559**: Question Added - Should MCP write mode stay disabled by default?
