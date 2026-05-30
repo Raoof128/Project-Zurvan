@@ -1,0 +1,7 @@
+Zurvan is a local-first AI knowledge engine.
+
+Vector search was delayed until extraction reliability was proven across TXT, Markdown, short PDF, long PDF, and ugly scanned PDF.
+
+The raw folder is immutable. Generated knowledge must never be written into raw.
+
+Zurvan uses a CLI memory layer so coding agents can store decisions, claims, notes, and questions without calling an internal LLM.

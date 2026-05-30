@@ -1,0 +1,78 @@
+# Knowledge Graph Export
+
+## Nodes
+- **CHANGELOG** (note) - `CHANGELOG.md`
+- **README** (note) - `README.md`
+- **AGENTS** (note) - `AGENTS.md`
+- **CLI memory test** (note) - `wiki/note-cli-memory-test.md`
+- **overview** (note) - `wiki/overview.md`
+- **E2E smoke memory note** (note) - `wiki/note-e2e-smoke-memory-note.md`
+- **Raw folder protection** (note) - `wiki/note-raw-folder-protection.md`
+- **log** (note) - `wiki/log.md`
+- **Test Note** (note) - `wiki/note-test-note.md`
+- **index** (note) - `wiki/index.md`
+- **open-questions** (note) - `wiki/open-questions.md`
+- **E2E smoke decision** (decision) - `wiki/decisions/e2e-smoke-decision.md`
+- **Delay vector search** (decision) - `wiki/decisions/delay-vector-search.md`
+- **AutoConcept-e2e_smoke_note.txt** (concept) - `wiki/concepts/AutoConcept-e2e_smoke_note.txt.md`
+- **AutoConcept-short_paper.pdf** (concept) - `wiki/concepts/AutoConcept-short_paper.pdf.md`
+- **AutoConcept-example.pdf** (concept) - `wiki/concepts/AutoConcept-example.pdf.md`
+- **AutoConcept-medium_article.md** (concept) - `wiki/concepts/AutoConcept-medium_article.md.md`
+- **AutoConcept-small_note.txt** (concept) - `wiki/concepts/AutoConcept-small_note.txt.md`
+- **AutoConcept-long_paper.pdf** (concept) - `wiki/concepts/AutoConcept-long_paper.pdf.md`
+- **AutoConcept-scanned_or_ugly.pdf** (concept) - `wiki/concepts/AutoConcept-scanned_or_ugly.pdf.md`
+- **medium_article_md_summary** (summary) - `wiki/summaries/medium_article_md_summary.md`
+- **long_paper_pdf_summary** (summary) - `wiki/summaries/long_paper_pdf_summary.md`
+- **short_paper_pdf_summary** (summary) - `wiki/summaries/short_paper_pdf_summary.md`
+- **example_pdf_summary** (summary) - `wiki/summaries/example_pdf_summary.md`
+- **small_note_txt_summary** (summary) - `wiki/summaries/small_note_txt_summary.md`
+- **scanned_or_ugly_pdf_summary** (summary) - `wiki/summaries/scanned_or_ugly_pdf_summary.md`
+- **example_summary** (summary) - `wiki/summaries/example_summary.md`
+- **e2e_smoke_note.txt** (source) - `wiki/sources/e2e_smoke_note.txt.md`
+- **short_paper.pdf** (source) - `wiki/sources/short_paper.pdf.md`
+- **scanned_or_ugly.pdf** (source) - `wiki/sources/scanned_or_ugly.pdf.md`
+- **medium_article.md** (source) - `wiki/sources/medium_article.md.md`
+- **long_paper.pdf** (source) - `wiki/sources/long_paper.pdf.md`
+- **small_note.txt** (source) - `wiki/sources/small_note.txt.md`
+- **example.pdf** (source) - `wiki/sources/example.pdf.md`
+- **claim-5f9a7a02** (claim) - `wiki/claims/claim-5f9a7a02.md`
+- **Claim-medium_article.md** (claim) - `wiki/claims/Claim-medium_article.md.md`
+- **Claim-example.pdf** (claim) - `wiki/claims/Claim-example.pdf.md`
+- **Claim-e2e_smoke_note.txt** (claim) - `wiki/claims/Claim-e2e_smoke_note.txt.md`
+- **Claim-scanned_or_ugly.pdf** (claim) - `wiki/claims/Claim-scanned_or_ugly.pdf.md`
+- **claim-0f6698a7** (claim) - `wiki/claims/claim-0f6698a7.md`
+- **claim-dummy-001** (claim) - `wiki/claims/claim-dummy-001.md`
+- **Claim-short_paper.pdf** (claim) - `wiki/claims/Claim-short_paper.pdf.md`
+- **Claim-small_note.txt** (claim) - `wiki/claims/Claim-small_note.txt.md`
+- **Claim-long_paper.pdf** (claim) - `wiki/claims/Claim-long_paper.pdf.md`
+- **extraction_test_matrix** (doc) - `docs/extraction_test_matrix.md`
+- **workflows_and_plans** (doc) - `docs/workflows_and_plans.md`
+
+## Edges
+- README --[mentions]--> workflows_and_plans
+- README --[mentions]--> extraction_test_matrix
+- README --[mentions]--> AGENTS
+- index --[mentions]--> overview
+- index --[mentions]--> open-questions
+- index --[mentions]--> log
+- index --[mentions]--> example.pdf
+- index --[mentions]--> small_note.txt
+- index --[mentions]--> medium_article.md
+- index --[mentions]--> short_paper.pdf
+- index --[mentions]--> long_paper.pdf
+- index --[mentions]--> scanned_or_ugly.pdf
+- index --[mentions]--> e2e_smoke_note.txt
+- AutoConcept-e2e_smoke_note.txt --[mentions]--> e2e_smoke_note.txt
+- AutoConcept-short_paper.pdf --[mentions]--> short_paper.pdf
+- AutoConcept-example.pdf --[mentions]--> example.pdf
+- AutoConcept-medium_article.md --[mentions]--> medium_article.md
+- AutoConcept-small_note.txt --[mentions]--> small_note.txt
+- AutoConcept-long_paper.pdf --[mentions]--> long_paper.pdf
+- AutoConcept-scanned_or_ugly.pdf --[mentions]--> scanned_or_ugly.pdf
+- Claim-medium_article.md --[mentions]--> medium_article.md
+- Claim-example.pdf --[mentions]--> example.pdf
+- Claim-e2e_smoke_note.txt --[mentions]--> e2e_smoke_note.txt
+- Claim-scanned_or_ugly.pdf --[mentions]--> scanned_or_ugly.pdf
+- Claim-short_paper.pdf --[mentions]--> short_paper.pdf
+- Claim-small_note.txt --[mentions]--> small_note.txt
+- Claim-long_paper.pdf --[mentions]--> long_paper.pdf

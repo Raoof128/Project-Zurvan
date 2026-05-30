@@ -1,0 +1,29 @@
+{
+  "source_id": "short_paper_pdf",
+  "summary": {
+    "short": "A short summary",
+    "detailed": "A more detailed summary of the source."
+  },
+  "claims": [
+    {
+      "claim_id": "claim-dummy-001",
+      "text": "Zurvan stores extracted knowledge as Markdown files.",
+      "claim_type": "fact",
+      "confidence": "high",
+      "evidence": [
+        {
+          "quote": "Zurvan turns raw sources into a persistent Markdown wiki...",
+          "location": "line 1"
+        }
+      ],
+      "tags": [
+        "ai",
+        "retrieval"
+      ]
+    }
+  ],
+  "concepts": [],
+  "entities": [],
+  "open_questions": [],
+  "possible_contradictions": []
+}
