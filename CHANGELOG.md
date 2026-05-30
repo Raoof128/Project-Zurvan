@@ -2,6 +2,29 @@
 
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Local MCP Server for Agent Integration (Phase 6)
+- **Summary:** Added MCP SDK based server to expose Zurvan memory securely via stdio. Added tools, resources, and prompts wrappers over existing Zurvan functions. Implemented `mcp_security.py` to enforce read-only defaults, path validation, and block arbitrary file reads/execution.
+- **Files Changed:**
+  - `scripts/mcp_server.py`, `scripts/mcp_tools.py`, `scripts/mcp_resources.py`, `scripts/mcp_prompts.py`, `scripts/mcp_security.py`
+  - `tests/test_mcp_*.py`
+  - `requirements.txt`, `requirements-dev.txt`, `scripts/check.sh`
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** Security tests passed. Smoke test via `check.sh` successfully verified MCP components.
+- **Follow-ups:** Use the MCP server with Claude Code or Cursor to securely interact with the knowledge engine.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
+- **Scope:** E2E Smoke Test (Phase 5.5 Finalization)
+- **Summary:** Created full E2E test script (`scripts/e2e_smoke.sh`) and fixed exit codes in `scripts/cli.py` and `scripts/memory.py` so memory actions failing return correctly. The E2E tests fully simulate the entire Zurvan pipeline.
+- **Files Changed:**
+  - `scripts/e2e_smoke.sh` (Created)
+  - `scripts/cli.py`, `scripts/memory.py` (Fixed return values)
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** Script executed successfully from beginning to end with all features active.
+- **Follow-ups:** Prepare for Phase 6: MCP Server for Agent Integration.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Graph-Assisted Context Expansion (Phase 5.5)
 - **Summary:** Upgraded `zurvan context` to support `--graph` which pairs hybrid search results with related graph nodes up to a specified depth. Added grouping by node type (Decisions, Claims, etc.).
 - **Files Changed:**
