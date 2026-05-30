@@ -12,6 +12,11 @@
 
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Local MCP Server for Agent Integration (Phase 6)
+- **Summary:** Added `mcp_server.py` and tools/resources/prompts to expose Zurvan via the Model Context Protocol (stdio). Implemented strict safety rules including a read-only mode by default and no arbitrary file reads/execution.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
 - **Scope:** LLM Provider & PDF Stress Testing
 - **Summary:** Added real LLM provider support and PDF extraction. Do not add vector search yet! Ensure basic extractions are robust first.
 
@@ -54,3 +59,8 @@
 **Raouf:**
 - **Scope:** Quality Gate (Test-Creator)
 - **Summary:** Added `scripts/check.sh` to enforce testing invariants (pytest, gauntlet, audit) sequentially.
+
+### 2026-05-30 (Australia/Sydney)
+**Raouf:**
+- **Scope:** E2E Smoke Test (Phase 5.5 Finalization)
+- **Summary:** Created full E2E test script (`scripts/e2e_smoke.sh`) and fixed exit codes in `scripts/cli.py` and `scripts/memory.py` so memory actions failing return correctly. The E2E tests fully simulate the entire Zurvan pipeline.
