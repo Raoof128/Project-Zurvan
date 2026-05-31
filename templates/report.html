@@ -13,19 +13,39 @@
     <div class="main-content">
         {% if selected %}
             <div class="report-header">
-                <h2>Report: {{ selected.topic }}</h2>
+                <h2>
+                    <span class="badge badge-{{ audit.status }}">{{ audit.status|upper }}</span>
+                    Report: {{ selected.topic }}
+                </h2>
                 <div class="actions">
                     <a href="/reports/{{ selected.report_id }}/citations" class="btn">Check Citations</a>
                     <a href="/reports/{{ selected.report_id }}/warnings" class="btn btn-warn">View Warnings</a>
+                    <a href="/reports/{{ selected.report_id }}/checklist" class="btn btn-checklist">Reviewer Checklist</a>
                     <a href="/reports/{{ selected.report_id }}/export?format=markdown" class="btn">Export MD</a>
                     <a href="/reports/{{ selected.report_id }}/export?format=json" class="btn">Export JSON</a>
                 </div>
             </div>
+            
+            {% if audit.status != 'pass' %}
+            <div class="warning-panel badge-{{ audit.status }}">
+                <strong>Audit Status: {{ audit.status|upper }}</strong>
+                <ul>
+                    {% for w in audit.warnings %}<li>{{ w }}</li>{% endfor %}
+                    {% for f in audit.failures %}<li>{{ f }}</li>{% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            
             <div class="metadata">
                 <p><strong>ID:</strong> {{ selected.report_id }}</p>
                 <p><strong>Template:</strong> {{ selected.template }}</p>
                 <p><strong>Redaction:</strong> {{ selected.redaction_status }}</p>
                 <p><strong>Source Pack:</strong> <a href="/evidence/{{ selected.source_pack_id }}">{{ selected.source_pack_id }}</a></p>
+            </div>
+            
+            <div class="citation-coverage">
+                <h3>Citation Coverage</h3>
+                <p>Total Claims: {{ audit.stats.claims }} | Mapped Citations: {{ audit.stats.mapped_citations }} | Missing Citations: <span class="{% if audit.stats.missing_citations > 0 %}error-text{% endif %}">{{ audit.stats.missing_citations }}</span></p>
             </div>
             
             {% if selected.claims %}

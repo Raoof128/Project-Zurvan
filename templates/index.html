@@ -3,13 +3,36 @@
 {% block content %}
 <div class="dashboard">
     <h2>Dashboard</h2>
-    <div class="dashboard-grid">
+    
+    <div class="summary-cards">
+        <div class="card stat-card">
+            <h3>Evidence Packs</h3>
+            <div class="stat-number">{{ index.packs|length }}</div>
+        </div>
+        <div class="card stat-card">
+            <h3>Reports</h3>
+            <div class="stat-number">{{ index.reports|length }}</div>
+        </div>
+        <div class="card stat-card warn">
+            <h3>Warnings</h3>
+            <div class="stat-number">{{ index.reports|selectattr('status', 'equalto', 'warn')|list|length }}</div>
+        </div>
+        <div class="card stat-card fail">
+            <h3>Failing Audit</h3>
+            <div class="stat-number">{{ index.reports|selectattr('status', 'equalto', 'fail')|list|length }}</div>
+        </div>
+    </div>
+
+    <div class="dashboard-grid" style="margin-top: 2rem;">
         <div class="card">
             <h3>Recent Reports</h3>
-            {% if reports %}
+            {% if index.reports %}
                 <ul>
-                {% for r in reports[:5] %}
-                    <li><a href="/reports/{{ r.report_id }}">{{ r.topic }} ({{ r.template }})</a></li>
+                {% for r in index.reports[:5] %}
+                    <li>
+                        <span class="badge badge-{{ r.status }}">{{ r.status|upper }}</span>
+                        <a href="/reports/{{ r.report_id }}">{{ r.topic }} ({{ r.template }})</a>
+                    </li>
                 {% endfor %}
                 </ul>
             {% else %}
@@ -19,9 +42,9 @@
         </div>
         <div class="card">
             <h3>Recent Evidence Packs</h3>
-            {% if packs %}
+            {% if index.packs %}
                 <ul>
-                {% for p in packs[:5] %}
+                {% for p in index.packs[:5] %}
                     <li><a href="/evidence/{{ p.pack_id }}">{{ p.topic }}</a></li>
                 {% endfor %}
                 </ul>

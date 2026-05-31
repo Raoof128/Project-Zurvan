@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="checklist-view">
+    <h2>Reviewer Checklist: {{ report.topic }}</h2>
+    <a href="/reports/{{ report.report_id }}" class="btn">Back to Report</a>
+    
+    <div class="checklist-container">
+        <div class="checklist-item">
+            <input type="checkbox" id="check-cit">
+            <label for="check-cit"><strong>Citations Checked</strong> ({{ audit.stats.claims }} claims, {{ audit.stats.missing_citations }} missing mappings)</label>
+        </div>
+        <div class="checklist-item">
+            <input type="checkbox" id="check-warn">
+            <label for="check-warn"><strong>Warnings Reviewed</strong> ({{ audit.warnings|length }} warnings, {{ audit.failures|length }} failures)</label>
+        </div>
+        <div class="checklist-item">
+            <input type="checkbox" id="check-redact">
+            <label for="check-redact"><strong>Redaction Verified</strong> (Status: {{ report.redaction_status }})</label>
+        </div>
+        <div class="checklist-item">
+            <input type="checkbox" id="check-format">
+            <label for="check-format"><strong>Export Format Selected</strong></label>
+        </div>
+        <div class="checklist-item">
+            <input type="checkbox" id="check-ready">
+            <label for="check-ready"><strong>Ready to Share</strong></label>
+        </div>
+        
+        <div class="export-actions" style="margin-top: 2rem;">
+            <a href="/reports/{{ report.report_id }}/export?format=markdown" class="btn">Export MD</a>
+            <a href="/reports/{{ report.report_id }}/export?format=json" class="btn">Export JSON</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

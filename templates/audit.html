@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="audit-single">
+    <h2>Audit Report: {{ report_id }}</h2>
+    <a href="/reports/{{ report_id }}" class="btn">Back to Report</a>
+    
+    <div class="audit-item badge-{{ audit.status }}">
+        <h3>Status: <span class="badge badge-{{ audit.status }}">{{ audit.status|upper }}</span></h3>
+        <p>Checked at: {{ audit.checked_at }}</p>
+        
+        {% if audit.failures %}
+            <h4>Failures:</h4>
+            <ul class="error-list">
+                {% for f in audit.failures %}<li>{{ f }}</li>{% endfor %}
+            </ul>
+        {% else %}
+            <p>No failures detected.</p>
+        {% endif %}
+        
+        {% if audit.warnings %}
+            <h4>Warnings:</h4>
+            <ul class="warning-list">
+                {% for w in audit.warnings %}<li>{{ w }}</li>{% endfor %}
+            </ul>
+        {% else %}
+            <p>No warnings detected.</p>
+        {% endif %}
+        
+        <h4>Citation Coverage</h4>
+        <p>Total Claims: {{ audit.stats.claims }}</p>
+        <p>Mapped Citations: {{ audit.stats.mapped_citations }}</p>
+        <p>Missing Citations: <span class="{% if audit.stats.missing_citations > 0 %}error-text{% endif %}">{{ audit.stats.missing_citations }}</span></p>
+    </div>
+</div>
+{% endblock %}
