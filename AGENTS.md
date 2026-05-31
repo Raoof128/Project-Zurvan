@@ -10,6 +10,11 @@
 6. **No Web App**: Focus on local SQLite and Markdown scripts for now. Obsidian compatibility is a plus.
 7. **Documentation**: Refer to `docs/workflows_and_plans.md` for explicit ingestion and audit workflow logic.
 
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase 6.5: MCP Client Integration Pack
+- **Summary:** Added `scripts/doctor_mcp.py` to assert system health before connection and `scripts/install_mcp_config.py` to generate safe MCP configurations for clients like Claude Code and Cursor. Added comprehensive client setup guides in `docs/mcp/`. Added explicit warnings when bypassing read-only defaults.
+
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 7: Comprehensive Documentation Audit

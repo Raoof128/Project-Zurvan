@@ -1,5 +1,17 @@
 ## Change Log
 
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase 6.5: MCP Client Integration Pack
+- **Summary:** Added `scripts/doctor_mcp.py` to assert system health before connection and `scripts/install_mcp_config.py` to generate safe MCP configurations for clients like Claude Code and Cursor. Added comprehensive client setup guides in `docs/mcp/`. Added explicit warnings when bypassing read-only defaults.
+- **Files Changed:**
+  - `docs/mcp/claude-code.md`, `docs/mcp/cursor.md`, `docs/mcp/codex-style-agents.md`, `docs/mcp/security.md`, `docs/mcp/troubleshooting.md`
+  - `scripts/doctor_mcp.py`, `scripts/install_mcp_config.py`
+  - `tests/test_doctor_mcp.py`, `tests/test_install_mcp_config.py`
+  - `scripts/check.sh`, `scripts/e2e_mcp_smoke.py`
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** `doctor_mcp.py` successfully detected missing dependencies and unsafe states. `install_mcp_config.py` correctly printed configurations. Pytest suite expanded and passed. MCP E2E smoke test continues to pass reliably without causing SQLite constraint collisions in subsequent runs.
+- **Follow-ups:** Prepare for Phase 7 (if any) or continue improving knowledge engine extractions.
 ### 2026-05-30 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 7: Comprehensive Documentation Audit
