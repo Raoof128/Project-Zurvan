@@ -7,7 +7,12 @@ echo "========================================="
 echo "  Zurvan Comprehensive Quality Gate"
 echo "========================================="
 
-echo "[1/6] Running Unit Tests (pytest)..."
+echo "[1/7] Running Public Repo Guard..."
+PYTHONPATH=. python scripts/public_repo_guard.py
+echo "✅ Public repo guard passed."
+echo ""
+
+echo "[2/7] Running Unit Tests (pytest)..."
 PYTHONPATH=. pytest tests/
 echo "✅ Unit tests passed."
 echo ""
