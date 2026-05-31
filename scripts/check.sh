@@ -142,7 +142,7 @@ python scripts/cli.py project radar drift >/dev/null
 echo "✅ Policy radar smoke test passed."
 
 echo ""
-echo "[18/19] Testing Evidence Pack Builder..."
+echo "[18/20] Testing Evidence Pack Builder..."
 mkdir -p "$ZURVAN_CONFIG_DIR"
 python scripts/cli.py project register --name zurvan --path . >/dev/null
 python scripts/cli.py evidence build --topic "smoke test" --hybrid --graph --include-decisions --include-policy-radar >/dev/null
@@ -154,6 +154,20 @@ if [ -n "$PACK_ID" ]; then
     echo "✅ Evidence pack smoke test passed."
 else
     echo "❌ Evidence pack smoke test failed."
+    exit 1
+fi
+
+echo ""
+echo "[19/20] Testing Report Composer..."
+python scripts/cli.py report compose --pack "$PACK_ID" --template evidence_digest >/dev/null
+REPORT_ID=$(python scripts/cli.py report list | head -n 1 | awk '{print $2}')
+if [ -n "$REPORT_ID" ]; then
+    python scripts/cli.py report inspect "$REPORT_ID" >/dev/null
+    python scripts/cli.py report validate "$REPORT_ID" >/dev/null
+    python scripts/cli.py report export "$REPORT_ID" --format markdown >/dev/null
+    echo "✅ Report composer smoke test passed."
+else
+    echo "❌ Report composer smoke test failed."
     exit 1
 fi
 

@@ -2,6 +2,22 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 14: Report Composer
+- **Summary:** Built the local Phase 14 Report Composer. It safely transforms Evidence Packs into structured Markdown and JSON reports without relying on LLM or cloud endpoints. Uses predefined deterministic templates (e.g. executive_summary, technical_audit, evidence_digest). Integrates existing redaction safeguards to completely scrub evidence of private keys and paths before final output. Included a strict validation engine ensuring every claim maps directly to citations and warns if sections lack sufficient evidence. Outputs default to safe off-repo directories (`~/.zurvan/reports/`) to maintain public repo safety.
+- **Files Changed:**
+  - `scripts/report_compose.py` - Core composition, templating and validation
+  - `scripts/report_export.py` - Markdown and JSON structure export
+  - `scripts/cli.py` - Added `zurvan report compose/list/inspect/export/validate`
+  - `scripts/public_repo_guard.py` & `.gitignore` - Added `reports/` block list
+  - `tests/test_report_*.py` - Test suite for report creation and export
+  - `scripts/check.sh` - Included Phase 14 report smoke test
+  - `docs/reports/*.md` - Documentation for overview, templates, CLI, and safety
+  - `README.md` & `docs/workflows_and_plans.md` - Marked Phase 14 as complete
+- **Verification:** Ran `bash scripts/check.sh`, resulting in 100% pass for unit and smoke tests, alongside the `test_report_compose.py` passing the validation structure check correctly categorizing missing sections as warnings.
+- **Follow-ups:** Proceed to Phase 15: Local Report UI / Review Workbench.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 13: Evidence Pack Builder
 - **Summary:** Implemented a robust Evidence Pack Builder capable of securely aggregating claims, decisions, contradictions, graph context, and search results into redacted, shareable bundles without requiring cloud connectivity, remote synchronization, or LLM summarization. Integrated data export pipelines supporting Markdown and JSON formats, alongside an automatic redaction utility guarding sensitive information like paths and API credentials. Output evidence packs are strictly stored locally outside the public workspace to protect data integrity and uphold safety constraints.
 - **Files Changed:**

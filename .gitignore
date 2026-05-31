@@ -8,6 +8,7 @@
 
 # Zurvan evidence bundles (never commit packs containing raw excerpts)
 evidence-packs/
+reports/
 
 # Local snapshots/backups may contain private wiki data
 dist/snapshots/
