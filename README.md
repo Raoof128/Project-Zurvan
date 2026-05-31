@@ -69,6 +69,16 @@ For full configuration details, see the Client Integration Pack:
 - [MCP Security](docs/mcp/security.md)
 - [MCP Troubleshooting](docs/mcp/troubleshooting.md)
 
+## Obsidian Integration
+Zurvan is highly compatible with [Obsidian](https://obsidian.md/). You can open the entire repository as a vault to get a beautiful graph view and seamless Markdown editing.
+
+To use Zurvan with Obsidian:
+1. Open Obsidian and select **Open folder as vault**.
+2. Select the root `Zurvan/` directory.
+
+We have included safe `.obsidian/` configurations that automatically ignore non-knowledge folders (like `data/` and `scripts/`) to keep your vault clean.
+See the [Obsidian Setup Guides](docs/obsidian/) for plugin recommendations and graph-view setup.
+
 ## Agent Workflow Orchestration
 Zurvan includes tools to structure AI agent sessions (for Claude Code, Codex, Cursor, etc.). By running these before and after edits, agents can safely maintain context and memory.
 

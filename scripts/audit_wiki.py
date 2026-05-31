@@ -54,7 +54,7 @@ def audit_orphan_pages(wiki_dir):
     
     errors = []
     for page in all_pages:
-        if page not in links and page not in ['index.md', 'log.md', 'overview.md', 'open-questions.md']:
+        if page not in links and page not in ['index.md', 'log.md', 'overview.md', 'open-questions.md'] and not page.startswith('templates/'):
             errors.append(f"Orphan page found: {page}")
     return errors
 
