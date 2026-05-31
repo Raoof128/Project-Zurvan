@@ -2,6 +2,20 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 12: Cross-Project Contradiction + Policy Radar
+- **Summary:** Added `zurvan project radar scan`, `contradictions`, `policies`, `drift`, and `report`. Built local heuristic detection for contradictions across decisions, claims, and policies based on positive/negative keyword lists and categorical overlap. Included rules to ensure safe handling of public repos, MCP write restrictions, and directory immutability.
+- **Files Changed:**
+  - `scripts/policy_rules.py` (created)
+  - `scripts/claim_federation.py` (created)
+  - `scripts/contradiction_radar.py` (created)
+  - `scripts/policy_radar.py` (created)
+  - `scripts/cli.py` (modified)
+  - `docs/policy-radar/` (created)
+- **Verification:** Unit tests added in `tests/test_policy_rules.py`, `test_claim_federation.py`, `test_contradiction_radar.py`, `test_policy_radar.py`. Smoke tests added to `check.sh` ran successfully.
+- **Follow-ups:** Proceed to Phase 13: Evidence Pack Builder.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 11: Cross-Project Decision Memory
 - **Summary:** Enabled Zurvan to scan, cache, and compare decisions across all federated projects. Added `zurvan project decisions-all`, `decisions-similar`, `decisions-conflicts`, and `decisions-stale`. Built heuristic algorithms to detect repeating architectural patterns and possible contradictions (e.g., conflicting defaults across projects) without relying on cloud endpoints, LLMs, or cross-project data copying. Cached decisions locally in `~/.zurvan/cache/` to ensure public-repo safety.
 - **Files Changed:**

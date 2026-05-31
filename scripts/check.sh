@@ -137,6 +137,16 @@ PYTHONPATH=. python scripts/cli.py project decisions-conflicts > /dev/null
 PYTHONPATH=. python scripts/cli.py project decisions-stale --days 90 > /dev/null
 echo "✅ Decision memory smoke test passed."
 
-echo -e "\n========================================="
+echo ""
+echo "[17/17] Testing Policy Radar..."
+export ZURVAN_CONFIG_DIR="$(mktemp -d)"
+python scripts/cli.py project radar scan > /dev/null
+python scripts/cli.py project radar contradictions > /dev/null
+python scripts/cli.py project radar drift > /dev/null
+python scripts/cli.py project radar report > /dev/null
+echo "✅ Policy radar smoke test passed."
+
+echo ""
+echo "========================================="
 echo "🎉 All Zurvan checks passed successfully."
 echo "========================================="

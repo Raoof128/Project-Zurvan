@@ -125,7 +125,17 @@ zurvan project list
 # Switch default project
 zurvan project use my-vault
 
-# Run command against a specific project without switching
+# Search across all projects
+zurvan project search-all "architecture"
+
+# Decision Memory
+zurvan project decisions-all
+zurvan project decisions-conflicts
+
+# Policy Radar
+zurvan project radar scan
+zurvan project radar contradictions
+zurvan project radar drift
 zurvan --project my-vault search "architecture"
 ```
 *Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
