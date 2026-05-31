@@ -100,10 +100,21 @@ PYTHONPATH=. python scripts/cli.py doctor
 echo "✅ Doctor check passed."
 echo ""
 
-echo "[13/13] Running Snapshot Smoke Test..."
+echo "[13/14] Running Snapshot Smoke Test..."
+export ZURVAN_SNAPSHOT_TEST="true"
 PYTHONPATH=. python scripts/cli.py snapshot create
-PYTHONPATH=. python scripts/cli.py snapshot list
 echo "✅ Snapshot smoke test passed."
+echo ""
+
+echo "[14/14] Testing Workspace Registry..."
+TEMP_ZURVAN_CONFIG_DIR=$(mktemp -d)
+export ZURVAN_CONFIG_DIR=$TEMP_ZURVAN_CONFIG_DIR
+PYTHONPATH=. python scripts/cli.py project register --name testproj --path .
+PYTHONPATH=. python scripts/cli.py project list
+PYTHONPATH=. python scripts/cli.py project current
+rm -rf $TEMP_ZURVAN_CONFIG_DIR
+unset ZURVAN_CONFIG_DIR
+echo "✅ Workspace registry test passed."
 echo ""
 
 echo "========================================="

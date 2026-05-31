@@ -1,15 +1,53 @@
 import argparse
 import sys
 import os
+from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import subprocess
 import subprocess
 from scripts.memory import add_decision, add_note, add_claim, add_question
 from scripts.context_export import search_memory, export_context
 
 def main():
+    args_list = sys.argv[1:]
+    project_name = None
+    if "--project" in args_list:
+        idx = args_list.index("--project")
+        if idx + 1 < len(args_list):
+            project_name = args_list[idx + 1]
+            args_list.pop(idx)
+            args_list.pop(idx)
+    
+    if project_name is not None:
+        from scripts.workspace import resolve_project_root
+        root = resolve_project_root(project_name)
+        print(f"Running against project: {project_name}")
+        cmd = [sys.executable, "scripts/cli.py"] + args_list
+        sys.exit(subprocess.run(cmd, cwd=str(root)).returncode)
+
     parser = argparse.ArgumentParser(description="Zurvan - Local-first CLI Memory Interface")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # zurvan project
+    project_parser = subparsers.add_parser("project", help="Manage workspaces")
+    project_sub = project_parser.add_subparsers(dest="action")
+    
+    p_reg = project_sub.add_parser("register")
+    p_reg.add_argument("--name", required=True)
+    p_reg.add_argument("--path", required=True)
+    p_reg.add_argument("--force", action="store_true")
+    
+    project_sub.add_parser("list")
+    project_sub.add_parser("current")
+    
+    p_use = project_sub.add_parser("use")
+    p_use.add_argument("name")
+    
+    p_doc = project_sub.add_parser("doctor")
+    p_doc.add_argument("name")
+    
+    p_snap = project_sub.add_parser("snapshot")
+    p_snap.add_argument("name")
+
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -145,9 +183,56 @@ def main():
     snap_restore.add_argument("snapshot_name")
     snap_restore.add_argument("--force", action="store_true")
 
-    args = parser.parse_args()
+    args = parser.parse_args(args_list)
     
-    if args.command == "remember":
+    if args.command == "project":
+        if args.action == "register":
+            from scripts.project_registry import register_project
+            register_project(args.name, args.path, args.force)
+            from scripts.workspace import shorten_path
+            print(f"✅ Registered project '{args.name}' at {shorten_path(args.path)}")
+        elif args.action == "list":
+            from scripts.project_registry import load_registry
+            from scripts.workspace import is_valid_zurvan_project, shorten_path
+            registry = load_registry()
+            print("Registered Projects:")
+            for name, data in registry["projects"].items():
+                marker = "*" if name == registry.get("current") else " "
+                path = data["path"]
+                status = "✅" if is_valid_zurvan_project(path) else "❌ (missing/invalid)"
+                print(f" {marker} {name:20} {shorten_path(path)} {status}")
+        elif args.action == "current":
+            from scripts.project_registry import get_current_project
+            from scripts.workspace import shorten_path
+            name, path = get_current_project()
+            if name:
+                print(f"Current project: {name} at {shorten_path(path)}")
+            else:
+                print("No current project.")
+                sys.exit(1)
+        elif args.action == "use":
+            from scripts.project_registry import set_current_project, load_registry
+            from scripts.workspace import is_valid_zurvan_project, shorten_path
+            registry = load_registry()
+            if args.name not in registry["projects"]:
+                print(f"❌ Project '{args.name}' not found.")
+                sys.exit(1)
+            path = registry["projects"][args.name]["path"]
+            if not is_valid_zurvan_project(path):
+                print(f"❌ Warning: Project path is invalid or missing: {shorten_path(path)}")
+            set_current_project(args.name)
+            print(f"✅ Switched to project '{args.name}'")
+        elif args.action == "doctor":
+            from scripts.workspace import resolve_project_root
+            root = resolve_project_root(args.name)
+            print(f"Running doctor for project: {args.name}")
+            sys.exit(subprocess.run([sys.executable, "scripts/cli.py", "doctor"], cwd=str(root)).returncode)
+        elif args.action == "snapshot":
+            from scripts.workspace import resolve_project_root
+            root = resolve_project_root(args.name)
+            print(f"Running snapshot for project: {args.name}")
+            sys.exit(subprocess.run([sys.executable, "scripts/cli.py", "snapshot", "create"], cwd=str(root)).returncode)
+    elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
     elif args.command == "decision" and args.action == "add":
