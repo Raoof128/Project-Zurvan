@@ -162,6 +162,7 @@ zurvan --project my-vault search "architecture"
 - Phase 13: Evidence Pack Builder
 - Phase 14: Report Composer
 - Phase 15: Local Report Review Workbench
+- Phase 16: Review Workbench Hardening + UX Polish
 
 ```bash
 # Register a project
