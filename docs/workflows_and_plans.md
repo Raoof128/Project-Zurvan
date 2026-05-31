@@ -104,3 +104,10 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
 1. **Trigger**: User runs `python scripts/doctor_mcp.py` to assert system health before connection.
 2. **Config Generation**: User runs `python scripts/install_mcp_config.py` to safely generate configurations for `claude-code`, `cursor`, etc., with explicit warnings for write-mode.
 3. **Documentation**: Clear integration guides are provided in `docs/mcp/` to safely onboard various agents without violating Zurvan's local-first rules.
+
+## Phase 7 Agent Workflow Orchestration
+1. **Trigger**: An agent (or human) starts a task using `session start`.
+2. **Context Gathering**: The agent runs `agent preflight` to get a dense, graph-expanded context bundle specifically formatted for LLM context windows, including recent logs and open questions.
+3. **Execution**: The agent performs the coding task.
+4. **Recording**: The agent runs `agent postedit` to write a structured memory of files changed and checks run to `wiki/log.md`.
+5. **Closure**: The agent runs `session close` to finalize the Markdown session file in `wiki/sessions/`.

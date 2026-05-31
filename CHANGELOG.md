@@ -2,6 +2,21 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 7: Agent Workflow Orchestration
+- **Summary:** Added structured local session management (`session start`, `session close`, `agent preflight`, `agent postedit`) to seamlessly onboard agents like Claude Code, Codex, and Cursor before and after edits. Provided templates and explicit workflow documentation.
+- **Files Changed:**
+  - `wiki/sessions/`
+  - `scripts/templates/preflight.md`, `scripts/templates/postedit.md`, `scripts/templates/session_start.md`, `scripts/templates/session_close.md`
+  - `scripts/session.py`, `scripts/agent_workflow.py`
+  - `tests/test_session.py`, `tests/test_agent_workflow.py`
+  - `scripts/cli.py`, `scripts/check.sh`
+  - `docs/agent-workflows/claude-code.md`, `docs/agent-workflows/codex.md`, `docs/agent-workflows/cursor.md`, `docs/agent-workflows/human.md`
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** Built fully tested subcommands via Pytest and incorporated smoke tests in `check.sh`.
+- **Follow-ups:** Prepare for Phase 8: Release Packaging + Versioned Snapshots.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 6.5: MCP Client Integration Pack
 - **Summary:** Added `scripts/doctor_mcp.py` to assert system health before connection and `scripts/install_mcp_config.py` to generate safe MCP configurations for clients like Claude Code and Cursor. Added comprehensive client setup guides in `docs/mcp/`. Added explicit warnings when bypassing read-only defaults.
 - **Files Changed:**
