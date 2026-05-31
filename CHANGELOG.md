@@ -2,6 +2,19 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 10: Cross-Project Search + Federation
+- **Summary:** Added a safe, local-first federation layer allowing users to search (`search-all`) and build context (`context-all`) across multiple registered projects. Includes strict privacy limits (no absolute path leaks, no data copying) and validation via `federation stats` and `doctor`.
+- **Files Changed:**
+  - `scripts/federation.py`, `scripts/cross_project_search.py`, `scripts/cross_project_context.py`
+  - `scripts/cli.py`
+  - `docs/federation/*.md`, `docs/workflows_and_plans.md`, `README.md`
+  - `tests/test_federation.py`, `tests/test_cross_project_search.py`, `tests/test_cross_project_context.py`
+  - `scripts/check.sh`
+- **Verification:** Built mock tests for federation parsing and grouping. Validated isolation by running cross-project subprocesses inside target directories. Verified via federated smoke tests in `check.sh`.
+- **Follow-ups:** Prepare for Phase 11: Cross-Project Decision Memory.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 9: Multi-Project Workspace Support
 - **Summary:** Added safe, isolated multi-project workspaces driven by a local registry (`~/.zurvan/projects.json`). Projects can be registered, listed, switched, and targeted cleanly using `zurvan project` and `--project`. Private absolute paths are now decoupled from the public repository entirely.
 - **Files Changed:**

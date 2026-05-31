@@ -47,6 +47,33 @@ def main():
     
     p_snap = project_sub.add_parser("snapshot")
     p_snap.add_argument("name")
+    
+    p_search_all = project_sub.add_parser("search-all")
+    p_search_all.add_argument("query")
+    p_search_all.add_argument("--hybrid", action="store_true")
+    p_search_all.add_argument("--limit", type=int, default=10)
+    p_search_all.add_argument("--projects", nargs="+")
+    p_search_all.add_argument("--strict", action="store_true")
+    p_search_all.add_argument("--verbose", action="store_true")
+    
+    p_context_all = project_sub.add_parser("context-all")
+    p_context_all.add_argument("--topic", required=True)
+    p_context_all.add_argument("--hybrid", action="store_true")
+    p_context_all.add_argument("--graph", action="store_true")
+    p_context_all.add_argument("--limit", type=int, default=10)
+    p_context_all.add_argument("--projects", nargs="+")
+    p_context_all.add_argument("--strict", action="store_true")
+    p_context_all.add_argument("--verbose", action="store_true")
+    
+    p_fed = project_sub.add_parser("federation")
+    p_fed_sub = p_fed.add_subparsers(dest="fed_action")
+    
+    fed_stats = p_fed_sub.add_parser("stats")
+    fed_stats.add_argument("--verbose", action="store_true")
+    
+    fed_doc = p_fed_sub.add_parser("doctor")
+    fed_doc.add_argument("--strict", action="store_true")
+    fed_doc.add_argument("--verbose", action="store_true")
 
     
     # zurvan remember
@@ -232,6 +259,26 @@ def main():
             root = resolve_project_root(args.name)
             print(f"Running snapshot for project: {args.name}")
             sys.exit(subprocess.run([sys.executable, "scripts/cli.py", "snapshot", "create"], cwd=str(root)).returncode)
+        elif args.action == "search-all":
+            from scripts.cross_project_search import cross_project_search
+            import json
+            res = cross_project_search(args.query, args.hybrid, args.limit, args.projects, args.strict, args.verbose)
+            print(json.dumps(res, indent=2))
+        elif args.action == "context-all":
+            from scripts.cross_project_context import build_federated_context
+            res = build_federated_context(args.topic, args.hybrid, args.graph, args.limit, args.projects, args.strict, args.verbose)
+            print(res)
+        elif args.action == "federation":
+            if args.fed_action == "stats":
+                from scripts.federation import get_federation_stats
+                import json
+                stats = get_federation_stats(args.verbose)
+                print(json.dumps(stats, indent=2))
+            elif args.fed_action == "doctor":
+                from scripts.federation import run_federation_doctor
+                success = run_federation_doctor(args.strict, args.verbose)
+                if not success and args.strict:
+                    sys.exit(1)
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)

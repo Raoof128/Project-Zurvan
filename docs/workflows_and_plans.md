@@ -13,15 +13,26 @@ Before relying on Zurvan's memory retrieval in automated contexts, we evaluate i
 4. **Metrics Computed**: Top-1 Accuracy, Top-3 Accuracy, and Mean Reciprocal Rank (MRR).
 5. **Quality Gates**: Failing the minimum threshold yields an exit code of 1, effectively stopping CI or tests if search reliability degrades. This is a critical prerequisite before moving onto Graph Retrieval.
 
-## Phase 9: Multi-Project Workspace Support (Complete)
-- Created `~/.zurvan/` local config to decouple private paths from public repository history.
-- Added `zurvan project register`, `list`, `use`, and `current` commands.
-- Exposed `--project <name>` global override for targeted commands like `search`, `context`, `doctor`, and `snapshot create`.
-- Fully isolated project operations to prevent out-of-bound path traversal or unsafe writes to `raw/`.
+## Phase 9: Multi-Project Workspace Support
+Allows multiple Zurvan projects to be managed independently on the same machine without leaking private absolute paths into public Git repositories.
+**Key Scripts**:
+- `scripts/config.py`: Local `~/.zurvan` path resolution.
+- `scripts/project_registry.py`: Manage projects in `~/.zurvan/projects.json`.
+- `scripts/workspace.py`: Safety and sanity checks for project targets.
 
-## Phase 10: Cross-Project Search + Federation (Pending)
-- Extend hybrid search to query across multiple registered projects.
-- Synthesize graphs from neighbouring vaults.
+## Phase 10: Cross-Project Search + Federation
+Turns a single Zurvan vault into a federated network of local knowledge bases.
+**Key Scripts**:
+- `scripts/federation.py`: Validates and filters healthy projects from the registry.
+- `scripts/cross_project_search.py`: Searches across registered projects securely.
+- `scripts/cross_project_context.py`: Builds a consolidated context bundle across multiple projects.
+
+**Federation Safety Model**:
+- **Read-Only**: Federation commands never mutate project data.
+- **Strict Privacy**: Files are never copied between projects, and absolute paths are hidden unless `--verbose` is provided.
+- **Isolation**: Search and context expansion use subprocesses executed in the target project's `cwd` to prevent path bleed.
+- **No Cloud**: All federation logic operates exclusively over local SQLite databases.
+- **Known Limitations**: Graph expansion (`cross_project_context`) groups items by project but does not attempt to merge cross-project graph edges.
 
 ## 5. Knowledge Graph Lite (Phase 5)
 
