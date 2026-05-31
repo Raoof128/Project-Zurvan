@@ -97,6 +97,21 @@ python scripts/cli.py session close --topic "Database refactor" --summary "Done"
 ```
 See the [Agent Workflow Guides](docs/agent-workflows/) for tool-specific instructions.
 
+## Snapshots & Versioning
+Zurvan supports lightweight, local snapshots to backup or migrate your knowledge graph.
+```bash
+# Check system health and version
+zurvan doctor
+zurvan version
+
+# Create a snapshot (excludes raw/ by default for safety)
+zurvan snapshot create
+
+# Restore a snapshot (requires --force)
+zurvan snapshot restore zurvan_snapshot_XYZ.tar.gz --force
+```
+See the [Release Packaging Guides](docs/release/) for details on portability and backups.
+
 ## Quality Gates
 Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:
 ```bash

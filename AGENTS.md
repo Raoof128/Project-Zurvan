@@ -12,6 +12,11 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 8: Release Packaging + Versioned Snapshots
+- **Summary:** Added `zurvan version`, `zurvan doctor`, and `zurvan snapshot` commands to make the system portable and safely recoverable. Snapshots intentionally exclude `raw/` by default to prevent data leakage. Restores require explicit confirmation and take automatic safety backups, explicitly blocking traversal paths or writes into `raw/`.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 7.5: Obsidian Integration Pack
 - **Summary:** Configured Zurvan as a first-class Obsidian vault. Added templates (`wiki/templates/`) for all core knowledge node types and created safe Obsidian settings (`.obsidian/`) to hide internal script and data directories. Added full documentation (`docs/obsidian/`) for vault setup and plugin recommendations.
 

@@ -117,4 +117,8 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
 2. **Configuration**: The predefined `.obsidian/` configuration automatically filters out noisy directories (like `data/` and `scripts/`).
 3. **Template Usage**: User can utilize provided YAML-compatible templates in `wiki/templates/` for creating uniform Claims, Decisions, Concepts, etc.
 4. **Execution**: The local graph perfectly mirrors the Obsidian knowledge graph without complex plugin dependencies.
-
+## Phase 8 Release Packaging + Versioned Snapshots
+1. **Trigger**: User runs `zurvan snapshot create`.
+2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
+3. **Restore Mechanism**: When `zurvan snapshot restore <name> --force` is run, Zurvan takes an automatic safety backup of the current state, explicitly blocks any paths targeting `raw/`, and extracts the snapshot.
+4. **Health Checking**: Users can run `zurvan doctor` and `zurvan version` at any time to verify their local installation integrity and feature flags.
