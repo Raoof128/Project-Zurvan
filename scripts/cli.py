@@ -202,6 +202,15 @@ def main():
     rev_open = review_sub.add_parser("open")
     rev_open.add_argument("report_id")
     
+    rev_audit = review_sub.add_parser("audit")
+    rev_audit.add_argument("report_id", nargs="?")
+    
+    rev_index = review_sub.add_parser("index")
+    rev_index.add_argument("action", choices=["rebuild"])
+    
+    rev_checklist = review_sub.add_parser("checklist")
+    rev_checklist.add_argument("report_id")
+    
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
     remember_parser.add_argument("--type", choices=["note", "summary", "finding"], default="note")
@@ -567,6 +576,27 @@ def main():
             url = f"http://127.0.0.1:8765/reports/{args.report_id}"
             webbrowser.open(url)
             print(f"Opened {url}")
+        elif args.review_action == "audit":
+            if args.report_id:
+                from scripts.review_audit import audit_report
+                audit = audit_report(args.report_id)
+                print(f"Audit Status for {args.report_id}: {audit['status'].upper()}")
+                for w in audit["warnings"]: print(f"WARN: {w}")
+                for f in audit["failures"]: print(f"FAIL: {f}")
+            else:
+                from scripts.review_audit import audit_all_reports
+                audits = audit_all_reports()
+                for a in audits:
+                    print(f"{a['report_id']} - {a['status'].upper()}")
+        elif args.review_action == "index":
+            from scripts.review_index import rebuild_index
+            idx = rebuild_index()
+            print(f"Index rebuilt. {len(idx['reports'])} reports, {len(idx['packs'])} packs.")
+        elif args.review_action == "checklist":
+            import webbrowser
+            url = f"http://127.0.0.1:8765/reports/{args.report_id}/checklist"
+            webbrowser.open(url)
+            print(f"Opened checklist for {args.report_id}")
                 
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:

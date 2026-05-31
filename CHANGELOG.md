@@ -335,3 +335,16 @@
   - `README.md` & `docs/workflows_and_plans.md` - Marked Phase 15 as complete.
 - **Verification:** Ran `bash scripts/check.sh`, resulting in 100% pass for unit and smoke tests. Verified the review endpoints properly export markdown and correctly reject invalid queries / prevent path traversals.
 - **Follow-ups:** Proceed to the next phases on optimizing or scaling the workbench.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase 16: Review Workbench Hardening + UX Polish
+- **Summary:** Enhanced the local report review cockpit with stronger safety checks and UX improvements. Added automatic secret scanning (emails, API keys, absolute paths) to flag unsafe exported content. Strengthened citation validation to catch unmapped or missing claims before final export. Polished the UI with clear status badges, a dedicated warnings panel, dynamic dashboard summary metrics, and a reviewer checklist. Fully integrated `zurvan review audit` and `zurvan review index rebuild` commands into the CLI.
+- **Files Changed:**
+  - `scripts/review_audit.py` & `scripts/review_index.py` - Core auditing and local indexing logic.
+  - `docs/review/hardening.md` & `docs/review/reviewer-checklist.md` - Operational guidelines for safety and workflows.
+  - `tests/test_review_audit.py` & `tests/test_review_index.py` - Unit test coverage for edge cases like secret detection and manifest validation.
+  - `scripts/review_routes.py`, `scripts/cli.py`, `templates/*.html`, `static/review.css` - Endpoint plumbing, UI/CSS updates, and command hooks.
+  - `README.md`, `docs/workflows_and_plans.md`, `scripts/check.sh` - Project structure and checklist documentation logic.
+- **Verification:** Ran `bash scripts/check.sh`, which hit a 100% pass rate. Verified `zurvan review audit` cleanly flags unmapped citations, and `zurvan review index rebuild` properly isolates without leaking absolute local paths into the registry.
+- **Follow-ups:** Prepare for Phase 17 involving potential new integrations or scaling report formats.

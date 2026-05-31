@@ -24,9 +24,9 @@ def setup_routes(app: FastAPI, tmpl: Jinja2Templates):
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    reports = list_reports()
-    packs = list_evidence_packs()
-    return templates.TemplateResponse("index.html", {"request": request, "reports": reports, "packs": packs})
+    from scripts.review_index import get_index
+    idx = get_index()
+    return templates.TemplateResponse("index.html", {"request": request, "index": idx})
 
 @router.get("/evidence", response_class=HTMLResponse)
 async def list_evidence(request: Request):
@@ -62,11 +62,15 @@ async def view_report_detail(request: Request, report_id: str):
     report = inspect_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+        
+    from scripts.review_audit import audit_report
+    audit = audit_report(report_id)
     
     return templates.TemplateResponse("report.html", {
         "request": request, 
         "reports": reports, 
-        "selected": report
+        "selected": report,
+        "audit": audit
     })
 
 @router.get("/reports/{report_id}/citations", response_class=HTMLResponse)
@@ -108,3 +112,29 @@ async def export_report_endpoint(report_id: str, format: str = "markdown"):
             return FileResponse(path, media_type="text/markdown", filename=f"{report_id}.md")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/audit", response_class=HTMLResponse)
+async def view_audit_all(request: Request):
+    from scripts.review_audit import audit_all_reports
+    audits = audit_all_reports()
+    return templates.TemplateResponse("audit_all.html", {"request": request, "audits": audits})
+
+@router.get("/audit/{report_id}", response_class=HTMLResponse)
+async def view_audit(request: Request, report_id: str):
+    from scripts.review_audit import audit_report
+    audit = audit_report(report_id)
+    return templates.TemplateResponse("audit.html", {"request": request, "audit": audit, "report_id": report_id})
+
+@router.get("/reports/{report_id}/checklist", response_class=HTMLResponse)
+async def view_checklist(request: Request, report_id: str):
+    report = inspect_report(report_id)
+    from scripts.review_audit import audit_report
+    audit = audit_report(report_id)
+    return templates.TemplateResponse("checklist.html", {"request": request, "report": report, "audit": audit})
+
+@router.get("/index/rebuild", response_class=JSONResponse)
+async def rebuild_index_route():
+    from scripts.review_index import rebuild_index
+    idx = rebuild_index()
+    return JSONResponse(idx)
+

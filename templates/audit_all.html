@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="audit-all">
+    <h2>Audit All Reports</h2>
+    <a href="/" class="btn">Back to Dashboard</a>
+    
+    <div class="audit-list">
+        {% for a in audits %}
+            <div class="audit-item badge-{{ a.status }}">
+                <h3>{{ a.report_id }} - <span class="badge badge-{{ a.status }}">{{ a.status|upper }}</span></h3>
+                <p>Checked at: {{ a.checked_at }}</p>
+                
+                {% if a.failures %}
+                    <h4>Failures:</h4>
+                    <ul class="error-list">
+                        {% for f in a.failures %}<li>{{ f }}</li>{% endfor %}
+                    </ul>
+                {% endif %}
+                
+                {% if a.warnings %}
+                    <h4>Warnings:</h4>
+                    <ul class="warning-list">
+                        {% for w in a.warnings %}<li>{{ w }}</li>{% endfor %}
+                    </ul>
+                {% endif %}
+                
+                <p>Coverage: {{ a.stats.mapped_citations }}/{{ a.stats.claims }} mapped citations ({{ a.stats.missing_citations }} missing)</p>
+                <a href="/reports/{{ a.report_id }}" class="btn">Go to Report</a>
+            </div>
+        {% endfor %}
+        {% if not audits %}
+            <p>No reports found.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
