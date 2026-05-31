@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zurvan Review Workbench</title>
+    <link rel="stylesheet" href="/static/review.css">
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <h1><a href="/">Zurvan Review</a></h1>
+            <nav>
+                <a href="/evidence">Evidence Packs</a>
+                <a href="/reports">Reports</a>
+            </nav>
+        </div>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>🔒 Local-only review mode. Bound to 127.0.0.1. Raw access blocked.</p>
+    </footer>
+    <script src="/static/review.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="warnings-view">
+    <h2>Warnings: {{ report.topic }}</h2>
+    <a href="/reports/{{ report.report_id }}" class="btn">Back to Report</a>
+    
+    <div class="warnings-container">
+        <h3>Report Warnings</h3>
+        {% if report.warnings %}
+            <ul class="warning-list">
+            {% for w in report.warnings %}
+                <li>{{ w }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No explicit warnings in the report.</p>
+        {% endif %}
+        
+        <h3>Validation Issues</h3>
+        {% if validation.issues %}
+            <ul class="error-list">
+            {% for i in validation.issues %}
+                <li>{{ i }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No validation issues found.</p>
+        {% endif %}
+        
+        <h3>Validation Warnings</h3>
+        {% if validation.warnings %}
+            <ul class="warning-list">
+            {% for w in validation.warnings %}
+                <li>{{ w }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No validation warnings found.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

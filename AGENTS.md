@@ -142,3 +142,17 @@
 **Raouf:**
 - **Scope:** E2E Smoke Test (Phase 5.5 Finalization)
 - **Summary:** Created full E2E test script (`scripts/e2e_smoke.sh`) and fixed exit codes in `scripts/cli.py` and `scripts/memory.py` so memory actions failing return correctly. The E2E tests fully simulate the entire Zurvan pipeline.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase 15: Local Report UI / Review Workbench
+- **Summary:** Built a local-only FastAPI UI to inspect evidence packs and review composed reports before exporting them. Bound strictly to localhost by default and restricted path access to safely prevent any raw data leakage. Validates citation integrity interactively via web dashboard to spot unsupported claims or empty sections manually.
+- **Files Changed:**
+  - `scripts/review_server.py`, `scripts/review_routes.py`, `scripts/review_models.py`, `scripts/review_safety.py` - Core web application backend logic and security validations.
+  - `templates/` and `static/` - HTML, CSS, JS frontend rendering for reports.
+  - `scripts/cli.py` - Wired up `zurvan review serve/list/open`
+  - `scripts/check.sh` - Added automated smoke test and routing test suite for review workbench.
+  - `docs/review/*.md` - Documentation for overview, usage and safety
+  - `README.md` & `docs/workflows_and_plans.md` - Marked Phase 15 as complete.
+- **Verification:** Ran `bash scripts/check.sh`, resulting in 100% pass for unit and smoke tests. Verified the review endpoints properly export markdown and correctly reject invalid queries / prevent path traversals.
+- **Follow-ups:** Proceed to the next phases on optimizing or scaling the workbench.

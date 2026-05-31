@@ -187,6 +187,21 @@ def main():
     r_validate = report_sub.add_parser("validate")
     r_validate.add_argument("report_id")
     
+    # zurvan review
+    review_parser = subparsers.add_parser("review", help="Local Report Review Workbench")
+    review_sub = review_parser.add_subparsers(dest="review_action")
+    
+    rev_serve = review_sub.add_parser("serve")
+    rev_serve.add_argument("--host", default="127.0.0.1")
+    rev_serve.add_argument("--port", type=int, default=8765)
+    rev_serve.add_argument("--allow-lan", action="store_true")
+    rev_serve.add_argument("--open", action="store_true")
+    
+    rev_list = review_sub.add_parser("list")
+    
+    rev_open = review_sub.add_parser("open")
+    rev_open.add_argument("report_id")
+    
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
     remember_parser.add_argument("--type", choices=["note", "summary", "finding"], default="note")
@@ -537,6 +552,21 @@ def main():
                 print("Validation Warnings:")
                 for w in res["warnings"]:
                     print(f" - {w}")
+                    
+    elif args.command == "review":
+        if args.review_action == "serve":
+            from scripts.review_server import run_server
+            run_server(host=args.host, port=args.port, allow_lan=args.allow_lan, open_browser=args.open)
+        elif args.review_action == "list":
+            from scripts.report_compose import list_reports
+            reps = list_reports()
+            for r in reps:
+                print(f"{r['report_id']} - {r['topic']}")
+        elif args.review_action == "open":
+            import webbrowser
+            url = f"http://127.0.0.1:8765/reports/{args.report_id}"
+            webbrowser.open(url)
+            print(f"Opened {url}")
                 
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
