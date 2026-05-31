@@ -113,7 +113,7 @@ PYTHONPATH=. python scripts/cli.py project list
 PYTHONPATH=. python scripts/cli.py project current
 echo "✅ Workspace registry test passed."
 
-echo -e "\n[15/15] Testing Federation..."
+echo -e "\n[15/16] Testing Federation..."
 # Register a second project for federation tests
 mkdir -p "$ZURVAN_CONFIG_DIR/testproj2"
 PYTHONPATH=. python scripts/cli.py project register --name testproj2 --path . > /dev/null
@@ -128,6 +128,14 @@ echo "✅ search-all smoke test passed."
 echo "Testing context-all..."
 PYTHONPATH=. python scripts/cli.py project context-all --topic "agent memory" --hybrid --graph --limit 10 > /dev/null
 echo "✅ context-all smoke test passed."
+
+echo -e "\n[16/16] Testing Decision Memory..."
+PYTHONPATH=. python scripts/cli.py project decision-memory rebuild > /dev/null
+PYTHONPATH=. python scripts/cli.py project decisions-all > /dev/null
+PYTHONPATH=. python scripts/cli.py project decisions-similar "mcp" > /dev/null
+PYTHONPATH=. python scripts/cli.py project decisions-conflicts > /dev/null
+PYTHONPATH=. python scripts/cli.py project decisions-stale --days 90 > /dev/null
+echo "✅ Decision memory smoke test passed."
 
 echo -e "\n========================================="
 echo "🎉 All Zurvan checks passed successfully."

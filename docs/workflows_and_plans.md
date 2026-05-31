@@ -20,8 +20,20 @@ Allows multiple Zurvan projects to be managed independently on the same machine 
 - `scripts/project_registry.py`: Manage projects in `~/.zurvan/projects.json`.
 - `scripts/workspace.py`: Safety and sanity checks for project targets.
 
-## Phase 10: Cross-Project Search + Federation
-Turns a single Zurvan vault into a federated network of local knowledge bases.
+### Phase 10: Cross-Project Search + Federation ✅
+- Implemented `zurvan project search-all` and `context-all`.
+- Implemented safe read-only subprocess federation.
+- Completed cross-project context merging.
+
+### Phase 11: Cross-Project Decision Memory ✅
+- Added `scripts/decision_memory.py`, `scripts/decision_compare.py`, `scripts/decision_federation.py`.
+- Added commands: `decisions-all`, `decisions-similar`, `decisions-conflicts`, `decisions-stale`.
+- Integrated decision memory cache with cross-project federation.
+
+### Phase 12: Cross-Project Contradiction + Policy Radar
+- Find policy inconsistencies across federated projects.
+- Detect "Project A says X, Project B says not-X" assumptions.
+
 **Key Scripts**:
 - `scripts/federation.py`: Validates and filters healthy projects from the registry.
 - `scripts/cross_project_search.py`: Searches across registered projects securely.
