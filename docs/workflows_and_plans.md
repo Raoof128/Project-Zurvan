@@ -99,3 +99,8 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
    - The `raw/` directory cannot be read through MCP unless `ZURVAN_MCP_ALLOW_RAW_READ=1` is explicitly set. Writing to `raw/` is never allowed.
    - The server is purely a thin wrapper around existing CLI and python scripts. It does not introduce arbitrary execution boundaries or new shell subprocess inputs.
    - `stdio` transport prevents external network requests from directly addressing the server. Future upgrades may introduce HTTP transport only after proper authentication layers are added.
+
+## Phase 6.5 MCP Client Integration Pack
+1. **Trigger**: User runs `python scripts/doctor_mcp.py` to assert system health before connection.
+2. **Config Generation**: User runs `python scripts/install_mcp_config.py` to safely generate configurations for `claude-code`, `cursor`, etc., with explicit warnings for write-mode.
+3. **Documentation**: Clear integration guides are provided in `docs/mcp/` to safely onboard various agents without violating Zurvan's local-first rules.
