@@ -27,6 +27,7 @@ def main():
     bad = [
         path for path in tracked
         if any(path.startswith(pattern) or path == pattern for pattern in BLOCKED_PATTERNS)
+        and not path.endswith(".gitkeep")
     ]
 
     if bad:

@@ -112,6 +112,24 @@ zurvan snapshot restore zurvan_snapshot_XYZ.tar.gz --force
 ```
 See the [Release Packaging Guides](docs/release/) for details on portability and backups.
 
+## Managing Multiple Projects (Phase 9)
+Zurvan allows a single CLI installation to manage multiple independent knowledge bases (vaults) on your local machine securely without committing paths to a public repo.
+
+```bash
+# Register a project
+zurvan project register --name my-vault --path .
+
+# List projects
+zurvan project list
+
+# Switch default project
+zurvan project use my-vault
+
+# Run command against a specific project without switching
+zurvan --project my-vault search "architecture"
+```
+*Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
+
 ## Quality Gates
 Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:
 ```bash
