@@ -5,6 +5,7 @@ BLOCKED_PATTERNS = [
     "raw/",
     "dist/snapshots/",
     "dist/backups/",
+    "evidence-packs/",
     "data/search.sqlite",
     "data/graph.sqlite",
     ".zurvan/",
