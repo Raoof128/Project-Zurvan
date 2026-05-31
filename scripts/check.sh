@@ -85,6 +85,22 @@ PYTHONPATH=. python scripts/cli.py session close \
 echo "✅ Agent Workflow smoke test passed."
 echo ""
 
+echo "[11/13] Running Version Check..."
+PYTHONPATH=. python scripts/cli.py version
+echo "✅ Version check passed."
+echo ""
+
+echo "[12/13] Running Doctor Check..."
+PYTHONPATH=. python scripts/cli.py doctor
+echo "✅ Doctor check passed."
+echo ""
+
+echo "[13/13] Running Snapshot Smoke Test..."
+PYTHONPATH=. python scripts/cli.py snapshot create
+PYTHONPATH=. python scripts/cli.py snapshot list
+echo "✅ Snapshot smoke test passed."
+echo ""
+
 echo "========================================="
 echo "🎉 All Zurvan checks passed successfully."
 echo "========================================="
