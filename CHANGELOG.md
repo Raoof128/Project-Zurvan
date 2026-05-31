@@ -2,6 +2,16 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 11: Cross-Project Decision Memory
+- **Summary:** Enabled Zurvan to scan, cache, and compare decisions across all federated projects. Added `zurvan project decisions-all`, `decisions-similar`, `decisions-conflicts`, and `decisions-stale`. Built heuristic algorithms to detect repeating architectural patterns and possible contradictions (e.g., conflicting defaults across projects) without relying on cloud endpoints, LLMs, or cross-project data copying. Cached decisions locally in `~/.zurvan/cache/` to ensure public-repo safety.
+- **Files Changed:**
+  - `scripts/decision_memory.py`, `scripts/decision_compare.py`, `scripts/decision_federation.py`
+  - `docs/decisions/*.md`
+- **Verification:** Unit tests added in `tests/test_decision_*`. E2E smoke tests added to `check.sh`.
+- **Follow-ups:** Proceed to Phase 12 (Cross-Project Contradiction + Policy Radar).
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 10: Cross-Project Search + Federation
 - **Summary:** Added a safe, local-first federation layer allowing users to search (`search-all`) and build context (`context-all`) across multiple registered projects. Includes strict privacy limits (no absolute path leaks, no data copying) and validation via `federation stats` and `doctor`.
 - **Files Changed:**

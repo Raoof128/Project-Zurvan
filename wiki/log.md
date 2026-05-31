@@ -224,3 +224,35 @@
 **Session Closed**: Phase 7 smoke test
 - **Summary**: Phase 7 workflow smoke test passed.
 - **Checks Run**: `pytest tests/ && bash scripts/check.sh`
+
+- **2026-05-31T15:58:11.106522**: Note Added - Test Note
+- **2026-05-31T15:58:25.941836**: Note Added - MCP test
+- **2026-05-31T15:58:29.356576**: Note Added - Test Note
+- **2026-05-31T15:58:42.165419**: Note Added - MCP test
+- **2026-05-31T15:59:12.485517**: Note Added - Test Note
+- **2026-05-31T15:59:26.992864**: Note Added - MCP test
+- **2026-05-31T15:59:30.276378**: Note Added - Test Note
+- **2026-05-31T15:59:42.732706**: Note Added - MCP test
+- **2026-05-31T16:00:02.430912**: Note Added - Test Note
+- **2026-05-31T16:00:16.363394**: Note Added - MCP test
+- **2026-05-31T16:00:19.693882**: Note Added - Test Note
+- **2026-05-31T16:00:31.862245**: Note Added - MCP test
+- **2026-05-31T16:00:37.577517**: Note Added - MCP test
+- **2026-05-31T16:00:42.038417**: Note Added - MCP E2E write mode smoke bfb9084f
+- **2026-05-31T16:00:42.049134**: Question Added - Should MCP write mode stay disabled by default? bfb9084f
+### 2026-05-31 16:00:42
+**Session Started**: Phase 7 smoke test
+- **File**: `wiki/sessions/2026-05-31-phase-7-smoke-test.md`
+
+### 2026-05-31 16:00:42
+**Agent Post-Edit**: Ran Phase 7 smoke test.
+- **Files Changed**:
+- `scripts/agent_workflow.py`
+- `scripts/session.py`
+- **Checks Run**: `pytest tests/ && bash scripts/check.sh`
+
+
+### 2026-05-31 16:00:42
+**Session Closed**: Phase 7 smoke test
+- **Summary**: Phase 7 workflow smoke test passed.
+- **Checks Run**: `pytest tests/ && bash scripts/check.sh`
