@@ -12,6 +12,11 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 10: Cross-Project Search + Federation
+- **Summary:** Added `zurvan project search-all` and `context-all` to federate searches across multiple isolated local knowledge bases. Ensured strict privacy by preventing file copying, absolute path leakage, and cloud dependencies. Read-only federation operations use subprocess execution per-project to prevent data bleed. Added `federation stats` and `doctor` commands to monitor network health.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 9: Multi-Project Workspace Support
 - **Summary:** Decoupled private workspace paths from the public repository by introducing a local config directory (`~/.zurvan/projects.json`). Implemented `zurvan project register`, `list`, `current`, `use`, `doctor`, and `snapshot`. Added a global `--project <name>` argument to override the project root for commands like `search` and `context`. Guaranteed full path safety by strictly validating Zurvan project structure and rejecting `raw/` paths.
 
