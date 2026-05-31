@@ -130,15 +130,27 @@ zurvan --project my-vault search "architecture"
 ```
 *Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
 
-## Cross-Project Federation (Phase 10)
-You can search and build context across multiple isolated vaults simultaneously without merging them.
-
+### 🔎 Cross-Project Federation & Decision Memory
+Zurvan supports a local registry to build federated context and cross-project decision memory across multiple vaults:
 ```bash
-# Search across all registered projects
-zurvan project search-all "security"
+# Register a project
+zurvan project register --name tizbin --path /Users/you/tizbin
 
-# Build federated context from multiple projects
-zurvan project context-all --topic "agent memory" --hybrid --graph
+# Search across all registered projects
+zurvan project search-all "MCP security"
+
+# Build context from multiple projects
+zurvan project context-all --topic "agent memory"
+
+# Decision Memory
+zurvan project decisions-all
+zurvan project decisions-similar "read only mcp"
+zurvan project decisions-conflicts
+zurvan project decisions-stale --days 90
+zurvan project decision-memory rebuild
+```
+
+### Privacy Guarantee
 
 # Check federation health
 zurvan project federation doctor
