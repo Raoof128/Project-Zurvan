@@ -130,6 +130,21 @@ zurvan --project my-vault search "architecture"
 ```
 *Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
 
+## Cross-Project Federation (Phase 10)
+You can search and build context across multiple isolated vaults simultaneously without merging them.
+
+```bash
+# Search across all registered projects
+zurvan project search-all "security"
+
+# Build federated context from multiple projects
+zurvan project context-all --topic "agent memory" --hybrid --graph
+
+# Check federation health
+zurvan project federation doctor
+```
+See the [Federation Guides](docs/federation/overview.md) for details on the privacy model and workflows.
+
 ## Quality Gates
 Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:
 ```bash
