@@ -160,6 +160,7 @@ zurvan --project my-vault search "architecture"
 - Phase 11: Cross-Project Decision Memory
 - Phase 12: Cross-Project Policy Radar
 - Phase 13: Evidence Pack Builder
+- Phase 14: Report Composer
 
 ```bash
 # Register a project
