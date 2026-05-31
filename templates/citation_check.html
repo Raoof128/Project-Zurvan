@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="citation-check">
+    <h2>Citation Check: {{ report.topic }}</h2>
+    <a href="/reports/{{ report.report_id }}" class="btn">Back to Report</a>
+    
+    <div class="citations-list">
+        {% for cit in report.citations %}
+            <div class="citation-item">
+                <div class="cit-id">{{ cit.citation_id }}</div>
+                <div class="cit-details">
+                    <p><strong>Title:</strong> {{ cit.title }}</p>
+                    <p><strong>Evidence ID:</strong> {{ cit.evidence_id }}</p>
+                    <p class="source-info">Project: {{ cit.project }} | Path: {{ cit.path }}</p>
+                </div>
+            </div>
+        {% endfor %}
+        {% if not report.citations %}
+            <p>No citations found for this report.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

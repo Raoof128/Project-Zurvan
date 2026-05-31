@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="two-col">
+    <div class="sidebar">
+        <h3>Evidence Packs</h3>
+        <ul>
+        {% for p in packs %}
+            <li><a href="/evidence/{{ p.pack_id }}">{{ p.topic }}</a></li>
+        {% endfor %}
+        </ul>
+    </div>
+    <div class="main-content">
+        {% if selected %}
+            <h2>Evidence Pack: {{ selected.manifest.topic }}</h2>
+            <div class="metadata">
+                <p><strong>ID:</strong> {{ selected.manifest.pack_id }}</p>
+                <p><strong>Redaction:</strong> {{ selected.manifest.redaction_status }}</p>
+                <p><strong>Items:</strong> {{ selected['items']|length }}</p>
+            </div>
+            <h3>Items</h3>
+            {% for item in selected['items'] %}
+                <div class="evidence-item">
+                    <h4>{{ item.title }}</h4>
+                    <p class="source-info">Project: {{ item.project }} | Path: {{ item.source_path }}</p>
+                    <blockquote>{{ item.excerpt }}</blockquote>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p>Select an evidence pack from the list.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
