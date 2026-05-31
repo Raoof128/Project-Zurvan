@@ -6,7 +6,9 @@ def generate_citation_appendix(report: dict, evidence_pack: dict) -> list[dict]:
     # gather all evidence items from pack
     items_by_id = {}
     for item in evidence_pack.get("items", []):
-        items_by_id[item["id"]] = item
+        item_id = item.get("evidence_id") or item.get("id")
+        if item_id:
+            items_by_id[item_id] = item
         
     citations = report.get("citations", [])
     
