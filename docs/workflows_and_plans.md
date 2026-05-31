@@ -30,7 +30,7 @@ Allows multiple Zurvan projects to be managed independently on the same machine 
 - Added commands: `decisions-all`, `decisions-similar`, `decisions-conflicts`, `decisions-stale`.
 - Integrated decision memory cache with cross-project federation.
 
-### Phase 12: Cross-Project Contradiction + Policy Radar
+### Phase 12: Cross-Project Contradiction + Policy Radar ✅
 - Find policy inconsistencies across federated projects.
 - Detect "Project A says X, Project B says not-X" assumptions.
 
