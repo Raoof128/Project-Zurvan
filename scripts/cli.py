@@ -105,6 +105,35 @@ def main():
     p_dec_mem_rebuild.add_argument("--strict", action="store_true")
     p_dec_mem_rebuild.add_argument("--verbose", action="store_true")
 
+    p_radar = project_sub.add_parser("radar")
+    p_radar_sub = p_radar.add_subparsers(dest="radar_action")
+    
+    p_radar_scan = p_radar_sub.add_parser("scan")
+    p_radar_scan.add_argument("--projects", nargs="+")
+    p_radar_scan.add_argument("--strict", action="store_true")
+    p_radar_scan.add_argument("--verbose", action="store_true")
+    
+    p_radar_contradictions = p_radar_sub.add_parser("contradictions")
+    p_radar_contradictions.add_argument("--projects", nargs="+")
+    p_radar_contradictions.add_argument("--strict", action="store_true")
+    p_radar_contradictions.add_argument("--verbose", action="store_true")
+    
+    p_radar_policies = p_radar_sub.add_parser("policies")
+    p_radar_policies.add_argument("--projects", nargs="+")
+    p_radar_policies.add_argument("--strict", action="store_true")
+    p_radar_policies.add_argument("--verbose", action="store_true")
+    
+    p_radar_drift = p_radar_sub.add_parser("drift")
+    p_radar_drift.add_argument("--projects", nargs="+")
+    p_radar_drift.add_argument("--strict", action="store_true")
+    p_radar_drift.add_argument("--verbose", action="store_true")
+    
+    p_radar_report = p_radar_sub.add_parser("report")
+    p_radar_report.add_argument("--projects", nargs="+")
+    p_radar_report.add_argument("--strict", action="store_true")
+    p_radar_report.add_argument("--verbose", action="store_true")
+    p_radar_report.add_argument("--format", choices=["markdown"], default="markdown")
+
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -329,6 +358,29 @@ def main():
             from scripts.decision_federation import rebuild_decision_memory
             count = rebuild_decision_memory(args.projects, args.strict, args.verbose)
             print(f"Rebuilt cache with {count} decisions.")
+        elif args.action == "radar":
+            from scripts.claim_federation import collect_federated_claims_and_policies
+            from scripts.policy_radar import format_policy_scan, format_policy_coverage, format_policy_drift, generate_full_report, save_report_locally, analyze_policies
+            from scripts.contradiction_radar import detect_contradictions, format_contradictions
+            
+            items = collect_federated_claims_and_policies(args.projects, args.strict, args.verbose)
+            
+            if args.radar_action == "scan":
+                print(format_policy_scan(items))
+            elif args.radar_action == "contradictions":
+                conflicts = detect_contradictions(items)
+                print(format_contradictions(conflicts))
+            elif args.radar_action == "policies":
+                analysis = analyze_policies(items)
+                print(format_policy_coverage(analysis))
+            elif args.radar_action == "drift":
+                analysis = analyze_policies(items)
+                print(format_policy_drift(analysis))
+            elif args.radar_action == "report":
+                report = generate_full_report(items)
+                print(report)
+                path = save_report_locally(report)
+                print(f"\nReport saved to: {path}")
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
