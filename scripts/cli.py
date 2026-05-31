@@ -211,6 +211,30 @@ def main():
     rev_checklist = review_sub.add_parser("checklist")
     rev_checklist.add_argument("report_id")
     
+    # zurvan publish
+    publish_parser = subparsers.add_parser("publish", help="Export and package reports")
+    publish_sub = publish_parser.add_subparsers(dest="publish_action", required=True)
+    
+    pub_export = publish_sub.add_parser("export")
+    pub_export.add_argument("report_id")
+    pub_export.add_argument("--format", choices=["markdown", "json", "html", "pdf", "docx"], default="markdown")
+    pub_export.add_argument("--output-dir")
+    pub_export.add_argument("--force", action="store_true")
+    pub_export.add_argument("--verbose", action="store_true")
+    
+    pub_bundle = publish_sub.add_parser("bundle")
+    pub_bundle.add_argument("report_id")
+    pub_bundle.add_argument("--format", choices=["directory", "zip"], default="directory")
+    pub_bundle.add_argument("--output-dir")
+    pub_bundle.add_argument("--force", action="store_true")
+    pub_bundle.add_argument("--verbose", action="store_true")
+    
+    pub_cit = publish_sub.add_parser("citations")
+    pub_cit.add_argument("report_id")
+    
+    pub_val = publish_sub.add_parser("validate")
+    pub_val.add_argument("report_id")
+    
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
     remember_parser.add_argument("--type", choices=["note", "summary", "finding"], default="note")
@@ -597,6 +621,50 @@ def main():
             url = f"http://127.0.0.1:8765/reports/{args.report_id}/checklist"
             webbrowser.open(url)
             print(f"Opened checklist for {args.report_id}")
+            
+    elif args.command == "publish":
+        if args.publish_action == "export":
+            from scripts.publication_export import export_publication
+            from pathlib import Path
+            out_dir = Path(args.output_dir) if args.output_dir else None
+            try:
+                out = export_publication(args.report_id, args.format, args.force, out_dir)
+                print(f"Exported {args.format} to {out}")
+            except Exception as e:
+                print(f"Export failed: {e}")
+                sys.exit(1)
+        elif args.publish_action == "bundle":
+            from scripts.publication_bundle import create_bundle
+            from pathlib import Path
+            out_dir = Path(args.output_dir) if args.output_dir else None
+            try:
+                out = create_bundle(args.report_id, args.format, args.force, out_dir)
+                print(f"Created bundle at {out}")
+            except Exception as e:
+                print(f"Bundle failed: {e}")
+                sys.exit(1)
+        elif args.publish_action == "citations":
+            from scripts.report_compose import inspect_report
+            from scripts.evidence_pack import inspect_evidence_pack
+            from scripts.publication_citations import generate_citation_appendix
+            rep = inspect_report(args.report_id)
+            if not rep:
+                print("Report not found.")
+                sys.exit(1)
+            pack_id = rep.get("source_pack_id")
+            pack = inspect_evidence_pack(pack_id) if pack_id else {}
+            app = generate_citation_appendix(rep, pack)
+            for c in app:
+                print(f"[{c['evidence_id']}] {c['project']} / {c['relative_path']}")
+                print(f"  {c['excerpt']}")
+        elif args.publish_action == "validate":
+            from scripts.review_audit import audit_report
+            audit = audit_report(args.report_id)
+            print(f"Validation Status: {audit['status'].upper()}")
+            for w in audit["warnings"]: print(f"WARN: {w}")
+            for f in audit["failures"]: print(f"FAIL: {f}")
+            if audit["status"] == "fail": sys.exit(1)
+
                 
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
