@@ -2,6 +2,20 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 17: Export & Publication Pack
+- **Summary:** Built local, safe publication pack generator for reviewed reports. Supports exporting to Markdown, JSON, HTML (and gracefully stubbed PDF/DOCX dependencies) and packaging into Zip bundles. Integrated strict publication safety blocking token-like strings, absolute paths, and emails by default. Outputs strictly target local ZURVAN_CONFIG_DIR (`~/.zurvan/publications/`) to prevent leaking private reports into the public repository. Included citation appendix generation that alerts on missing references.
+- **Files Changed:**
+  - `scripts/publication_export.py`, `scripts/publication_bundle.py`, `scripts/publication_citations.py`, `scripts/publication_safety.py`, `scripts/publication_templates.py` - Core logic for safe, decoupled export.
+  - `docs/publication/*.md` - Documentation for overview, formats, appendix, safety, workflows.
+  - `tests/test_publication_*.py` - Complete test suite for formats, bundling, redaction safety blocks, and appendix structure.
+  - `scripts/cli.py` - Added `publish export/bundle/citations/validate`.
+  - `scripts/check.sh` - Added automated publication validation tests to the quality gate.
+  - `scripts/public_repo_guard.py` - Blocked `.pdf`, `.docx` files globally and enforced `.zurvan/publications/` is outside tracked scope.
+- **Verification:** Ran `bash scripts/check.sh` locally alongside `pytest`. The pipeline hit a 100% pass rate. Verified `public_repo_guard` catches stray references safely and that empty appendix citations are caught properly.
+- **Follow-ups:** Proceed to Phase 18: Template Externalisation or another scaling phase.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 14: Report Composer
 - **Summary:** Built the local Phase 14 Report Composer. It safely transforms Evidence Packs into structured Markdown and JSON reports without relying on LLM or cloud endpoints. Uses predefined deterministic templates (e.g. executive_summary, technical_audit, evidence_digest). Integrates existing redaction safeguards to completely scrub evidence of private keys and paths before final output. Included a strict validation engine ensuring every claim maps directly to citations and warns if sections lack sufficient evidence. Outputs default to safe off-repo directories (`~/.zurvan/reports/`) to maintain public repo safety.
 - **Files Changed:**
