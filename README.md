@@ -56,12 +56,18 @@ zurvan context --topic "project roadmap" --hybrid --graph --limit 10
 Zurvan can act as a local Model Context Protocol (MCP) server over `stdio` to provide structured long-term memory to agents like Claude Code or Cursor. It operates in **read-only mode** by default.
 
 ```bash
-# Start the MCP server manually (usually spawned automatically by the agent client)
-export ZURVAN_MCP_READONLY=1
-export ZURVAN_MCP_TRANSPORT=stdio
-python scripts/mcp_server.py
+# Verify system readiness
+python scripts/doctor_mcp.py
+
+# Generate client configuration
+python scripts/install_mcp_config.py --client claude-code --readonly
 ```
-For full configuration details, see the [API Guide](docs/API.md).
+For full configuration details, see the Client Integration Pack:
+- [Claude Code Setup](docs/mcp/claude-code.md)
+- [Cursor Setup](docs/mcp/cursor.md)
+- [Codex-style Agents](docs/mcp/codex-style-agents.md)
+- [MCP Security](docs/mcp/security.md)
+- [MCP Troubleshooting](docs/mcp/troubleshooting.md)
 
 ## Quality Gates
 Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:

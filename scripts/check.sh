@@ -47,12 +47,21 @@ PYTHONPATH=. python scripts/cli.py context --topic "vector" --hybrid --graph --l
 echo "✅ Graph tests passed."
 echo ""
 
-echo "[7/8] Testing MCP Server Integration..."
-PYTHONPATH=. ZURVAN_MCP_READONLY=1 python -m pytest tests/test_mcp_security.py tests/test_mcp_tools.py tests/test_mcp_resources.py tests/test_mcp_server_smoke.py
+echo "[7/9] Running MCP Doctor..."
+PYTHONPATH=. python scripts/doctor_mcp.py
+echo "✅ MCP Doctor passed."
+echo ""
+
+echo "[8/9] Testing MCP Server Integration..."
+PYTHONPATH=. ZURVAN_MCP_READONLY=1 python -m pytest tests/test_mcp_security.py tests/test_mcp_tools.py tests/test_mcp_resources.py tests/test_mcp_server_smoke.py tests/test_doctor_mcp.py tests/test_install_mcp_config.py
+if [ $? -ne 0 ]; then
+    echo "❌ MCP server tests failed."
+    exit 1
+fi
 echo "✅ MCP Server tests passed."
 echo ""
 
-echo "[8/8] Running MCP E2E smoke test..."
+echo "[9/9] Running MCP E2E smoke test..."
 PYTHONPATH=. \
 ZURVAN_MCP_TRANSPORT=stdio \
 ZURVAN_MCP_READONLY=1 \
