@@ -47,12 +47,12 @@ PYTHONPATH=. python scripts/cli.py context --topic "vector" --hybrid --graph --l
 echo "✅ Graph tests passed."
 echo ""
 
-echo "[7/9] Running MCP Doctor..."
+echo "[7/10] Running MCP Doctor..."
 PYTHONPATH=. python scripts/doctor_mcp.py
 echo "✅ MCP Doctor passed."
 echo ""
 
-echo "[8/9] Testing MCP Server Integration..."
+echo "[8/10] Testing MCP Server Integration..."
 PYTHONPATH=. ZURVAN_MCP_READONLY=1 python -m pytest tests/test_mcp_security.py tests/test_mcp_tools.py tests/test_mcp_resources.py tests/test_mcp_server_smoke.py tests/test_doctor_mcp.py tests/test_install_mcp_config.py
 if [ $? -ne 0 ]; then
     echo "❌ MCP server tests failed."
@@ -61,7 +61,7 @@ fi
 echo "✅ MCP Server tests passed."
 echo ""
 
-echo "[9/9] Running MCP E2E smoke test..."
+echo "[9/10] Running MCP E2E smoke test..."
 PYTHONPATH=. \
 ZURVAN_MCP_TRANSPORT=stdio \
 ZURVAN_MCP_READONLY=1 \
@@ -71,6 +71,18 @@ ZURVAN_LLM_MODEL=mock \
 ZURVAN_EMBED_PROVIDER=mock \
 python scripts/e2e_mcp_smoke.py
 echo "✅ MCP E2E smoke test passed."
+echo "[10/10] Agent Workflow Smoke Test..."
+PYTHONPATH=. python scripts/cli.py session start --topic "Phase 7 smoke test" > /dev/null
+PYTHONPATH=. python scripts/cli.py agent preflight --topic "Zurvan roadmap" --hybrid --graph --limit 10 > /dev/null
+PYTHONPATH=. python scripts/cli.py agent postedit \
+  --summary "Ran Phase 7 smoke test." \
+  --files scripts/agent_workflow.py scripts/session.py \
+  --checks "pytest tests/ && bash scripts/check.sh" > /dev/null
+PYTHONPATH=. python scripts/cli.py session close \
+  --topic "Phase 7 smoke test" \
+  --summary "Phase 7 workflow smoke test passed." \
+  --checks "pytest tests/ && bash scripts/check.sh" > /dev/null
+echo "✅ Agent Workflow smoke test passed."
 echo ""
 
 echo "========================================="

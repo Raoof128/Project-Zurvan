@@ -99,6 +99,33 @@ def main():
     graph_export_parser = graph_sub.add_parser("export", help="Export graph")
     graph_export_parser.add_argument("--format", choices=["markdown", "dot"], required=True)
 
+    # zurvan session
+    session_parser = subparsers.add_parser("session", help="Manage agent sessions")
+    session_sub = session_parser.add_subparsers(dest="action")
+    
+    sess_start = session_sub.add_parser("start", help="Start a session")
+    sess_start.add_argument("--topic", required=True)
+    
+    sess_close = session_sub.add_parser("close", help="Close a session")
+    sess_close.add_argument("--topic", required=True)
+    sess_close.add_argument("--summary", required=True)
+    sess_close.add_argument("--checks", required=True)
+    
+    # zurvan agent
+    agent_parser = subparsers.add_parser("agent", help="Agent workflows")
+    agent_sub = agent_parser.add_subparsers(dest="action")
+    
+    agent_pref = agent_sub.add_parser("preflight", help="Agent preflight context")
+    agent_pref.add_argument("--topic", required=True)
+    agent_pref.add_argument("--hybrid", action="store_true")
+    agent_pref.add_argument("--graph", action="store_true")
+    agent_pref.add_argument("--limit", type=int, default=10)
+    
+    agent_post = agent_sub.add_parser("postedit", help="Agent post-edit log")
+    agent_post.add_argument("--summary", required=True)
+    agent_post.add_argument("--files", nargs="+", required=True)
+    agent_post.add_argument("--checks", required=True)
+
     args = parser.parse_args()
     
     if args.command == "remember":
@@ -162,6 +189,18 @@ def main():
             subprocess.run(["python", "scripts/graph_export.py", "--format", args.format])
         else:
             graph_parser.print_help()
+    elif args.command == "session" and args.action == "start":
+        from scripts.session import session_start
+        print(session_start(args.topic))
+    elif args.command == "session" and args.action == "close":
+        from scripts.session import session_close
+        print(session_close(args.topic, args.summary, args.checks))
+    elif args.command == "agent" and args.action == "preflight":
+        from scripts.agent_workflow import agent_preflight
+        print(agent_preflight(args.topic, args.hybrid, args.graph, args.limit))
+    elif args.command == "agent" and args.action == "postedit":
+        from scripts.agent_workflow import agent_postedit
+        print(agent_postedit(args.summary, args.files, args.checks))
     else:
         parser.print_help()
 
