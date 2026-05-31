@@ -253,12 +253,15 @@ async def write_mode_smoke() -> None:
         async with ClientSession(read, write) as session:
             await session.initialize()
 
+            import uuid
+            test_id = str(uuid.uuid4())[:8]
+            
             await expect_tool(
                 session,
                 "zurvan_remember",
                 {
                     "type": "note",
-                    "title": "MCP E2E write mode smoke",
+                    "title": f"MCP E2E write mode smoke {test_id}",
                     "body": "Zurvan MCP write mode can store a note only when explicitly enabled.",
                     "tags": ["mcp", "e2e", "write-mode"],
                 },
@@ -268,7 +271,7 @@ async def write_mode_smoke() -> None:
                 session,
                 "zurvan_question_add",
                 {
-                    "question": "Should MCP write mode stay disabled by default?",
+                    "question": f"Should MCP write mode stay disabled by default? {test_id}",
                     "reason": "Write mode can change project memory, so read-only should remain the safe default.",
                     "tags": ["mcp", "security", "readonly"],
                 },
