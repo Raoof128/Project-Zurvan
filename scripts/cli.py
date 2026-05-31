@@ -162,6 +162,30 @@ def main():
     e_redact = evidence_sub.add_parser("redact")
     e_redact.add_argument("pack_id")
 
+    # zurvan report
+    report_parser = subparsers.add_parser("report", help="Compose structured reports")
+    report_sub = report_parser.add_subparsers(dest="report_action")
+    
+    r_compose = report_sub.add_parser("compose")
+    r_compose.add_argument("--pack", required=True)
+    r_compose.add_argument("--template", default="evidence_digest", 
+                          choices=["executive_summary", "technical_audit", "research_brief", "decision_log", "risk_review", "evidence_digest"])
+    r_compose.add_argument("--format", default="markdown")
+    r_compose.add_argument("--allow-unsafe", action="store_true", help="Allow unredacted output")
+    
+    r_list = report_sub.add_parser("list")
+    
+    r_inspect = report_sub.add_parser("inspect")
+    r_inspect.add_argument("report_id")
+    
+    r_export = report_sub.add_parser("export")
+    r_export.add_argument("report_id")
+    r_export.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    r_export.add_argument("--output-dir")
+    r_export.add_argument("--allow-unsafe", action="store_true")
+    
+    r_validate = report_sub.add_parser("validate")
+    r_validate.add_argument("report_id")
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -456,6 +480,63 @@ def main():
                 print(f"Redacted pack {args.pack_id}")
             else:
                 print(f"Pack {args.pack_id} not found or already redacted.")
+                
+    elif args.command == "report":
+        from scripts.report_compose import compose_report, list_reports, inspect_report, validate_report
+        from scripts.report_export import export_report
+        
+        if args.report_action == "compose":
+            rep = compose_report(args.pack, args.template, args.allow_unsafe)
+            print(f"Report composed: {rep['report_id']}")
+            
+            for f in args.format.split(","):
+                path = export_report(rep["report_id"], f, allow_unsafe=args.allow_unsafe)
+                print(f"Exported {f}: {path}")
+                
+        elif args.report_action == "list":
+            reps = list_reports()
+            if not reps:
+                print("No reports found.")
+            for r in reps:
+                print(f"- {r['report_id']} | Topic: '{r.get('topic','')}' | Template: {r.get('template','')} | Created: {r.get('created_at','')}")
+                
+        elif args.report_action == "inspect":
+            data = inspect_report(args.report_id)
+            if not data:
+                print(f"Report {args.report_id} not found.")
+                sys.exit(1)
+            print(f"Report ID: {data['report_id']}")
+            print(f"Topic: {data.get('topic', '')}")
+            print(f"Template: {data.get('template', '')}")
+            print(f"Source Pack: {data.get('source_pack_id', '')}")
+            print(f"Redaction: {data.get('redaction_status', '')}")
+            if data.get("warnings"):
+                print("Warnings:")
+                for w in data["warnings"]:
+                    print(f" - {w}")
+                    
+        elif args.report_action == "export":
+            try:
+                path = export_report(args.report_id, args.format, args.output_dir, args.allow_unsafe)
+                print(f"Exported to {path}")
+            except Exception as e:
+                print(f"Export failed: {e}")
+                sys.exit(1)
+                
+        elif args.report_action == "validate":
+            res = validate_report(args.report_id)
+            if res["valid"]:
+                print(f"Report {args.report_id} is valid.")
+            else:
+                print(f"Report {args.report_id} has issues:")
+                for iss in res["issues"]:
+                    print(f" - {iss}")
+                sys.exit(1)
+            
+            if res.get("warnings"):
+                print("Validation Warnings:")
+                for w in res["warnings"]:
+                    print(f" - {w}")
                 
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
