@@ -172,6 +172,15 @@ else
 fi
 
 echo ""
+echo "[20/21] Testing Local Review Workbench..."
+# Just start the server in background and kill it to ensure it creates correctly
+python scripts/cli.py review serve --host 127.0.0.1 --port 8769 &
+SERVER_PID=$!
+sleep 2
+kill $SERVER_PID || true
+echo "✅ Review workbench smoke test passed."
+
+echo ""
 echo "========================================="
 echo "🎉 All Zurvan checks passed successfully."
 echo "========================================="

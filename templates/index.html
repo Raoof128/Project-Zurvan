@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard">
+    <h2>Dashboard</h2>
+    <div class="dashboard-grid">
+        <div class="card">
+            <h3>Recent Reports</h3>
+            {% if reports %}
+                <ul>
+                {% for r in reports[:5] %}
+                    <li><a href="/reports/{{ r.report_id }}">{{ r.topic }} ({{ r.template }})</a></li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p>No reports found.</p>
+            {% endif %}
+            <a href="/reports" class="btn">View all reports</a>
+        </div>
+        <div class="card">
+            <h3>Recent Evidence Packs</h3>
+            {% if packs %}
+                <ul>
+                {% for p in packs[:5] %}
+                    <li><a href="/evidence/{{ p.pack_id }}">{{ p.topic }}</a></li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p>No evidence packs found.</p>
+            {% endif %}
+            <a href="/evidence" class="btn">View all evidence</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
