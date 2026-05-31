@@ -1,2 +1,27 @@
+# Zurvan local/private state
+.zurvan/
+*.local.json
+*.secret.json
+.env
+.env.*
+!.env.example
+
+# Local snapshots/backups may contain private wiki data
+dist/snapshots/
+dist/backups/
+
+# Raw sources are private by default
+raw/
+!raw/.gitkeep
+
+# Local databases may expose private knowledge
+data/*.sqlite
+data/*.db
+data/embeddings/
+!data/.gitkeep
+
+# Python/local noise
+.venv/
 __pycache__/
-*.sqlite
+.pytest_cache/
+.DS_Store
