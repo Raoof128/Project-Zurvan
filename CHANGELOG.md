@@ -2,6 +2,18 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 7.5: Obsidian Integration Pack
+- **Summary:** Configured Zurvan as a first-class Obsidian vault. Added YAML-compliant templates for all core node types, created safe `.obsidian/` configurations to filter out non-knowledge directories, and documented vault setup strategies.
+- **Files Changed:**
+  - `wiki/templates/claim.md`, `decision.md`, `concept.md`, `entity.md`, `source.md`, `session.md`, `contradiction.md`
+  - `.obsidian/app.json`, `.obsidian/core-plugins.json`, `.obsidian/templates.json`
+  - `docs/obsidian/setup.md`, `recommended-plugins.md`, `graph-view.md`, `workflows.md`
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+- **Verification:** Ensured `.obsidian/` filter ignores `data/`, `scripts/`, `raw/`, etc., keeping the UI clean. Templates conform to existing `graph_build.py` node logic.
+- **Follow-ups:** Prepare for Phase 8: Release Packaging.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 7: Agent Workflow Orchestration
 - **Summary:** Added structured local session management (`session start`, `session close`, `agent preflight`, `agent postedit`) to seamlessly onboard agents like Claude Code, Codex, and Cursor before and after edits. Provided templates and explicit workflow documentation.
 - **Files Changed:**
