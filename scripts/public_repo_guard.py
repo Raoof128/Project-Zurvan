@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 
 BLOCKED_PATTERNS = [
     "raw/",
@@ -11,6 +12,11 @@ BLOCKED_PATTERNS = [
     "data/graph.sqlite",
     ".zurvan/",
     ".env",
+    "snapshots/",
+    "publications/",
+    "dist/publications/",
+    ".pdf",
+    ".docx"
 ]
 
 def main():
@@ -26,11 +32,21 @@ def main():
         sys.exit(1)
 
     tracked = result.stdout.splitlines()
-    bad = [
-        path for path in tracked
-        if any(path.startswith(pattern) or path == pattern for pattern in BLOCKED_PATTERNS)
-        and not path.endswith(".gitkeep")
-    ]
+    bad = []
+    for path in tracked:
+        for pattern in BLOCKED_PATTERNS:
+            if pattern.endswith("/"):
+                if path.startswith(pattern):
+                    if not path.endswith(".gitkeep"):
+                        bad.append(path)
+            elif pattern.startswith("."):
+                if path.endswith(pattern):
+                    # Exclude docs/*.pdf
+                    if not path.startswith("docs/") and not path.startswith("tests/"):
+                        bad.append(path)
+            else:
+                if path == pattern:
+                    bad.append(path)
 
     if bad:
         print("Public repo guard failed. Remove these tracked private files:")
