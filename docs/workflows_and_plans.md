@@ -111,3 +111,10 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
 3. **Execution**: The agent performs the coding task.
 4. **Recording**: The agent runs `agent postedit` to write a structured memory of files changed and checks run to `wiki/log.md`.
 5. **Closure**: The agent runs `session close` to finalize the Markdown session file in `wiki/sessions/`.
+
+## Phase 7.5 Obsidian Integration Pack
+1. **Trigger**: User opens the Zurvan root repository as an Obsidian vault.
+2. **Configuration**: The predefined `.obsidian/` configuration automatically filters out noisy directories (like `data/` and `scripts/`).
+3. **Template Usage**: User can utilize provided YAML-compatible templates in `wiki/templates/` for creating uniform Claims, Decisions, Concepts, etc.
+4. **Execution**: The local graph perfectly mirrors the Obsidian knowledge graph without complex plugin dependencies.
+

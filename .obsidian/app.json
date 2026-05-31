@@ -1,0 +1,15 @@
+{
+  "newFileLocation": "folder",
+  "newFileFolderPath": "wiki",
+  "attachmentFolderPath": "/",
+  "useMarkdownLinks": false,
+  "userIgnoreFilters": [
+    "data/",
+    "scripts/",
+    "tests/",
+    "__pycache__/",
+    ".venv/",
+    ".git/",
+    "raw/"
+  ]
+}
