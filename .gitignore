@@ -6,6 +6,9 @@
 .env.*
 !.env.example
 
+# Zurvan evidence bundles (never commit packs containing raw excerpts)
+evidence-packs/
+
 # Local snapshots/backups may contain private wiki data
 dist/snapshots/
 dist/backups/

@@ -2,6 +2,22 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 13: Evidence Pack Builder
+- **Summary:** Implemented a robust Evidence Pack Builder capable of securely aggregating claims, decisions, contradictions, graph context, and search results into redacted, shareable bundles without requiring cloud connectivity, remote synchronization, or LLM summarization. Integrated data export pipelines supporting Markdown and JSON formats, alongside an automatic redaction utility guarding sensitive information like paths and API credentials. Output evidence packs are strictly stored locally outside the public workspace to protect data integrity and uphold safety constraints.
+- **Files Changed:**
+  - `scripts/evidence_pack.py` - Core pack orchestration
+  - `scripts/evidence_collect.py` - Safe cross-project evidence collection
+  - `scripts/evidence_manifest.py` - Evidence packing manifest generation
+  - `scripts/evidence_redact.py` - Security redactions for paths and tokens
+  - `scripts/evidence_export.py` - Local bundle exports (Markdown/JSON)
+  - `docs/evidence/*.md` - Documentation updates
+  - `tests/test_evidence_*.py` - Complete test coverage
+  - `scripts/cli.py` - Evidence builder interface
+  - `scripts/check.sh` - Add tests to CI
+- **Verification:** Successfully ran all unit tests for evidence generation, validation, redaction logic, and smoke-tested local pack generation using `check.sh`.
+- **Follow-ups:** Proceed to Phase 14: Report Composer.
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 12: Cross-Project Contradiction + Policy Radar
 - **Summary:** Added `zurvan project radar scan`, `contradictions`, `policies`, `drift`, and `report`. Built local heuristic detection for contradictions across decisions, claims, and policies based on positive/negative keyword lists and categorical overlap. Included rules to ensure safe handling of public repos, MCP write restrictions, and directory immutability.
 - **Files Changed:**

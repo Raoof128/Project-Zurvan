@@ -141,7 +141,26 @@ zurvan --project my-vault search "architecture"
 *Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
 
 ### 🔎 Cross-Project Federation & Decision Memory
-Zurvan supports a local registry to build federated context and cross-project decision memory across multiple vaults:
+- **Cross-Project Federation**: Search, context, and decision memory across multiple vaults.
+- **Policy Radar**: Heuristic detection of cross-project contradictions and policy drift.
+- **Evidence Pack Builder**: Generate shareable, citation-backed, redacted evidence bundles locally.
+
+## Features by Phase
+
+- Phase 1: Local Knowledge Vault
+- Phase 2: Structured Document Extraction
+- Phase 3: Agent-Facing CLI Memory Interface
+- Phase 4: Local Hybrid Search (FTS5 + Embeddings)
+- Phase 5: Knowledge Graph Lite
+- Phase 6: Local MCP Server
+- Phase 7: Agent Workflow Orchestration & Obsidian Integration
+- Phase 8: Release Packaging & Snapshots
+- Phase 9: Multi-Project Workspace Support
+- Phase 10: Cross-Project Federation
+- Phase 11: Cross-Project Decision Memory
+- Phase 12: Cross-Project Policy Radar
+- Phase 13: Evidence Pack Builder
+
 ```bash
 # Register a project
 zurvan project register --name tizbin --path /Users/you/tizbin
