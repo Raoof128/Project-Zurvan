@@ -2,6 +2,19 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 9: Multi-Project Workspace Support
+- **Summary:** Added safe, isolated multi-project workspaces driven by a local registry (`~/.zurvan/projects.json`). Projects can be registered, listed, switched, and targeted cleanly using `zurvan project` and `--project`. Private absolute paths are now decoupled from the public repository entirely.
+- **Files Changed:**
+  - `scripts/config.py`, `scripts/project_registry.py`, `scripts/workspace.py`
+  - `scripts/cli.py`
+  - `tests/test_workspace.py`, `tests/test_project_registry.py`, `tests/test_config.py`
+  - `docs/workspaces/*.md`
+  - `scripts/check.sh`
+- **Verification:** Unit tests confirm atomic registry writing, config path overriding, safety filters against `raw/` indexing, and path traversal blocking. All E2E smoke tests in `check.sh` pass using a temporary registry mock.
+- **Follow-ups:** Prepare for Phase 10: Cross-Project Search.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 8: Release Packaging + Versioned Snapshots
 - **Summary:** Added safe, local-first release packaging via `zurvan snapshot`. Added system health checks via `zurvan doctor` and version reporting via `zurvan version`. Built strict path safety into the restore mechanism to prevent traversal outside the project or into `raw/`.
 - **Files Changed:**

@@ -13,6 +13,16 @@ Before relying on Zurvan's memory retrieval in automated contexts, we evaluate i
 4. **Metrics Computed**: Top-1 Accuracy, Top-3 Accuracy, and Mean Reciprocal Rank (MRR).
 5. **Quality Gates**: Failing the minimum threshold yields an exit code of 1, effectively stopping CI or tests if search reliability degrades. This is a critical prerequisite before moving onto Graph Retrieval.
 
+## Phase 9: Multi-Project Workspace Support (Complete)
+- Created `~/.zurvan/` local config to decouple private paths from public repository history.
+- Added `zurvan project register`, `list`, `use`, and `current` commands.
+- Exposed `--project <name>` global override for targeted commands like `search`, `context`, `doctor`, and `snapshot create`.
+- Fully isolated project operations to prevent out-of-bound path traversal or unsafe writes to `raw/`.
+
+## Phase 10: Cross-Project Search + Federation (Pending)
+- Extend hybrid search to query across multiple registered projects.
+- Synthesize graphs from neighbouring vaults.
+
 ## 5. Knowledge Graph Lite (Phase 5)
 
 Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files.
