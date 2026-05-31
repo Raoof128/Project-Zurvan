@@ -163,6 +163,7 @@ zurvan --project my-vault search "architecture"
 - Phase 14: Report Composer
 - Phase 15: Local Report Review Workbench
 - Phase 16: Review Workbench Hardening + UX Polish
+- Phase 17: Export & Publication Pack
 
 ```bash
 # Register a project
