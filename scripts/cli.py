@@ -133,6 +133,34 @@ def main():
     p_radar_report.add_argument("--strict", action="store_true")
     p_radar_report.add_argument("--verbose", action="store_true")
     p_radar_report.add_argument("--format", choices=["markdown"], default="markdown")
+    
+    # zurvan evidence
+    evidence_parser = subparsers.add_parser("evidence", help="Manage evidence packs")
+    evidence_sub = evidence_parser.add_subparsers(dest="evidence_action")
+    
+    e_build = evidence_sub.add_parser("build")
+    e_build.add_argument("--topic", required=True)
+    e_build.add_argument("--projects", nargs="+")
+    e_build.add_argument("--hybrid", action="store_true")
+    e_build.add_argument("--graph", action="store_true")
+    e_build.add_argument("--include-decisions", action="store_true")
+    e_build.add_argument("--include-policy-radar", action="store_true")
+    e_build.add_argument("--limit", type=int, default=20)
+    e_build.add_argument("--no-redact", action="store_false", dest="redact", default=True)
+    e_build.add_argument("--verbose", action="store_true")
+    
+    e_list = evidence_sub.add_parser("list")
+    
+    e_inspect = evidence_sub.add_parser("inspect")
+    e_inspect.add_argument("pack_id")
+    
+    e_export = evidence_sub.add_parser("export")
+    e_export.add_argument("pack_id")
+    e_export.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    e_export.add_argument("--output-dir")
+    
+    e_redact = evidence_sub.add_parser("redact")
+    e_redact.add_argument("pack_id")
 
     
     # zurvan remember
@@ -381,6 +409,54 @@ def main():
                 print(report)
                 path = save_report_locally(report)
                 print(f"\nReport saved to: {path}")
+    elif args.command == "evidence":
+        from scripts.evidence_pack import build_evidence_pack, list_evidence_packs, inspect_evidence_pack
+        from scripts.evidence_export import export_evidence_pack, redact_existing_pack
+        
+        if args.evidence_action == "build":
+            res = build_evidence_pack(
+                args.topic, args.projects, args.hybrid, args.graph, 
+                args.include_decisions, args.include_policy_radar, 
+                args.limit, args.redact
+            )
+            print(f"Evidence pack created: {res['pack_id']}")
+            print(f"Items collected: {res['item_count']}")
+            if args.verbose:
+                print(f"Output directory: {res['path']}")
+                
+        elif args.evidence_action == "list":
+            packs = list_evidence_packs()
+            if not packs:
+                print("No evidence packs found.")
+            else:
+                for p in packs:
+                    print(f"- {p['pack_id']} | Topic: '{p.get('topic', '')}' | Items: {p.get('item_count', 0)} | Created: {p.get('created_at', '')}")
+                    
+        elif args.evidence_action == "inspect":
+            data = inspect_evidence_pack(args.pack_id)
+            if not data:
+                print(f"Pack {args.pack_id} not found.")
+                sys.exit(1)
+            manifest = data["manifest"]
+            print(f"Pack ID: {manifest['pack_id']}")
+            print(f"Topic: {manifest.get('topic', '')}")
+            print(f"Items: {manifest.get('item_count', 0)}")
+            print(f"Redaction: {manifest.get('redaction_status', 'unknown')}")
+            
+        elif args.evidence_action == "export":
+            try:
+                path = export_evidence_pack(args.pack_id, args.format, args.output_dir)
+                print(f"Exported to {path}")
+            except Exception as e:
+                print(f"Export failed: {e}")
+                sys.exit(1)
+                
+        elif args.evidence_action == "redact":
+            if redact_existing_pack(args.pack_id):
+                print(f"Redacted pack {args.pack_id}")
+            else:
+                print(f"Pack {args.pack_id} not found or already redacted.")
+                
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)

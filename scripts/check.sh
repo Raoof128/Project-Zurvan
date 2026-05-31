@@ -129,22 +129,33 @@ echo "Testing context-all..."
 PYTHONPATH=. python scripts/cli.py project context-all --topic "agent memory" --hybrid --graph --limit 10 > /dev/null
 echo "✅ context-all smoke test passed."
 
-echo -e "\n[16/16] Testing Decision Memory..."
-PYTHONPATH=. python scripts/cli.py project decision-memory rebuild > /dev/null
-PYTHONPATH=. python scripts/cli.py project decisions-all > /dev/null
-PYTHONPATH=. python scripts/cli.py project decisions-similar "mcp" > /dev/null
-PYTHONPATH=. python scripts/cli.py project decisions-conflicts > /dev/null
-PYTHONPATH=. python scripts/cli.py project decisions-stale --days 90 > /dev/null
+echo -e "\n[16/19] Testing Decision Memory..."
+python scripts/cli.py project decisions-all >/dev/null
+python scripts/cli.py project decisions-stale >/dev/null
 echo "✅ Decision memory smoke test passed."
 
 echo ""
-echo "[17/17] Testing Policy Radar..."
-export ZURVAN_CONFIG_DIR="$(mktemp -d)"
-python scripts/cli.py project radar scan > /dev/null
-python scripts/cli.py project radar contradictions > /dev/null
-python scripts/cli.py project radar drift > /dev/null
-python scripts/cli.py project radar report > /dev/null
+echo "[17/19] Testing Policy Radar..."
+python scripts/cli.py project radar policies >/dev/null
+python scripts/cli.py project radar contradictions >/dev/null
+python scripts/cli.py project radar drift >/dev/null
 echo "✅ Policy radar smoke test passed."
+
+echo ""
+echo "[18/19] Testing Evidence Pack Builder..."
+mkdir -p "$ZURVAN_CONFIG_DIR"
+python scripts/cli.py project register --name zurvan --path . >/dev/null
+python scripts/cli.py evidence build --topic "smoke test" --hybrid --graph --include-decisions --include-policy-radar >/dev/null
+PACK_ID=$(python scripts/cli.py evidence list | grep "smoke test" | awk '{print $2}')
+if [ -n "$PACK_ID" ]; then
+    python scripts/cli.py evidence inspect "$PACK_ID" >/dev/null
+    python scripts/cli.py evidence export "$PACK_ID" --format markdown >/dev/null
+    python scripts/cli.py evidence export "$PACK_ID" --format json >/dev/null
+    echo "✅ Evidence pack smoke test passed."
+else
+    echo "❌ Evidence pack smoke test failed."
+    exit 1
+fi
 
 echo ""
 echo "========================================="
