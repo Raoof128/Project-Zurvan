@@ -12,6 +12,11 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 9: Multi-Project Workspace Support
+- **Summary:** Decoupled private workspace paths from the public repository by introducing a local config directory (`~/.zurvan/projects.json`). Implemented `zurvan project register`, `list`, `current`, `use`, `doctor`, and `snapshot`. Added a global `--project <name>` argument to override the project root for commands like `search` and `context`. Guaranteed full path safety by strictly validating Zurvan project structure and rejecting `raw/` paths.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 8: Release Packaging + Versioned Snapshots
 - **Summary:** Added `zurvan version`, `zurvan doctor`, and `zurvan snapshot` commands to make the system portable and safely recoverable. Snapshots intentionally exclude `raw/` by default to prevent data leakage. Restores require explicit confirmation and take automatic safety backups, explicitly blocking traversal paths or writes into `raw/`.
 
