@@ -2,6 +2,19 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 8: Release Packaging + Versioned Snapshots
+- **Summary:** Added safe, local-first release packaging via `zurvan snapshot`. Added system health checks via `zurvan doctor` and version reporting via `zurvan version`. Built strict path safety into the restore mechanism to prevent traversal outside the project or into `raw/`.
+- **Files Changed:**
+  - `scripts/snapshot.py`, `scripts/restore_snapshot.py`, `scripts/doctor.py`, `scripts/version.py`, `scripts/cli.py`
+  - `docs/release/*.md`
+  - `tests/test_snapshot.py`, `tests/test_restore_snapshot.py`, `tests/test_doctor.py`, `tests/test_version.py`
+  - `README.md`, `docs/workflows_and_plans.md`, `AGENTS.md`, `CHANGELOG.md`
+  - `scripts/check.sh`
+- **Verification:** Unit tests confirm that `snapshot` excludes `raw/`, `restore` blocks unsafe paths and enforces `--force`, and `doctor` accurately detects missing components. Smoke tests in `check.sh` run successfully.
+- **Follow-ups:** Prepare for a stable 1.0 release branch.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 7.5: Obsidian Integration Pack
 - **Summary:** Configured Zurvan as a first-class Obsidian vault. Added YAML-compliant templates for all core node types, created safe `.obsidian/` configurations to filter out non-knowledge directories, and documented vault setup strategies.
 - **Files Changed:**

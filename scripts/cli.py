@@ -126,6 +126,25 @@ def main():
     agent_post.add_argument("--files", nargs="+", required=True)
     agent_post.add_argument("--checks", required=True)
 
+    # zurvan version
+    subparsers.add_parser("version", help="Print version and environment info")
+    
+    # zurvan doctor
+    subparsers.add_parser("doctor", help="Run system health checks")
+    
+    # zurvan snapshot
+    snapshot_parser = subparsers.add_parser("snapshot", help="Manage release snapshots")
+    snapshot_sub = snapshot_parser.add_subparsers(dest="action")
+    
+    snap_create = snapshot_sub.add_parser("create", help="Create a snapshot")
+    snap_create.add_argument("--include-raw", action="store_true")
+    
+    snapshot_sub.add_parser("list", help="List snapshots")
+    
+    snap_restore = snapshot_sub.add_parser("restore", help="Restore a snapshot")
+    snap_restore.add_argument("snapshot_name")
+    snap_restore.add_argument("--force", action="store_true")
+
     args = parser.parse_args()
     
     if args.command == "remember":
@@ -201,6 +220,24 @@ def main():
     elif args.command == "agent" and args.action == "postedit":
         from scripts.agent_workflow import agent_postedit
         print(agent_postedit(args.summary, args.files, args.checks))
+    elif args.command == "version":
+        from scripts.version import print_version
+        print_version()
+    elif args.command == "doctor":
+        from scripts.doctor import run_doctor
+        sys.exit(run_doctor())
+    elif args.command == "snapshot":
+        if args.action == "create":
+            from scripts.snapshot import create_snapshot
+            create_snapshot(args.include_raw)
+        elif args.action == "list":
+            from scripts.snapshot import list_snapshots
+            list_snapshots()
+        elif args.action == "restore":
+            from scripts.restore_snapshot import restore_snapshot
+            restore_snapshot(args.snapshot_name, args.force)
+        else:
+            snapshot_parser.print_help()
     else:
         parser.print_help()
 
