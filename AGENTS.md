@@ -12,6 +12,11 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 11: Cross-Project Decision Memory
+- **Summary:** Enabled Zurvan to scan, cache, and compare decisions across all federated projects. Added `zurvan project decisions-all`, `decisions-similar`, `decisions-conflicts`, and `decisions-stale`. Built heuristic algorithms to detect repeating architectural patterns and possible contradictions (e.g., conflicting defaults across projects) without relying on cloud endpoints, LLMs, or cross-project data copying. Cached decisions locally in `~/.zurvan/cache/` to ensure public-repo safety.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 10: Cross-Project Search + Federation
 - **Summary:** Added `zurvan project search-all` and `context-all` to federate searches across multiple isolated local knowledge bases. Ensured strict privacy by preventing file copying, absolute path leakage, and cloud dependencies. Read-only federation operations use subprocess execution per-project to prevent data bleed. Added `federation stats` and `doctor` commands to monitor network health.
 

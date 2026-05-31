@@ -74,6 +74,36 @@ def main():
     fed_doc = p_fed_sub.add_parser("doctor")
     fed_doc.add_argument("--strict", action="store_true")
     fed_doc.add_argument("--verbose", action="store_true")
+    
+    p_dec_all = project_sub.add_parser("decisions-all")
+    p_dec_all.add_argument("--projects", nargs="+")
+    p_dec_all.add_argument("--strict", action="store_true")
+    p_dec_all.add_argument("--verbose", action="store_true")
+    
+    p_dec_sim = project_sub.add_parser("decisions-similar")
+    p_dec_sim.add_argument("query")
+    p_dec_sim.add_argument("--projects", nargs="+")
+    p_dec_sim.add_argument("--limit", type=int, default=10)
+    p_dec_sim.add_argument("--strict", action="store_true")
+    p_dec_sim.add_argument("--verbose", action="store_true")
+    
+    p_dec_conf = project_sub.add_parser("decisions-conflicts")
+    p_dec_conf.add_argument("--projects", nargs="+")
+    p_dec_conf.add_argument("--strict", action="store_true")
+    p_dec_conf.add_argument("--verbose", action="store_true")
+    
+    p_dec_stale = project_sub.add_parser("decisions-stale")
+    p_dec_stale.add_argument("--days", type=int, default=90)
+    p_dec_stale.add_argument("--projects", nargs="+")
+    p_dec_stale.add_argument("--strict", action="store_true")
+    p_dec_stale.add_argument("--verbose", action="store_true")
+    
+    p_dec_mem = project_sub.add_parser("decision-memory")
+    p_dec_mem_sub = p_dec_mem.add_subparsers(dest="dec_action")
+    p_dec_mem_rebuild = p_dec_mem_sub.add_parser("rebuild")
+    p_dec_mem_rebuild.add_argument("--projects", nargs="+")
+    p_dec_mem_rebuild.add_argument("--strict", action="store_true")
+    p_dec_mem_rebuild.add_argument("--verbose", action="store_true")
 
     
     # zurvan remember
@@ -279,6 +309,26 @@ def main():
                 success = run_federation_doctor(args.strict, args.verbose)
                 if not success and args.strict:
                     sys.exit(1)
+        elif args.action == "decisions-all":
+            from scripts.decision_federation import collect_federated_decisions, format_decisions_all
+            ds = collect_federated_decisions(args.projects, args.strict, args.verbose)
+            print(format_decisions_all(ds))
+        elif args.action == "decisions-similar":
+            from scripts.decision_federation import collect_federated_decisions, format_similar_decisions
+            ds = collect_federated_decisions(args.projects, args.strict, args.verbose)
+            print(format_similar_decisions(ds, args.query, args.limit))
+        elif args.action == "decisions-conflicts":
+            from scripts.decision_federation import collect_federated_decisions, format_decision_conflicts
+            ds = collect_federated_decisions(args.projects, args.strict, args.verbose)
+            print(format_decision_conflicts(ds))
+        elif args.action == "decisions-stale":
+            from scripts.decision_federation import collect_federated_decisions, format_stale_decisions
+            ds = collect_federated_decisions(args.projects, args.strict, args.verbose)
+            print(format_stale_decisions(ds, args.days))
+        elif args.action == "decision-memory" and getattr(args, "dec_action", None) == "rebuild":
+            from scripts.decision_federation import rebuild_decision_memory
+            count = rebuild_decision_memory(args.projects, args.strict, args.verbose)
+            print(f"Rebuilt cache with {count} decisions.")
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
