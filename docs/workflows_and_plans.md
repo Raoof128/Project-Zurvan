@@ -31,7 +31,11 @@ Allows multiple Zurvan projects to be managed independently on the same machine 
 - Integrated decision memory cache with cross-project federation.
 
 ### Phase 12: Cross-Project Contradiction + Policy Radar ✅
-- Find policy inconsistencies across federated projects.
+- Phase 10: Cross-Project Search + Federation [COMPLETED]
+- Phase 11: Cross-Project Decision Memory [COMPLETED]
+- Phase 12: Cross-Project Contradiction + Policy Radar [COMPLETED]
+- Phase 13: Evidence Pack Builder [COMPLETED]
+- Phase 14: Report Composer [PENDING]projects.
 - Detect "Project A says X, Project B says not-X" assumptions.
 
 **Key Scripts**:

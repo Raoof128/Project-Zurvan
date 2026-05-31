@@ -53,3 +53,8 @@ Unresolved questions extracted from sources.
 - **ID**: 84ed755c
 - **Reason**: Write mode can change project memory, so read-only should remain the safe default.
 - **Tags**: mcp, security, readonly
+
+## Q: Should MCP write mode stay disabled by default? f820e86a
+- **ID**: cd1fc2bf
+- **Reason**: Write mode can change project memory, so read-only should remain the safe default.
+- **Tags**: mcp, security, readonly
