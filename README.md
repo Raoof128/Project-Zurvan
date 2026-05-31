@@ -69,6 +69,24 @@ For full configuration details, see the Client Integration Pack:
 - [MCP Security](docs/mcp/security.md)
 - [MCP Troubleshooting](docs/mcp/troubleshooting.md)
 
+## Agent Workflow Orchestration
+Zurvan includes tools to structure AI agent sessions (for Claude Code, Codex, Cursor, etc.). By running these before and after edits, agents can safely maintain context and memory.
+
+```bash
+# 1. Start a session
+python scripts/cli.py session start --topic "Database refactor"
+
+# 2. Get dense pre-edit context
+python scripts/cli.py agent preflight --topic "database"
+
+# 3. Record changes
+python scripts/cli.py agent postedit --summary "Updated schema" --files db.py --checks "pytest"
+
+# 4. Close session
+python scripts/cli.py session close --topic "Database refactor" --summary "Done" --checks "pytest"
+```
+See the [Agent Workflow Guides](docs/agent-workflows/) for tool-specific instructions.
+
 ## Quality Gates
 Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:
 ```bash
