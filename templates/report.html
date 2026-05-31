@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="two-col">
+    <div class="sidebar">
+        <h3>Reports</h3>
+        <ul>
+        {% for r in reports %}
+            <li><a href="/reports/{{ r.report_id }}">{{ r.topic }}</a></li>
+        {% endfor %}
+        </ul>
+    </div>
+    <div class="main-content">
+        {% if selected %}
+            <div class="report-header">
+                <h2>Report: {{ selected.topic }}</h2>
+                <div class="actions">
+                    <a href="/reports/{{ selected.report_id }}/citations" class="btn">Check Citations</a>
+                    <a href="/reports/{{ selected.report_id }}/warnings" class="btn btn-warn">View Warnings</a>
+                    <a href="/reports/{{ selected.report_id }}/export?format=markdown" class="btn">Export MD</a>
+                    <a href="/reports/{{ selected.report_id }}/export?format=json" class="btn">Export JSON</a>
+                </div>
+            </div>
+            <div class="metadata">
+                <p><strong>ID:</strong> {{ selected.report_id }}</p>
+                <p><strong>Template:</strong> {{ selected.template }}</p>
+                <p><strong>Redaction:</strong> {{ selected.redaction_status }}</p>
+                <p><strong>Source Pack:</strong> <a href="/evidence/{{ selected.source_pack_id }}">{{ selected.source_pack_id }}</a></p>
+            </div>
+            
+            {% if selected.claims %}
+            <h3>Claims</h3>
+            <ul>
+                {% for claim in selected.claims %}
+                    <li>{{ claim.title }} ({{ claim.evidence_id }})</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            
+            {% if selected.decisions %}
+            <h3>Decisions</h3>
+            <ul>
+                {% for dec in selected.decisions %}
+                    <li>{{ dec.title }} ({{ dec.evidence_id }})</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            
+            <p><em>Use the "Export MD" button to view the full formatted report.</em></p>
+            
+        {% else %}
+            <p>Select a report from the list.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

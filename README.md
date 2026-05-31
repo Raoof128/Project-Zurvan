@@ -161,6 +161,7 @@ zurvan --project my-vault search "architecture"
 - Phase 12: Cross-Project Policy Radar
 - Phase 13: Evidence Pack Builder
 - Phase 14: Report Composer
+- Phase 15: Local Report Review Workbench
 
 ```bash
 # Register a project
