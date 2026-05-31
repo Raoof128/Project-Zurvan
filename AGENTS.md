@@ -12,6 +12,11 @@
 
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 7.5: Obsidian Integration Pack
+- **Summary:** Configured Zurvan as a first-class Obsidian vault. Added templates (`wiki/templates/`) for all core knowledge node types and created safe Obsidian settings (`.obsidian/`) to hide internal script and data directories. Added full documentation (`docs/obsidian/`) for vault setup and plugin recommendations.
+
+### 2026-05-31 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase 7: Agent Workflow Orchestration
 - **Summary:** Added structured local session management (`session start`, `session close`, `agent preflight`, `agent postedit`) to seamlessly onboard agents like Claude Code, Codex, and Cursor before and after edits. Provided templates and explicit workflow documentation.
 
