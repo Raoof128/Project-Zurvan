@@ -490,3 +490,24 @@
 - **2026-06-02T09:27:23.873165**: Note Added - MCP test
 - **2026-06-02T09:28:54.407193**: Note Added - Test Note
 - **2026-06-02T09:29:10.298783**: Note Added - MCP test
+- **2026-06-02T09:31:48.256695**: Note Added - Test Note
+- **2026-06-02T09:32:03.502719**: Note Added - MCP test
+- **2026-06-02T09:32:10.188175**: Note Added - MCP test
+- **2026-06-02T09:32:14.975816**: Note Added - MCP E2E write mode smoke 3379c90e
+- **2026-06-02T09:32:14.981294**: Question Added - Should MCP write mode stay disabled by default? 3379c90e
+### 2026-06-02 09:32:15
+**Session Started**: Phase 7 smoke test
+- **File**: `wiki/sessions/2026-06-02-phase-7-smoke-test.md`
+
+### 2026-06-02 09:32:15
+**Agent Post-Edit**: Ran Phase 7 smoke test.
+- **Files Changed**:
+- `scripts/agent_workflow.py`
+- `scripts/session.py`
+- **Checks Run**: `pytest tests/ && bash scripts/check.sh`
+
+
+### 2026-06-02 09:32:15
+**Session Closed**: Phase 7 smoke test
+- **Summary**: Phase 7 workflow smoke test passed.
+- **Checks Run**: `pytest tests/ && bash scripts/check.sh`
