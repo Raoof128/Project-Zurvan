@@ -1,5 +1,16 @@
 ## Change Log
 
+### 2026-06-02 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full Project Audit — Test Fix + Deprecation Cleanup
+- **Summary:** Ran a full codebase audit. Found and fixed 1 hard test failure and 7 Starlette deprecation warnings, plus 1 tarfile deprecation warning. The test failure was a time-bomb: `test_find_stale_decisions` used a hardcoded `created_at` date of `"2026-05-01T12:00:00"` for a `pending` decision (d2), which passed the `age > 30 days` stale check as of 2026-06-02. Fixed by making d2's date dynamic (5 days ago). Starlette 0.50+ changed `TemplateResponse` signature from `(name, context_with_request)` to `(request, name, context)` — updated all 10 call sites in `review_routes.py`. Added `filter="data"` to `tar.extract()` in `restore_snapshot.py` for Python 3.14 compatibility.
+- **Files Changed:**
+  - `tests/test_decision_compare.py` — Made d2 `created_at` dynamic via `datetime.now() - timedelta(days=5)`
+  - `scripts/review_routes.py` — Updated all 10 `TemplateResponse` calls to Starlette 0.50+ signature
+  - `scripts/restore_snapshot.py` — Added `filter="data"` to `tar.extract()` call
+- **Verification:** `python -m pytest tests/ -q` → 131 passed, 0 failed, 2 external warnings (SwigPy, not fixable).
+- **Follow-ups:** Upgrade sentence-transformers if SwigPy warnings become an issue in CI.
+
 ### 2026-05-31 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 17: Export & Publication Pack

@@ -22,7 +22,7 @@ def mock_decisions():
             "title": "SQLite is best for local",
             "status": "pending",
             "tags": ["db", "local"],
-            "created_at": "2026-05-01T12:00:00",
+            "created_at": (datetime.now() - timedelta(days=5)).isoformat(),
             "excerpt": "Deciding on SQLite."
         },
         {
