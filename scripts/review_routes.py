@@ -26,12 +26,12 @@ def setup_routes(app: FastAPI, tmpl: Jinja2Templates):
 async def dashboard(request: Request):
     from scripts.review_index import get_index
     idx = get_index()
-    return templates.TemplateResponse("index.html", {"request": request, "index": idx})
+    return templates.TemplateResponse(request, "index.html", {"index": idx})
 
 @router.get("/evidence", response_class=HTMLResponse)
 async def list_evidence(request: Request):
     packs = list_evidence_packs()
-    return templates.TemplateResponse("evidence_pack.html", {"request": request, "packs": packs, "selected": None})
+    return templates.TemplateResponse(request, "evidence_pack.html", {"packs": packs, "selected": None})
 
 @router.get("/evidence/{pack_id}", response_class=HTMLResponse)
 async def view_evidence(request: Request, pack_id: str):
@@ -45,16 +45,15 @@ async def view_evidence(request: Request, pack_id: str):
         if "source_path" in item:
             item["source_path"] = os.path.basename(item["source_path"])
             
-    return templates.TemplateResponse("evidence_pack.html", {
-        "request": request, 
-        "packs": packs, 
+    return templates.TemplateResponse(request, "evidence_pack.html", {
+        "packs": packs,
         "selected": pack_data
     })
 
 @router.get("/reports", response_class=HTMLResponse)
 async def view_reports(request: Request):
     reports = list_reports()
-    return templates.TemplateResponse("report.html", {"request": request, "reports": reports, "selected": None})
+    return templates.TemplateResponse(request, "report.html", {"reports": reports, "selected": None})
 
 @router.get("/reports/{report_id}", response_class=HTMLResponse)
 async def view_report_detail(request: Request, report_id: str):
@@ -66,9 +65,8 @@ async def view_report_detail(request: Request, report_id: str):
     from scripts.review_audit import audit_report
     audit = audit_report(report_id)
     
-    return templates.TemplateResponse("report.html", {
-        "request": request, 
-        "reports": reports, 
+    return templates.TemplateResponse(request, "report.html", {
+        "reports": reports,
         "selected": report,
         "audit": audit
     })
@@ -79,8 +77,7 @@ async def view_citations(request: Request, report_id: str):
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
         
-    return templates.TemplateResponse("citation_check.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "citation_check.html", {
         "report": report
     })
 
@@ -94,8 +91,7 @@ async def view_warnings(request: Request, report_id: str):
     from scripts.report_compose import validate_report
     val = validate_report(report_id)
     
-    return templates.TemplateResponse("warnings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "warnings.html", {
         "report": report,
         "validation": val
     })
@@ -117,20 +113,20 @@ async def export_report_endpoint(report_id: str, format: str = "markdown"):
 async def view_audit_all(request: Request):
     from scripts.review_audit import audit_all_reports
     audits = audit_all_reports()
-    return templates.TemplateResponse("audit_all.html", {"request": request, "audits": audits})
+    return templates.TemplateResponse(request, "audit_all.html", {"audits": audits})
 
 @router.get("/audit/{report_id}", response_class=HTMLResponse)
 async def view_audit(request: Request, report_id: str):
     from scripts.review_audit import audit_report
     audit = audit_report(report_id)
-    return templates.TemplateResponse("audit.html", {"request": request, "audit": audit, "report_id": report_id})
+    return templates.TemplateResponse(request, "audit.html", {"audit": audit, "report_id": report_id})
 
 @router.get("/reports/{report_id}/checklist", response_class=HTMLResponse)
 async def view_checklist(request: Request, report_id: str):
     report = inspect_report(report_id)
     from scripts.review_audit import audit_report
     audit = audit_report(report_id)
-    return templates.TemplateResponse("checklist.html", {"request": request, "report": report, "audit": audit})
+    return templates.TemplateResponse(request, "checklist.html", {"report": report, "audit": audit})
 
 @router.get("/index/rebuild", response_class=JSONResponse)
 async def rebuild_index_route():
