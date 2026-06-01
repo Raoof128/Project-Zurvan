@@ -1,7 +1,7 @@
 # Phase 18: Living Wiki + Provider Expansion — Design Spec
 
 **Date:** 2026-06-02
-**Status:** Approved
+**Status:** Design approved; implementation pending
 **Scope:** Three layered sub-phases (18a → 18b → 18c), each independently testable with `check.sh` green after every sub-phase.
 
 ---
@@ -78,6 +78,8 @@ Each provider has a hardcoded default overridable via `ZURVAN_LLM_MODEL`:
 | openai | `gpt-4o` (unchanged) |
 | ollama | `llama3` (unchanged) |
 | anthropic | `claude-sonnet-4-6` |
+
+> **Future note:** OpenAI now recommends newer GPT-5.x models for complex reasoning/coding tasks. Review and update the OpenAI default model in a separate small PR after Phase 18 ships — do not change it during 18a to avoid scope creep.
 
 ### Files
 
@@ -309,6 +311,7 @@ Both formats produce a graceful empty state (`No results found.`) when search re
 - No new mandatory Python package dependencies introduced
 - All new CLI flags are shellable by Claude Code and Codex
 - Each sub-phase updates `CHANGELOG.md` and `AGENTS.md` with a `Raouf:` entry
+- After 18c completion, update `README.md` and `docs/workflows_and_plans.md` to mark Phase 18 complete
 - All stored paths are relative and Git-safe
 - `public_repo_guard.py` continues to pass
 
