@@ -16,7 +16,7 @@ def safe_extract(tar, path="."):
             raise Exception(f"Unsafe path in tar archive: {member.name}")
         if member_path.startswith("raw/") or member_path == "raw":
             raise Exception(f"Attempted to restore into protected raw/ directory: {member.name}")
-        tar.extract(member, path=path)
+        tar.extract(member, path=path, filter="data")
 
 def restore_snapshot(snapshot_name: str, force: bool = False):
     snapshot_path = SNAPSHOTS_DIR / snapshot_name
