@@ -158,6 +158,55 @@ Zurvan builds a local SQLite-backed knowledge graph directly from Markdown files
 2. **Configuration**: The predefined `.obsidian/` configuration automatically filters out noisy directories (like `data/` and `scripts/`).
 3. **Template Usage**: User can utilize provided YAML-compatible templates in `wiki/templates/` for creating uniform Claims, Decisions, Concepts, etc.
 4. **Execution**: The local graph perfectly mirrors the Obsidian knowledge graph without complex plugin dependencies.
+## Phase 18: Living Wiki + Provider Expansion ✅
+
+### 18a — LLM Provider Registry
+`scripts/llm.py` was refactored from an if/elif chain into a provider registry dict (`_PROVIDERS`). Mock is the default when `ZURVAN_LLM_PROVIDER` is unset. Anthropic/Claude is supported via raw `urllib` — no SDK. Per-provider model defaults live in `_PROVIDER_DEFAULTS`.
+
+```bash
+# Use Anthropic (requires ANTHROPIC_API_KEY)
+export ZURVAN_LLM_PROVIDER=anthropic
+python scripts/extract.py --source wiki/sources/example.md.md
+```
+
+### 18b — Compounding Wiki + --save
+1. `scripts/wiki_merge.py` is the canonical writer for concept and entity pages.
+2. `merge_extraction(data)` is called from `extract.py` instead of writing pages directly.
+3. Each call adds a `## Evidence from <source_id>` section — purely additive, idempotent.
+4. `wiki/log.md` entries now follow a grep-parseable format: `## [YYYY-MM-DD] kind | part1 | part2`.
+5. `zurvan context --save` and `zurvan search --save` file synthesis pages to `wiki/syntheses/`.
+
+```bash
+# File a synthesis page after a context query
+PYTHONPATH=. python scripts/cli.py context --topic "agent memory" --save
+
+# Grep the log for all ingest events
+grep "^## \[" wiki/log.md | grep "ingest"
+```
+
+### 18c — Image-Aware Skeleton + --format
+1. **Image files**: `ingest.py:ingest_image_stub()` creates `wiki/sources/<slug>.md` with `status: pending-visual` and records a JSON entry in `data/image_manifest.json`. No OCR or network calls.
+2. **Embedded refs**: `scan_for_embedded_images()` finds `![alt](url)` in Markdown/PDF text and logs them as `image-skip` events without fetching.
+3. **`--format table`**: renders context results as a Markdown pipe table (stdout only).
+4. **`--format marp`**: renders context results as a Marp slide deck (stdout only).
+5. `--save` always writes canonical Markdown to `wiki/syntheses/`, regardless of `--format`.
+
+```bash
+# Render as a table
+PYTHONPATH=. python scripts/cli.py context --topic "MCP security" --format table
+
+# Render as slides
+PYTHONPATH=. python scripts/cli.py context --topic "MCP security" --format marp
+
+# Save canonical Markdown but display as table
+PYTHONPATH=. python scripts/cli.py context --topic "MCP security" --save --format table
+```
+
+**Key scripts added/changed:**
+- `scripts/filename_utils.py` — shared `sanitize_filename()` used by extract.py and wiki_merge.py
+- `scripts/wiki_merge.py` — canonical merge writer + shared log formatter
+- `scripts/llm.py` — provider registry (mock/openai/ollama/anthropic)
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
