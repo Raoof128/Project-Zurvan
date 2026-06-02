@@ -2,6 +2,14 @@
 
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Add Apache 2.0 LICENSE
+- **Summary:** Added LICENSE file (Apache 2.0, copyright 2026 Mohammad Raouf Abedini). Added license badge to README.md.
+- **Files Changed:** `LICENSE`, `README.md`
+- **Verification:** `python scripts/public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
 - **Scope:** README — Full professional rewrite
 - **Summary:** Rewrote README.md from scratch as a polished, structured document. Added shields.io badges (Python 3.10+, 183 tests passing, Phase 18, Obsidian-compatible, MCP). Replaced flat Goals list with a capability table. Replaced inconsistent `python scripts/cli.py` calls with unified `zurvan` CLI. Removed duplicate multiproject code block that duplicated content under "Features by Phase". Added: LLM provider table, Obsidian 7-node-type colour table, architecture directory tree, feature history table (18 phases), full documentation index table. Sections reordered for logical flow: pitch → quick start → features → architecture → quality gate → history → docs → contributing.
 - **Files Changed:** `README.md`
