@@ -1,5 +1,19 @@
 ## Change Log
 
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full Documentation Audit — Phase 18 Sync
+- **Summary:** Audited all 60+ docs files. Updated the 6 stale files to reflect Phase 18 changes. Fixed a broken Markdown code block in README.md. Added Anthropic provider + ANTHROPIC_API_KEY to ENVIRONMENT.md. Expanded ARCHITECTURE.md with wiki/syntheses/, wiki/entities/, data/image_manifest.json, new scripts, and updated data-flow section. Added --save/--format CLI examples to API.md along with Evidence/Reports/Review Workbench command groups. Updated TESTING.md with accurate stage count (22) and test count (183). Added Phase 18 workflow section (18a/18b/18c) to workflows_and_plans.md.
+- **Files Changed:**
+  - `docs/ENVIRONMENT.md` — Added anthropic provider, ANTHROPIC_API_KEY, per-provider model defaults
+  - `docs/ARCHITECTURE.md` — New directories, new scripts, rewritten data-flow section
+  - `docs/API.md` — --save/--format flags, Evidence/Reports/Publication/Review CLI sections
+  - `docs/TESTING.md` — Stage count (22) and test count (183) updated
+  - `docs/workflows_and_plans.md` — Phase 18 workflow section added
+  - `README.md` — Broken code block fixed, --save/--format examples in Quick Start
+- **Verification:** `python scripts/public_repo_guard.py` passed. All 6 docs render clean Markdown. `git push` succeeded.
+- **Follow-ups:** None. Docs are now current through Phase 18.
+
 ### 2026-06-02 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 18: Living Wiki + Provider Expansion
