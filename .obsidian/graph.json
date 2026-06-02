@@ -7,13 +7,55 @@
   "showOrphans": true,
   "collapse-color-groups": true,
   "colorGroups": [
-    { "query": "path:wiki/decisions/", "color": { "a": 1, "rgb": 16744272 } },
-    { "query": "path:wiki/claims/", "color": { "a": 1, "rgb": 4678655 } },
-    { "query": "path:wiki/concepts/", "color": { "a": 1, "rgb": 10040063 } },
-    { "query": "path:wiki/sessions/", "color": { "a": 1, "rgb": 5025840 } },
-    { "query": "path:wiki/contradictions/", "color": { "a": 1, "rgb": 16728064 } },
-    { "query": "path:wiki/entities/", "color": { "a": 1, "rgb": 16769024 } },
-    { "query": "path:wiki/syntheses/", "color": { "a": 1, "rgb": 6737151 } }
+    {
+      "query": "path:wiki/decisions/",
+      "color": {
+        "a": 1,
+        "rgb": 16744272
+      }
+    },
+    {
+      "query": "path:wiki/claims/",
+      "color": {
+        "a": 1,
+        "rgb": 4678655
+      }
+    },
+    {
+      "query": "path:wiki/concepts/",
+      "color": {
+        "a": 1,
+        "rgb": 10040063
+      }
+    },
+    {
+      "query": "path:wiki/sessions/",
+      "color": {
+        "a": 1,
+        "rgb": 5025840
+      }
+    },
+    {
+      "query": "path:wiki/contradictions/",
+      "color": {
+        "a": 1,
+        "rgb": 16728064
+      }
+    },
+    {
+      "query": "path:wiki/entities/",
+      "color": {
+        "a": 1,
+        "rgb": 16769024
+      }
+    },
+    {
+      "query": "path:wiki/syntheses/",
+      "color": {
+        "a": 1,
+        "rgb": 6737151
+      }
+    }
   ],
   "collapse-display": true,
   "showArrow": true,
@@ -25,6 +67,6 @@
   "repelStrength": 10,
   "linkStrength": 1,
   "linkDistance": 250,
-  "scale": 0.011599441840144116,
+  "scale": 1.2210144807914332,
   "close": false
 }
