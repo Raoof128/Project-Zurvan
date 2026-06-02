@@ -49,6 +49,8 @@ def _parse_fm(content: str):
         return {}, content
     end = content.find("\n---\n", 4)
     if end == -1:
+        import warnings
+        warnings.warn("wiki_merge: page starts with --- but has no closing ---; treating as no frontmatter")
         return {}, content
     fm_text = content[4:end]
     body = content[end + 5:]
@@ -70,11 +72,22 @@ def _parse_sources(raw: str) -> List[str]:
 
 
 def _safe_write_page(path: str, content: str) -> None:
-    """Write page content. Falls back to direct write if safe_write rejects the path (e.g. in tests)."""
-    if not write_file_safely(path, content):
+    """Write page content via safe_write for relative paths (production).
+    For absolute paths (e.g. tmp_path in tests or ~/.zurvan/ dirs) that safe_write
+    rejects because they are outside the hardcoded project root, fall back to
+    direct write. Relative paths rejected by safe_write raise — that is a real
+    path-traversal violation, not a test isolation issue.
+    """
+    if write_file_safely(path, content):
+        return
+    if os.path.isabs(path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
+    else:
+        raise RuntimeError(
+            f"write_file_safely rejected relative path '{path}' — possible path traversal attempt."
+        )
 
 
 # ── Core merge logic ───────────────────────────────────────────────────────────
@@ -87,9 +100,8 @@ def _merge_page(
     source_id: str,
     extra_fm: dict = None,
 ) -> None:
-    os.makedirs(os.path.dirname(page_path), exist_ok=True)
-
     if not os.path.exists(page_path):
+        os.makedirs(os.path.dirname(page_path), exist_ok=True)
         fm = {
             "type": page_type,
             "sources": source_id,
