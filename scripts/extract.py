@@ -5,10 +5,7 @@ from scripts.llm import run_llm
 from scripts.validate_extraction import validate_extraction_json, is_safe_filename
 from scripts.ingest import extract_text # reuse extraction logic
 
-def sanitize_filename(name):
-    # Very basic sanitation
-    safe_name = "".join([c if c.isalnum() or c in ['-', '_'] else "_" for c in name])
-    return safe_name
+from scripts.filename_utils import sanitize_filename
 
 def extract_source(filepath):
     if not os.path.exists(filepath):
