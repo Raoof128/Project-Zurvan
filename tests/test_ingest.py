@@ -17,3 +17,17 @@ def test_extract_text_txt(tmp_path):
 def test_extract_text_unsupported():
     with pytest.raises(ValueError):
         extract_text("file.unknown")
+
+import re
+
+def test_append_log_uses_grep_parseable_format(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+
+    from scripts.wiki_merge import append_log_ingest
+    append_log_ingest("example.pdf")
+
+    log = (tmp_path / "wiki" / "log.md").read_text()
+    assert re.search(r"^## \[", log, re.MULTILINE)
+    assert "ingest" in log and "example.pdf" in log
