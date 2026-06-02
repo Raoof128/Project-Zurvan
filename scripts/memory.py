@@ -11,12 +11,13 @@ def append_to_log(action: str, details: str):
     entry = f"\n- **{timestamp}**: {action} - {details}"
     append_file_safely(log_path, entry)
 
-def sanitize_filename(name: str) -> str:
+def _make_note_slug(name: str) -> str:
+    """Lowercase hyphenated slug for note/decision filenames (different from wiki-page slugs)."""
     name = name.lower().replace(" ", "-")
     return re.sub(r'[^a-z0-9\-]', '', name)[:50]
 
 def add_decision(title: str, reason: str, status: str, tags: List[str]):
-    filename = f"{sanitize_filename(title)}.md"
+    filename = f"{_make_note_slug(title)}.md"
     filepath = os.path.join("wiki", "decisions", filename)
     
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
@@ -45,7 +46,7 @@ tags:
         return False
 
 def add_note(title: str, body: str, tags: List[str]):
-    filename = f"note-{sanitize_filename(title)}.md"
+    filename = f"note-{_make_note_slug(title)}.md"
     filepath = os.path.join("wiki", filename)
     
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
