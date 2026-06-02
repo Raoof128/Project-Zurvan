@@ -12,12 +12,42 @@ def extract_source(filepath):
         print(f"File not found: {filepath}")
         return
 
+    from scripts.ingest import is_image_file
+    if is_image_file(filepath):
+        print(f"Skipping LLM extraction for image file: {filepath}")
+        return
+
     basename = os.path.basename(filepath)
     source_id = sanitize_filename(os.path.splitext(basename)[0])
     
     # 1. Read the source Markdown/text
     source_text = extract_text(filepath)
-    
+
+    # Best-effort embedded image detection — never breaks ingestion
+    if filepath.lower().endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+            from scripts.ingest import log_embedded_image_refs
+            reader = PdfReader(filepath)
+            image_refs = []
+            for page in reader.pages:
+                if hasattr(page, "images") and page.images:
+                    for img in page.images:
+                        image_refs.append({"path": getattr(img, "name", "embedded"), "is_remote": False})
+            if image_refs:
+                log_embedded_image_refs(image_refs)
+        except Exception:
+            pass  # Best-effort: never break PDF text extraction
+
+    if filepath.lower().endswith((".md", ".txt")):
+        try:
+            from scripts.ingest import scan_for_embedded_images, log_embedded_image_refs
+            refs = scan_for_embedded_images(source_text)
+            if refs:
+                log_embedded_image_refs(refs)
+        except Exception:
+            pass
+
     # 2. Load scripts/prompts/extract_source.md
     prompt_path = os.path.join("scripts", "prompts", "extract_source.md")
     with open(prompt_path, "r", encoding="utf-8") as f:
