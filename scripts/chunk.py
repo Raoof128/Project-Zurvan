@@ -24,7 +24,7 @@ def extract_chunks_from_markdown(filepath: str):
         text = "\n".join(current_text).strip()
         if text:
             # Deterministic chunk ID
-            chunk_id_str = f"{filepath}::{current_heading}::{text[:50]}"
+            chunk_id_str = f"{filepath}::{current_heading}::{text}"
             chunk_id = hash_content(chunk_id_str)
             
             chunks.append({
