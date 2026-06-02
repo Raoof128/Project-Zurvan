@@ -4,6 +4,14 @@
 
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Add Apache 2.0 LICENSE
+- **Summary:** Added LICENSE file (Apache 2.0, copyright 2026 Mohammad Raouf Abedini). Added license badge to README.md.
+- **Files Changed:** `LICENSE`, `README.md`
+- **Verification:** `python scripts/public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
 - **Scope:** README — Full professional rewrite
 - **Summary:** Rewrote README.md from scratch. Added badges (Python, tests, phase, Obsidian, MCP). Replaced flat Goals list with a capability table. Unified CLI syntax to use `zurvan` command throughout. Removed duplicate multiproject code block that appeared under Features by Phase. Added LLM provider table, Obsidian node-type colour table, architecture directory tree, feature history table, and full documentation index table. Sections: What it does · Quick Start · LLM Providers · MCP Server · Obsidian · Agent Workflow · Multi-Project · Evidence/Reports · Snapshots · Architecture · Quality Gate · Feature History · Documentation · Contributing.
 - **Files Changed:** `README.md`

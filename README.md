@@ -6,6 +6,7 @@
 [![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen)](docs/TESTING.md)
 [![Phase](https://img.shields.io/badge/phase-18%20%E2%9C%85-blueviolet)](CHANGELOG.md)
 [![Obsidian](https://img.shields.io/badge/Obsidian-compatible-7c3aed?logo=obsidian&logoColor=white)](docs/obsidian/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](docs/mcp/)
 
 *Inspired by [Andrej Karpathy's gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).*
