@@ -66,6 +66,30 @@ def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> No
     append_log_save(slug)
 
 
+def _format_table(results: list) -> str:
+    if not results:
+        return "No results found.\n"
+    rows = ["| Source | Score | Excerpt |", "|---|---|---|"]
+    for r in results:
+        source = r["source_path"]
+        score = f"{r.get('hybrid_score', 0):.2f}"
+        excerpt = r["text"][:120].replace("\n", " ").replace("|", "\\|")
+        rows.append(f"| {source} | {score} | {excerpt} |")
+    return "\n".join(rows)
+
+
+def _format_marp(topic: str, results: list) -> str:
+    if not results:
+        return f"---\nmarp: true\n---\n\n# Context: {topic}\n\nNo results found.\n"
+    slides = ["---\nmarp: true\n---", f"\n# Context: {topic}\n"]
+    for r in results:
+        path = r["source_path"]
+        score = r.get("hybrid_score", 0)
+        excerpt = r["text"][:300].replace("\n", " ")
+        slides.append(f"\n---\n\n## {path} ({score:.2f})\n\n{excerpt}\n")
+    return "\n".join(slides)
+
+
 def search_memory(query: str, hybrid: bool = False, save: bool = False):
     """
     Search wiki and print list of matches.
@@ -143,6 +167,10 @@ def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: boo
     if save:
         _save_synthesis(topic, base_output, seed_paths)
 
+    if fmt == "table":
+        return _format_table(results)
+    elif fmt == "marp":
+        return _format_marp(topic, results)
     return base_output
 
 if __name__ == "__main__":
