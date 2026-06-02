@@ -41,6 +41,8 @@ def extract_node_data(path: str, content: str) -> Dict[str, str]:
         if 'claims/' in path: node_type = 'claim'
         elif 'concepts/' in path: node_type = 'concept'
         elif 'decisions/' in path: node_type = 'decision'
+        elif 'entities/' in path: node_type = 'entity'
+        elif 'syntheses/' in path: node_type = 'synthesis'
         elif 'summaries/' in path: node_type = 'summary'
         elif 'sources/' in path: node_type = 'source'
         elif path.startswith('docs/'): node_type = 'doc'

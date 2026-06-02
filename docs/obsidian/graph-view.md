@@ -12,6 +12,8 @@ To make the graph more readable:
 - `path:wiki/concepts/` ➔ Color: Purple (Concepts)
 - `path:wiki/sessions/` ➔ Color: Green (Sessions)
 - `path:wiki/contradictions/` ➔ Color: Red (Contradictions)
+- `path:wiki/entities/` ➔ Color: Gold (Entities — Phase 18)
+- `path:wiki/syntheses/` ➔ Color: Teal (Syntheses — Phase 18, written via `--save`)
 
 ### Display
 - **Arrows**: ✅ Enabled (Shows direction of the relationship)
