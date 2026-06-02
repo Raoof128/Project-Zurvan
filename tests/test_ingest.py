@@ -115,11 +115,12 @@ def test_image_stub_collision_frontmatter_uses_actual_filename(tmp_path, monkeyp
     ingest_image_stub(str(img))  # creates image_png.md
     ingest_image_stub(str(img))  # creates image_png-2.md
 
-    stubs = sorted((tmp_path / "wiki" / "sources").glob("image_png*.md"))
+    stubs = list((tmp_path / "wiki" / "sources").glob("image_png*.md"))
     assert len(stubs) == 2
-    # The second stub must reference image_png-2.md in its path, not image_png.md
-    content2 = stubs[1].read_text()
-    assert "image_png-2.md" in content2
+    # The collision stub (image_png-2.md) must have path: sources/image_png-2.md in frontmatter
+    collision_stub = next(s for s in stubs if s.name == "image_png-2.md")
+    content = collision_stub.read_text()
+    assert "path: sources/image_png-2.md" in content
 
 
 def test_image_stub_writes_manifest_json(tmp_path, monkeypatch):

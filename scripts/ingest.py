@@ -139,17 +139,11 @@ def ingest_image_stub(filepath: str) -> None:
     with open(candidate, "w", encoding="utf-8") as f:
         f.write(content)
 
-    # If this is a collision stub (not the base file), update the base file to reference this one.
-    # This ensures tools that inspect the base stub can discover all collision variants.
-    if candidate != base_candidate and os.path.exists(base_candidate):
-        with open(base_candidate, "a", encoding="utf-8") as f:
-            f.write(f"\n<!-- collision: {relative_path} -->\n")
-
     # Append to manifest JSON
     manifest_path = os.path.join("data", "image_manifest.json")
     os.makedirs("data", exist_ok=True)
     try:
-        with open(manifest_path) as fh:
+        with open(manifest_path, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (FileNotFoundError, json.JSONDecodeError):
         manifest = []
@@ -161,7 +155,7 @@ def ingest_image_stub(filepath: str) -> None:
         "reason": "image-skip",
         "ingested_at": datetime.datetime.now().isoformat(),
     })
-    with open(manifest_path, "w") as fh:
+    with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2)
 
     append_log_image_skip(basename)
