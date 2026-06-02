@@ -164,6 +164,7 @@ zurvan --project my-vault search "architecture"
 - Phase 15: Local Report Review Workbench
 - Phase 16: Review Workbench Hardening + UX Polish
 - Phase 17: Export & Publication Pack
+- **Phase 18 ✅** — Living Wiki + Provider Expansion (Anthropic provider, cross-source merge, --save, log format contract, image skeleton, --format table/marp)
 
 ```bash
 # Register a project

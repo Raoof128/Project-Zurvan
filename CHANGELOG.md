@@ -2,6 +2,34 @@
 
 ### 2026-06-02 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 18: Living Wiki + Provider Expansion
+- **Summary:** (18a) Refactored llm.py into a provider registry with mock as default when ZURVAN_LLM_PROVIDER is unset; added Anthropic/Claude via raw urllib with no SDK. (18b) Created wiki_merge.py as canonical concept/entity writer — pages now compound across sources via additive merge; migrates legacy source_id frontmatter; added --save to zurvan context and zurvan search to file answers into wiki/syntheses/ with microsecond-safe filenames; standardised log.md to grep-parseable ## [date] format with shared formatter. (18c) Complete image-aware skeleton: image files, embedded Markdown refs, remote URL logging, PDF best-effort detection — all produce pending-visual stubs with manifest JSON entry, no OCR or network. Added --format table/marp stdout rendering; --save always writes canonical Markdown.
+- **Files Changed:**
+  - `scripts/filename_utils.py` — New shared sanitize_filename()
+  - `scripts/llm.py` — Provider registry + Anthropic + mock default
+  - `scripts/wiki_merge.py` — Canonical merge writer + shared log formatter
+  - `scripts/extract.py` — Route concept/entity pages through merge_extraction(); image guard; embedded image scan
+  - `scripts/ingest.py` — New log format; image detection + manifest JSON; embedded image logging
+  - `scripts/context_export.py` — --save (context + search), --format table/marp
+  - `scripts/cli.py` — --save and --format flags wired
+  - `scripts/chunk.py` — Fix chunk_id collision (use full text not text[:50])
+  - `scripts/memory.py` — Rename local sanitize_filename to _make_note_slug to avoid confusion with shared utility
+  - `tests/test_filename_utils.py`, `tests/test_llm.py`, `tests/test_wiki_merge.py`, `tests/test_context_export.py`, `tests/test_ingest.py` — New/extended tests
+- **Verification:** pytest → 183 passed, 0 failed. check.sh passed after 18a, 18b, and 18c milestones.
+- **Follow-ups:** Review OpenAI model default (GPT-5.x). Phase 19+: image extraction via OCR/vision provider.
+
+### 2026-06-02 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase 18b — wiki_merge.py log formatter skeleton
+- **Summary:** TDD implementation of `scripts/wiki_merge.py` with the shared `append_log_event()` formatter and 5 wrapper functions (`append_log_ingest`, `append_log_merge`, `append_log_save`, `append_log_image_skip`). Log entries are grep-parseable (`## [YYYY-MM-DD] kind | parts`) and pipe characters inside parts are escaped as `\|`. Used direct file I/O rather than `append_file_safely` because `safe_write.is_safe_path` hardcodes the project root, which blocks writes to `tmp_path` in pytest fixtures.
+- **Files Changed:**
+  - `scripts/wiki_merge.py` — created: shared log formatter + 4 wrappers
+  - `tests/test_wiki_merge.py` — created: 6 log-format tests
+- **Verification:** `PYTHONPATH=. pytest tests/ -q` → 151 passed, 0 failed (was 145 before; +6 new).
+- **Follow-ups:** Phase 18c will add merge logic (slug resolution, source dedup, wiki page writing) to `wiki_merge.py`.
+
+### 2026-06-02 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Full Project Audit — Test Fix + Deprecation Cleanup
 - **Summary:** Ran a full codebase audit. Found and fixed 1 hard test failure and 7 Starlette deprecation warnings, plus 1 tarfile deprecation warning. The test failure was a time-bomb: `test_find_stale_decisions` used a hardcoded `created_at` date of `"2026-05-01T12:00:00"` for a `pending` decision (d2), which passed the `age > 30 days` stale check as of 2026-06-02. Fixed by making d2's date dynamic (5 days ago). Starlette 0.50+ changed `TemplateResponse` signature from `(name, context_with_request)` to `(request, name, context)` — updated all 10 call sites in `review_routes.py`. Added `filter="data"` to `tar.extract()` in `restore_snapshot.py` for Python 3.14 compatibility.
 - **Files Changed:**
