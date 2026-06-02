@@ -48,8 +48,18 @@ zurvan search "local-first architecture"
 # Hybrid Search (Keyword + semantic embeddings)
 zurvan search "local-first architecture" --hybrid
 
+# Save search results as a wiki synthesis page
+zurvan search "local-first architecture" --hybrid --save
+
 # Export expanded graph-assisted context bundle
 zurvan context --topic "project roadmap" --hybrid --graph --limit 10
+
+# Save context as a wiki synthesis page
+zurvan context --topic "project roadmap" --save
+
+# Render as Markdown table or Marp slides (stdout only)
+zurvan context --topic "project roadmap" --format table
+zurvan context --topic "project roadmap" --format marp
 ```
 
 ### 3. MCP Server (Agent Memory Integration)
@@ -186,6 +196,7 @@ zurvan project decision-memory rebuild
 
 ### Privacy Guarantee
 
+```bash
 # Check federation health
 zurvan project federation doctor
 ```
