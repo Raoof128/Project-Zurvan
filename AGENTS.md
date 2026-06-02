@@ -4,6 +4,14 @@
 
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
+- **Scope:** README — Full professional rewrite
+- **Summary:** Rewrote README.md from scratch. Added badges (Python, tests, phase, Obsidian, MCP). Replaced flat Goals list with a capability table. Unified CLI syntax to use `zurvan` command throughout. Removed duplicate multiproject code block that appeared under Features by Phase. Added LLM provider table, Obsidian node-type colour table, architecture directory tree, feature history table, and full documentation index table. Sections: What it does · Quick Start · LLM Providers · MCP Server · Obsidian · Agent Workflow · Multi-Project · Evidence/Reports · Snapshots · Architecture · Quality Gate · Feature History · Documentation · Contributing.
+- **Files Changed:** `README.md`
+- **Verification:** `python scripts/public_repo_guard.py` passed.
+- **Follow-ups:** Add LICENSE file (no license currently present).
+
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Full Documentation Audit — Phase 18 Sync
 - **Summary:** All six stale docs updated to match Phase 18 implementation. ENVIRONMENT.md now lists anthropic as a valid ZURVAN_LLM_PROVIDER option with ANTHROPIC_API_KEY. ARCHITECTURE.md accurately describes wiki/syntheses/, wiki/entities/, data/image_manifest.json, wiki_merge.py, filename_utils.py, and the image/compounding/synthesis data flows. API.md documents --save and --format flags and post-Phase-12 CLI command groups. TESTING.md stage/test counts corrected. workflows_and_plans.md has Phase 18 section. README.md broken code block fixed.
 - **Files Changed:** `docs/ENVIRONMENT.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
