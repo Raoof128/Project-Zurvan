@@ -39,6 +39,7 @@ Allows multiple Zurvan projects to be managed independently on the same machine 
 - Phase 15: Local Report UI / Review Workbench [COMPLETED]
 - Phase 16: Review Workbench Hardening + UX Polish [COMPLETED]
 - Phase 17: Export & Publication Pack [COMPLETED]
+- **Phase 18 ✅** — Living Wiki + Provider Expansion (Anthropic provider, cross-source merge, --save, log format contract, image skeleton, --format table/marp)
 - Detect "Project A says X, Project B says not-X" assumptions.
 
 **Key Scripts**:
