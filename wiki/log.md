@@ -713,3 +713,16 @@
 **Session Closed**: Phase 7 smoke test
 - **Summary**: Phase 7 workflow smoke test passed.
 - **Checks Run**: `pytest tests/ && bash scripts/check.sh`
+
+- **2026-06-03T09:11:45.065182**: Note Added - Zurvan Project Overview
+- **2026-06-03T09:11:52.017128**: Note Added - Zurvan Architecture Principles
+- **2026-06-03T09:12:00.946221**: Note Added - Zurvan Data Flow Pipeline
+- **2026-06-03T09:12:18.471110**: Note Added - Zurvan Key Scripts Reference
+- **2026-06-03T09:12:30.987207**: Note Added - Zurvan CLI Commands Reference
+- **2026-06-03T09:12:41.362354**: Note Added - Zurvan Phase 18 Complete — Current State as of 2026-06-03
+- **2026-06-03T09:12:53.176459**: Note Added - Zurvan Security Model
+- **2026-06-03T09:13:02.184209**: Note Added - Zurvan MCP Server Integration
+- **2026-06-03T09:13:13.043840**: Note Added - Zurvan Testing Infrastructure
+- **2026-06-03T09:13:21.232138**: Note Added - Zurvan LLM Provider Registry
+- **2026-06-03T09:13:30.921189**: Note Added - Zurvan Multi-Project Workspace and Federation
+- **2026-06-03T09:16:27.680805**: Decision Added - MCP write mode stays disabled by default
