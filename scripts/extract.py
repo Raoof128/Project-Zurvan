@@ -75,25 +75,9 @@ def extract_source(filepath):
                 for ev in claim["evidence"]:
                     f.write(f"> \"{ev['quote']}\"\n\nLocation: {ev.get('location', 'Unknown')}\nSource: [[sources/{basename}]]\n\n")
 
-    # Concepts
-    concepts_dir = os.path.join("wiki", "concepts")
-    os.makedirs(concepts_dir, exist_ok=True)
-    for concept in data.get("concepts", []):
-        cname = sanitize_filename(concept["name"])
-        concept_file = os.path.join(concepts_dir, f"{cname}.md")
-        if is_safe_filename(concept_file):
-            with open(concept_file, "w", encoding="utf-8") as f:
-                f.write(f"---\ntype: concept\nsource_id: {source_id}\n---\n\n# {concept['name']}\n\n## Definition\n{concept['definition']}\n")
-
-    # Entities
-    entities_dir = os.path.join("wiki", "entities")
-    os.makedirs(entities_dir, exist_ok=True)
-    for ent in data.get("entities", []):
-        ename = sanitize_filename(ent["name"])
-        ent_file = os.path.join(entities_dir, f"{ename}.md")
-        if is_safe_filename(ent_file):
-            with open(ent_file, "w", encoding="utf-8") as f:
-                f.write(f"---\ntype: entity\nentity_type: {ent.get('entity_type', 'other')}\nsource_id: {source_id}\n---\n\n# {ent['name']}\n\n{ent['description']}\n")
+    # Concepts and Entities: canonical writer is wiki_merge (compounding wiki)
+    from scripts.wiki_merge import merge_extraction
+    merge_extraction(data)
                 
     # Open questions (append to list)
     if data.get("open_questions"):

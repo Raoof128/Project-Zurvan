@@ -67,11 +67,8 @@ def create_stub_concept_and_claim(basename):
         f.write(f"---\ntitle: Claim-{basename}\n---\n# Claim-{basename}\n\nEvidence missing? No, cited from [{basename}](../sources/{basename}.md)")
 
 def append_log(filename):
-    log_path = os.path.join("wiki", "log.md")
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = f"\n- **{timestamp}**: Ingested `{filename}`\n"
-    with open(log_path, 'a', encoding='utf-8') as f:
-        f.write(entry)
+    from scripts.wiki_merge import append_log_ingest
+    append_log_ingest(filename)
 
 def update_index(filename):
     # Basic index update, rebuild_index.py handles more comprehensive rebuilds
