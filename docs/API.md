@@ -15,11 +15,23 @@ python scripts/cli.py search "architecture"
 # Hybrid Search (Keyword + Semantic)
 python scripts/cli.py search "architecture" --hybrid
 
+# Save search results as a synthesis page (wiki/syntheses/)
+python scripts/cli.py search "architecture" --hybrid --save
+
 # Context Bundle Export
 python scripts/cli.py context --topic "vector search" --limit 10
 
 # Graph-Assisted Context Bundle
 python scripts/cli.py context --topic "vector search" --hybrid --graph
+
+# Save context as a synthesis page
+python scripts/cli.py context --topic "vector search" --save
+
+# Render context as a Markdown table (stdout only)
+python scripts/cli.py context --topic "vector search" --format table
+
+# Render context as a Marp slide deck (stdout only)
+python scripts/cli.py context --topic "vector search" --format marp
 ```
 
 ### Writing Memory
@@ -29,6 +41,42 @@ python scripts/cli.py decision add --title "Use SQLite" --reason "Simple and loc
 
 # Add a claim
 python scripts/cli.py claim add --text "SQLite is fast" --source "docs/architecture.md" --evidence "SQLite is fast" --confidence high
+```
+
+### Evidence, Reports & Publication
+```bash
+# Build an evidence pack (stored in ~/.zurvan/evidence/)
+python scripts/cli.py evidence build --topic "search architecture" --hybrid --graph
+
+# List and inspect packs
+python scripts/cli.py evidence list
+python scripts/cli.py evidence inspect <pack-id>
+
+# Export a pack
+python scripts/cli.py evidence export <pack-id> --format markdown
+
+# Compose a report from a pack
+python scripts/cli.py report compose --pack <pack-id> --template evidence_digest
+
+# Validate and export a report
+python scripts/cli.py report validate <report-id>
+python scripts/cli.py report export <report-id> --format markdown
+
+# Publish a report bundle
+python scripts/cli.py publish export <report-id>
+python scripts/cli.py publish bundle <report-id>
+```
+
+### Review Workbench
+```bash
+# Launch local review UI (http://127.0.0.1:8768)
+python scripts/cli.py review serve
+
+# Audit citations and detect unsafe content
+python scripts/cli.py review audit
+
+# Rebuild review index
+python scripts/cli.py review index rebuild
 ```
 
 ## 2. MCP Server (`scripts/mcp_server.py`)

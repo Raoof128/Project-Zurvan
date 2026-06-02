@@ -16,9 +16,10 @@ Controls which provider Zurvan uses for extracting concepts, claims, and entitie
 
 | Variable | Options / Example | Description |
 |---|---|---|
-| `ZURVAN_LLM_PROVIDER` | `mock`, `openai`, `ollama` | The provider engine to use. `mock` is the default and is safe for testing without incurring costs. |
-| `ZURVAN_LLM_MODEL` | `mock`, `gpt-4.5-preview`, `qwen2.5:7b` | The specific model identifier for the chosen provider. |
+| `ZURVAN_LLM_PROVIDER` | `mock`, `openai`, `ollama`, `anthropic` | The provider engine to use. `mock` is the default — no API calls, safe for all testing. |
+| `ZURVAN_LLM_MODEL` | `mock`, `gpt-4o`, `qwen2.5:7b`, `claude-sonnet-4-6` | The specific model identifier for the chosen provider. Defaults per provider: mock→`mock`, openai→`gpt-4o`, ollama→`llama3`, anthropic→`claude-sonnet-4-6`. |
 | `OPENAI_API_KEY` | `sk-...` | Required if `ZURVAN_LLM_PROVIDER=openai`. |
+| `ANTHROPIC_API_KEY` | `sk-ant-...` | Required if `ZURVAN_LLM_PROVIDER=anthropic`. Uses raw HTTPS — no Anthropic SDK needed. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | (Optional) Override the default Ollama server URL. |
 
 ## Embeddings
@@ -43,9 +44,15 @@ These variables strictly control what an external agent (like Claude Code) can d
 ## Example `.env` or `.bashrc` config
 
 ```bash
+# Local-only (no API keys required)
 export PYTHONPATH=.
 export ZURVAN_LLM_PROVIDER=ollama
 export ZURVAN_LLM_MODEL=qwen2.5:7b
 export ZURVAN_EMBED_PROVIDER=sentence_transformers
 export ZURVAN_EMBED_MODEL=all-MiniLM-L6-v2
+
+# Cloud provider (Anthropic)
+export ZURVAN_LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+# ZURVAN_LLM_MODEL defaults to claude-sonnet-4-6 when provider=anthropic
 ```
