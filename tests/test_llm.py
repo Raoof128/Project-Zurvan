@@ -122,3 +122,35 @@ def test_zurvan_llm_model_overrides_anthropic_default(monkeypatch):
         from scripts.llm import run_llm
         run_llm("test")
     assert captured["body"]["model"] == "claude-opus-4-8"
+
+def test_anthropic_zero_text_blocks_raises_runtime_error(monkeypatch):
+    monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    def fake_urlopen(req):
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        # Only tool_use block, no text block
+        mock_resp.read.return_value = json.dumps({
+            "content": [{"type": "tool_use", "id": "x"}]
+        }).encode()
+        return mock_resp
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        with pytest.raises(RuntimeError, match="no text content"):
+            run_llm("test")
+
+def test_anthropic_http_error_raises_runtime_error(monkeypatch):
+    from urllib.error import HTTPError
+    monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    def fake_urlopen(req):
+        raise HTTPError(req.full_url, 529, "Overloaded", {}, None)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        with pytest.raises(RuntimeError, match="529"):
+            run_llm("test")

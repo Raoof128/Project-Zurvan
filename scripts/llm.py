@@ -62,6 +62,9 @@ def _call_ollama(prompt: str, model: str, temperature: float) -> str:
 
 
 def _call_anthropic(prompt: str, model: str, temperature: float) -> str:
+    # temperature is accepted for API consistency but intentionally not sent —
+    # Anthropic Messages API defaults to 1.0; callers needing a specific temperature
+    # should use the openai or ollama provider instead.
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError(
@@ -85,11 +88,16 @@ def _call_anthropic(prompt: str, model: str, temperature: float) -> str:
     try:
         with urllib.request.urlopen(req) as response:
             result = json.loads(response.read().decode("utf-8"))
-            return "".join(
+            texts = [
                 block["text"]
                 for block in result.get("content", [])
                 if block.get("type") == "text"
-            )
+            ]
+            if not texts:
+                raise RuntimeError(
+                    f"Anthropic returned no text content. Full response: {result}"
+                )
+            return "".join(texts)
     except HTTPError as e:
         raise RuntimeError(f"Anthropic API error: {e.code} {e.reason}")
     except URLError as e:
