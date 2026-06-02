@@ -726,3 +726,528 @@
 - **2026-06-03T09:13:21.232138**: Note Added - Zurvan LLM Provider Registry
 - **2026-06-03T09:13:30.921189**: Note Added - Zurvan Multi-Project Workspace and Federation
 - **2026-06-03T09:16:27.680805**: Decision Added - MCP write mode stays disabled by default
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | invisible-window-paper.md.md
+
+## [2026-06-03] ingest | invisible-window-references.md.md
+
+## [2026-06-03] ingest | anthropic-grant-pitch.md.md
+
+## [2026-06-03] ingest | emails-to-anthropic.md.md
+
+## [2026-06-03] ingest | applications-ready-to-send.md.md
+
+## [2026-06-03] ingest | ARXIV-SUBMISSION-GUIDE.md.md
+
+## [2026-06-03] ingest | RESULTS.md.md
+
+## [2026-06-03] ingest | ANALYSIS.md.md
+
+## [2026-06-03] ingest | RESULTS.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | CONTRIBUTING.md.md
+
+## [2026-06-03] ingest | SECURITY.md.md
+
+## [2026-06-03] ingest | NSWindow.sharingType = .none hides visible windows from ScreenCaptureKit_WebRTC capture - My Reports - Apple Security Research.pdf.md
+
+## [2026-06-03] ingest | MIcrosoft- RE_ 111448 CRM_0034000320.pdf.md
+
+## [2026-06-03] ingest | main.pdf.md
+
+## [2026-06-03] ingest | pull_request_template.md.md
+
+## [2026-06-03] ingest | swift-daemon-lifecycle.txt.md
+
+## [2026-06-03] ingest | daemon-doctor.txt.md
+
+## [2026-06-03] ingest | daemon-doctor.txt.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | DECISIONS.md.md
+
+## [2026-06-03] ingest | DEMO_SCRIPT.md.md
+
+## [2026-06-03] ingest | DEVICE_SHIELD_CONTRACT.md.md
+
+## [2026-06-03] ingest | DEVICE_SHIELD_PLATFORM_MATRIX.md.md
+
+## [2026-06-03] ingest | DISCLAIMER.md.md
+
+## [2026-06-03] ingest | ETHICS.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | LIMITATIONS.md.md
+
+## [2026-06-03] ingest | PAPER_ACCURACY_AUDIT.md.md
+
+## [2026-06-03] ingest | RESEARCH_PROGRAMME.md.md
+
+## [2026-06-03] ingest | DATA_MANAGEMENT_PLAN.md.md
+
+## [2026-06-03] ingest | check-sh.txt.md
+
+## [2026-06-03] ingest | npm-audit.txt.md
+
+## [2026-06-03] ingest | npm-test.txt.md
+
+## [2026-06-03] ingest | privacy-audit.txt.md
+
+## [2026-06-03] ingest | security-audit-voting-pilot.txt.md
+
+## [2026-06-03] ingest | smoke-voting-pilot.txt.md
+
+## [2026-06-03] ingest | EXPERIMENT_MATRIX.md.md
+
+## [2026-06-03] ingest | NON_CLAIMS.md.md
+
+## [2026-06-03] ingest | PARTICIPANT_INFORMATION_AND_CONSENT.md.md
+
+## [2026-06-03] ingest | PHASE_A_CLOSEOUT.md.md
+
+## [2026-06-03] ingest | VOTING_PILOT_PROTOCOL.md.md
+
+## [2026-06-03] ingest | RESOURCE_PLAN.md.md
+
+## [2026-06-03] ingest | REVIEWER_CHECKLIST.md.md
+
+## [2026-06-03] ingest | RISK_REGISTER.md.md
+
+## [2026-06-03] ingest | STAGE_1_5_REVIEWER_PACK.md.md
+
+## [2026-06-03] ingest | STAGE_1_ACADEMIC_SHIELD.md.md
+
+## [2026-06-03] ingest | STAGE_2_3_MACOS_LOCALHOST_DAEMON.md.md
+
+## [2026-06-03] ingest | STAGE_2_5_CLOSEOUT_SECURITY_AUDIT.md.md
+
+## [2026-06-03] ingest | STAGE_2_5_MACOS_AFFINITY_SCANNER.md.md
+
+## [2026-06-03] ingest | STAGE_2_5_TECHNICAL_BRIEF.md.md
+
+## [2026-06-03] ingest | STAGE_2_6_WINDOWS_DISPLAY_AFFINITY_SCANNER.md.md
+
+## [2026-06-03] ingest | STAGE_2_7_CROSS_PLATFORM_DEVICE_SHIELD.md.md
+
+## [2026-06-03] ingest | STAGE_2_7_REVIEWER_CHECKLIST.md.md
+
+## [2026-06-03] ingest | STAGE_2_8_LINUX_CLOSEOUT.md.md
+
+## [2026-06-03] ingest | STAGE_2_8_LINUX_REVIEWER_CHECKLIST.md.md
+
+## [2026-06-03] ingest | STAGE_2_8_LINUX_TECHNICAL_BRIEF.md.md
+
+## [2026-06-03] ingest | STAGE_2_8_LINUX_VALIDATION_MATRIX.md.md
+
+## [2026-06-03] ingest | STAGE_2_ARCHITECTURE.md.md
+
+## [2026-06-03] ingest | STAGE_2_WINDOWS_DEVICE_SHIELD_CLOSEOUT.md.md
+
+## [2026-06-03] ingest | STAGE_2_WINDOWS_REVIEWER_CHECKLIST.md.md
+
+## [2026-06-03] ingest | STAGE_2_WINDOWS_TECHNICAL_BRIEF.md.md
+
+## [2026-06-03] ingest | STAGE_2_WINDOWS_VALIDATION_MATRIX.md.md
+
+## [2026-06-03] ingest | 2026-05-13-simurgh-academic-shield.md.md
+
+## [2026-06-03] ingest | 2026-05-14-stage-2-1-macos-integrity-proof.md.md
+
+## [2026-06-03] ingest | 2026-05-14-stage-2-2-macos-node-pairing.md.md
+
+## [2026-06-03] ingest | 2026-05-16-stage-2-2-2-3-e2e-smoke-pack.md.md
+
+## [2026-06-03] ingest | 2026-05-16-stage-2-4-2-5-e2e-smoke-pack.md.md
+
+## [2026-06-03] ingest | 2026-05-16-stage-2-6-windows-display-affinity-scanner.md.md
+
+## [2026-06-03] ingest | 2026-05-17-stage-2-7-cross-platform-device-shield.md.md
+
+## [2026-06-03] ingest | 2026-05-17-stage-2-8a-linux-foundation.md.md
+
+## [2026-06-03] ingest | 2026-05-17-stage-2-8b-linux-x11-scanner.md.md
+
+## [2026-06-03] ingest | 2026-05-18-stage-2-8cd-linux-wayland-systemd-ci.md.md
+
+## [2026-06-03] ingest | 2026-05-28-voting-pilot.md.md
+
+## [2026-06-03] ingest | 2026-05-13-simurgh-academic-shield-design.md.md
+
+## [2026-06-03] ingest | 2026-05-14-stage-2-1-macos-integrity-proof-design.md.md
+
+## [2026-06-03] ingest | 2026-05-14-stage-2-2-macos-node-pairing-design.md.md
+
+## [2026-06-03] ingest | 2026-05-17-stage-2-7-cross-platform-device-shield-design.md.md
+
+## [2026-06-03] ingest | 2026-05-17-stage-2-8-linux-display-integrity-design.md.md
+
+## [2026-06-03] ingest | 2026-05-21-simurgh-paper-design.md.md
+
+## [2026-06-03] ingest | 2026-05-28-voting-pilot-design.md.md
+
+## [2026-06-03] ingest | THREAT_MODEL.md.md
+
+## [2026-06-03] ingest | VALIDATION.md.md
+
+## [2026-06-03] ingest | figure1_architecture.md.md
+
+## [2026-06-03] ingest | figure2_proof_sequence.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | table1_privacy_boundary.md.md
+
+## [2026-06-03] ingest | table2_validation_summary.md.md
+
+## [2026-06-03] ingest | table3_platform_matrix.md.md
+
+## [2026-06-03] ingest | claims.md.md
+
+## [2026-06-03] ingest | concepts.md.md
+
+## [2026-06-03] ingest | experiments.md.md
+
+## [2026-06-03] ingest | problem.md.md
+
+## [2026-06-03] ingest | related_work.md.md
+
+## [2026-06-03] ingest | algorithm.md.md
+
+## [2026-06-03] ingest | architecture.md.md
+
+## [2026-06-03] ingest | constraints.md.md
+
+## [2026-06-03] ingest | heuristics.md.md
+
+## [2026-06-03] ingest | PAPER.md.md
+
+## [2026-06-03] ingest | model.md.md
+
+## [2026-06-03] ingest | training.md.md
+
+## [2026-06-03] ingest | environment.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | REPRODUCE_LINUX_CI.md.md
+
+## [2026-06-03] ingest | REPRODUCE_PRIVACY_AUDIT.md.md
+
+## [2026-06-03] ingest | REPRODUCE_WINDOWS.md.md
+
+## [2026-06-03] ingest | main.pdf.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | PRIVACY.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | ROADMAP.md.md
+
+## [2026-06-03] ingest | SECURITY.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | bug_report.md.md
+
+## [2026-06-03] ingest | feature_request.md.md
+
+## [2026-06-03] ingest | PULL_REQUEST_TEMPLATE.md.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | CODE_OF_CONDUCT.md.md
+
+## [2026-06-03] ingest | CONTRIBUTING.md.md
+
+## [2026-06-03] ingest | API.md.md
+
+## [2026-06-03] ingest | ARCHITECTURE.md.md
+
+## [2026-06-03] ingest | DEPLOYMENT.md.md
+
+## [2026-06-03] ingest | ENVIRONMENT.md.md
+
+## [2026-06-03] ingest | SETUP.md.md
+
+## [2026-06-03] ingest | 2026-04-02-aion-mvp.md.md
+
+## [2026-06-03] ingest | 2026-05-25-streak-system.md.md
+
+## [2026-06-03] ingest | 2026-05-26-reference-resolver.md.md
+
+## [2026-06-03] ingest | 2026-05-26-research-scaffold.md.md
+
+## [2026-06-03] ingest | 2026-04-02-aion-mvp-design.md.md
+
+## [2026-06-03] ingest | 2026-05-25-streak-system-design.md.md
+
+## [2026-06-03] ingest | 2026-05-26-research-scaffold-design.md.md
+
+## [2026-06-03] ingest | TESTING.md.md
+
+## [2026-06-03] ingest | TROUBLESHOOTING.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | annotation_guidelines.md.md
+
+## [2026-06-03] ingest | thematic_annotation_notes.md.md
+
+## [2026-06-03] ingest | reference-resolution.md.md
+
+## [2026-06-03] ingest | reviewer_packet_BLIND.md.md
+
+## [2026-06-03] ingest | judge_prompt_citation_support.md.md
+
+## [2026-06-03] ingest | judge_prompt_false_premise.md.md
+
+## [2026-06-03] ingest | abstract.md.md
+
+## [2026-06-03] ingest | conclusion.md.md
+
+## [2026-06-03] ingest | discussion.md.md
+
+## [2026-06-03] ingest | experiments.md.md
+
+## [2026-06-03] ingest | introduction.md.md
+
+## [2026-06-03] ingest | acl_latex.pdf.md
+
+## [2026-06-03] ingest | anthology.bib.txt.md
+
+## [2026-06-03] ingest | formatting.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | limitations.md.md
+
+## [2026-06-03] ingest | method.md.md
+
+## [2026-06-03] ingest | related_work.md.md
+
+## [2026-06-03] ingest | results.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | phase3_citation_faithfulness_gold40_v03_failures.md.md
+
+## [2026-06-03] ingest | phase3_citation_faithfulness_gold40_v03_summary.md.md
+
+## [2026-06-03] ingest | phase4_multijudge_validation_summary.md.md
+
+## [2026-06-03] ingest | v1_hybrid_ref_gold40_failures.md.md
+
+## [2026-06-03] ingest | v1_hybrid_ref_gold40_summary.md.md
+
+## [2026-06-03] ingest | v2_chapter_ref_gold40_v02_failures.md.md
+
+## [2026-06-03] ingest | v2_chapter_ref_gold40_v02_summary.md.md
+
+## [2026-06-03] ingest | v3_direct_chapter_gold40_v02_failures.md.md
+
+## [2026-06-03] ingest | v3_direct_chapter_gold40_v02_summary.md.md
+
+## [2026-06-03] ingest | v3_phase3_gold40_v03_judged_summary.md.md
+
+## [2026-06-03] ingest | SECURITY.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | AGENTS.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | CLAUDE.md.md
+
+## [2026-06-03] ingest | CODE_OF_CONDUCT.md.md
+
+## [2026-06-03] ingest | CONTRIBUTING.md.md
+
+## [2026-06-03] ingest | api-reference.md.md
+
+## [2026-06-03] ingest | architecture.md.md
+
+## [2026-06-03] ingest | design-guidelines.md.md
+
+## [2026-06-03] ingest | operations.md.md
+
+## [2026-06-03] ingest | 2026-03-15-auth-sliding-panels-design.md.md
+
+## [2026-06-03] ingest | 2026-03-15-unified-media-model-design.md.md
+
+## [2026-06-03] ingest | 2026-03-17-bidirectional-status-controls-design.md.md
+
+## [2026-06-03] ingest | 2026-03-17-bidirectional-status-controls.md.md
+
+## [2026-06-03] ingest | 2026-03-17-supabase-realtime-design.md.md
+
+## [2026-06-03] ingest | 2026-03-17-supabase-realtime.md.md
+
+## [2026-06-03] ingest | 2026-04-10-unified-inbox.md.md
+
+## [2026-06-03] ingest | 2026-04-12-cyberpunk2077-palette.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase1.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase2.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase3a.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase3b.md.md
+
+## [2026-06-03] ingest | 2026-06-01-aion-integration.md.md
+
+## [2026-06-03] ingest | 2026-04-10-unified-inbox-design.md.md
+
+## [2026-06-03] ingest | 2026-04-12-cyberpunk2077-palette-design.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase1-design.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase2-design.md.md
+
+## [2026-06-03] ingest | 2026-04-16-browser-os-phase3a-design.md.md
+
+## [2026-06-03] ingest | 2026-06-01-aion-integration-design.md.md
+
+## [2026-06-03] ingest | usage-examples.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | SECURITY.md.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | CODE_OF_CONDUCT.md.md
+
+## [2026-06-03] ingest | CONTRIBUTING.md.md
+
+## [2026-06-03] ingest | PROJECT_REPORT.md.md
+
+## [2026-06-03] ingest | ARCHITECTURE.md.md
+
+## [2026-06-03] ingest | endpoint_inventory.md.md
+
+## [2026-06-03] ingest | entity_inventory.md.md
+
+## [2026-06-03] ingest | env_inventory.md.md
+
+## [2026-06-03] ingest | key_inventory.md.md
+
+## [2026-06-03] ingest | map_inventory.md.md
+
+## [2026-06-03] ingest | notification_matrix.md.md
+
+## [2026-06-03] ingest | route_matrix.md.md
+
+## [2026-06-03] ingest | SECURITY_POSTURE.md.md
+
+## [2026-06-03] ingest | 2026-05-18-auth-favorites-implementation.md.md
+
+## [2026-06-03] ingest | 2026-05-18-auth-favorites-design.md.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | CODE_OF_CONDUCT.md.md
+
+## [2026-06-03] ingest | CONTRIBUTING.md.md
+
+## [2026-06-03] ingest | API_REFERENCE.md.md
+
+## [2026-06-03] ingest | ARCHITECTURE.md.md
+
+## [2026-06-03] ingest | ECRSM_README.md.md
+
+## [2026-06-03] ingest | GITSWITCH_README.md.md
+
+## [2026-06-03] ingest | MEHR_GUARD_README.md.md
+
+## [2026-06-03] ingest | 2026-03-21-cyberpunk-hud-redesign.md.md
+
+## [2026-06-03] ingest | security.txt.md
+
+## [2026-06-03] ingest | Invisible_Window_Research_Preprint_V2.0.pdf.md
+
+## [2026-06-03] ingest | llms.txt.md
+
+## [2026-06-03] ingest | pgp-key.txt.md
+
+## [2026-06-03] ingest | Project_Simurgh_Preprint_v1.0.pdf.md
+
+## [2026-06-03] ingest | security.txt.md
+
+## [2026-06-03] ingest | README.md.md
+
+## [2026-06-03] ingest | SECURITY.md.md
+
+## [2026-06-03] ingest | Invoice_INV-2026-002_ChrisTaya_April2026.pdf.md
+
+## [2026-06-03] ingest | AGENT.md.md
+
+## [2026-06-03] ingest | AGENTS.md.md
+
+## [2026-06-03] ingest | CHANGELOG.md.md
+
+## [2026-06-03] ingest | CLAUDE.md.md
+
+## [2026-06-03] ingest | 311_9_Gay_St_2.txt.md
+
+## [2026-06-03] ingest | missing_hashes.txt.md
+
+## [2026-06-03] ingest | CUTOVER_RUNBOOK.md.md
+
+## [2026-06-03] ingest | 2026-03-25-wordpress-migration-design.md.md
+
+## [2026-06-03] ingest | 2026-03-25-wordpress-migration-plan.md.md
+
+## [2026-06-03] ingest | 2026-03-31-quiz-assessment-tracking-design.md.md
+
+## [2026-06-03] ingest | 2026-03-31-quiz-assessment-tracking-plan.md.md
+
+## [2026-06-03] ingest | 2026-04-02-suspend-old-students-design.md.md
+
+## [2026-06-03] ingest | 2026-04-02-suspend-old-students-plan.md.md
+
+## [2026-06-03] ingest | grade_error_incident_report_20260219.md.md
+
+## [2026-06-03] ingest | shane_fletcher_BSB50820_status_20260218.md.md
+
+## [2026-06-03] ingest | MASTER_Assessments_Tracking_Readme.md.md
