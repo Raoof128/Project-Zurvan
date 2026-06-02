@@ -273,7 +273,8 @@ def main():
     search_parser = subparsers.add_parser("search", help="Search memory")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--hybrid", action="store_true", help="Use hybrid search")
-    
+    search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
+
     # zurvan context
     context_parser = subparsers.add_parser("context", help="Export context bundle")
     context_parser.add_argument("--topic", required=True)
@@ -281,7 +282,15 @@ def main():
     context_parser.add_argument("--hybrid", action="store_true", help="Use hybrid search")
     context_parser.add_argument("--graph", action="store_true", help="Expand graph neighbours")
     context_parser.add_argument("--depth", type=int, default=1, help="Graph expansion depth")
-    
+    context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
+    context_parser.add_argument(
+        "--format",
+        choices=["markdown", "table", "marp"],
+        default="markdown",
+        dest="output_format",
+        help="Output format for stdout. --save always writes canonical Markdown.",
+    )
+
     # zurvan audit
     subparsers.add_parser("audit", help="Audit the wiki")
     
@@ -679,10 +688,14 @@ def main():
         if add_question(args.question, args.reason, args.tags) is False:
             sys.exit(1)
     elif args.command == "search":
-        search_memory(args.query, args.hybrid)
+        search_memory(args.query, args.hybrid, save=getattr(args, "save", False))
     elif args.command == "context":
         from scripts.context_export import export_context
-        bundle = export_context(args.topic, args.limit, args.hybrid, args.graph, args.depth)
+        bundle = export_context(
+            args.topic, args.limit, args.hybrid, args.graph, args.depth,
+            save=getattr(args, "save", False),
+            fmt=getattr(args, "output_format", "markdown"),
+        )
         print(bundle)
     elif args.command == "audit":
         subprocess.run(["python", "scripts/audit_wiki.py"])
