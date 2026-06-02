@@ -2,6 +2,14 @@
 
 ## Project Constraints and Rules
 
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full Documentation Audit — Phase 18 Sync
+- **Summary:** All six stale docs updated to match Phase 18 implementation. ENVIRONMENT.md now lists anthropic as a valid ZURVAN_LLM_PROVIDER option with ANTHROPIC_API_KEY. ARCHITECTURE.md accurately describes wiki/syntheses/, wiki/entities/, data/image_manifest.json, wiki_merge.py, filename_utils.py, and the image/compounding/synthesis data flows. API.md documents --save and --format flags and post-Phase-12 CLI command groups. TESTING.md stage/test counts corrected. workflows_and_plans.md has Phase 18 section. README.md broken code block fixed.
+- **Files Changed:** `docs/ENVIRONMENT.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
+- **Verification:** `public_repo_guard.py` passed. Pushed to origin/main.
+- **Follow-ups:** None. Docs current through Phase 18.
+
 ### 2026-06-02 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 18: Living Wiki + Provider Expansion
