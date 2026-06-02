@@ -1,209 +1,311 @@
-# Local-first LLM Wiki Knowledge Engine
+# Zurvan
+
+> **Local-first LLM knowledge engine** — ingest any document, extract structured knowledge, and query it via hybrid search, graph expansion, or MCP agent memory.
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen)](docs/TESTING.md)
+[![Phase](https://img.shields.io/badge/phase-18%20%E2%9C%85-blueviolet)](CHANGELOG.md)
+[![Obsidian](https://img.shields.io/badge/Obsidian-compatible-7c3aed?logo=obsidian&logoColor=white)](docs/obsidian/)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](docs/mcp/)
 
 *Inspired by [Andrej Karpathy's gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).*
 
-A local, Markdown-based wiki knowledge engine that uses LLMs to ingest raw sources, extract claims, entities, and concepts, and generate a linked Markdown wiki.
+---
 
-## Goals
-- Convert raw sources into a maintained Markdown wiki.
-- Preserve raw sources as immutable source-of-truth.
-- Generate source summaries, concepts, entities, claims, contradictions, and open questions.
-- Maintain `wiki/index.md` and `wiki/log.md`.
-- Git-friendly Markdown output.
-- Include citation metadata for claims.
+## What it does
 
-## Project Documentation
-Detailed documentation is split into dedicated files:
-- [Setup Guide](docs/SETUP.md): Instructions for installation and initialisation.
-- [Architecture Overview](docs/ARCHITECTURE.md): Design principles, data flow, and directory structure.
-- [Environment Variables](docs/ENVIRONMENT.md): Configuration for LLMs, embeddings, and security.
-- [Integration & API Guide](docs/API.md): Usage of the CLI and the local MCP server.
-- [Testing Guide](docs/TESTING.md): Running the quality gates and evaluations.
-- [Troubleshooting](docs/TROUBLESHOOTING.md): Common errors and fixes.
-- [Deployment](docs/DEPLOYMENT.md): Deployment notes and limitations.
-- [Workflows and Script Plans](docs/workflows_and_plans.md): Detailed python scripting breakdowns.
-- [Extraction Test Matrix](docs/extraction_test_matrix.md): Formats successfully handled by the extraction gauntlet.
-- [Agent Rules](AGENTS.md): Strict invariants for AI agent interaction.
+Zurvan turns raw documents (Markdown, PDF, plain text, images) into a **linked, searchable, git-friendly wiki** — then exposes that wiki to AI agents via a local MCP server.
+
+| Capability | Detail |
+|---|---|
+| **Ingestion** | MD · PDF · TXT · images (pending-visual stub) |
+| **Extraction** | Claims · concepts · entities · decisions — via any LLM provider |
+| **Search** | SQLite FTS5 + semantic embeddings (hybrid) |
+| **Graph** | Local knowledge graph; wikilink-aware; graph-neighbour expansion |
+| **Agent memory** | MCP stdio server — read-only by default, opt-in write mode |
+| **Living wiki** | Concept/entity pages compound additively across sources |
+| **Multi-project** | Federate search and decisions across independent vaults |
+| **Evidence → Reports** | Pack → compose → review → publish, fully local, redacted |
+| **Obsidian** | Open the repo root as a vault — colour-coded graph, 7 node types |
+
+---
 
 ## Quick Start
+
 ```bash
 pip install -r requirements.txt
 export PYTHONPATH=.
 ```
 
-### 1. Ingestion & Extraction
-```bash
-# Ingest an immutable source document
-python scripts/ingest.py raw/notes/example.md
+### 1. Ingest a source
 
-# Extract knowledge via configured LLM provider
-python scripts/extract.py --source wiki/sources/example.md.md
+```bash
+python scripts/ingest.py raw/notes/my-doc.md
 ```
 
-### 2. Search & Expand Context
-```bash
-# Keyword Search
-zurvan search "local-first architecture"
+### 2. Extract knowledge
 
-# Hybrid Search (Keyword + semantic embeddings)
+```bash
+# Uses mock LLM by default — set ZURVAN_LLM_PROVIDER=openai|anthropic for real extraction
+python scripts/extract.py --source wiki/sources/my-doc.md.md
+```
+
+### 3. Search and retrieve context
+
+```bash
+# Hybrid keyword + semantic search
 zurvan search "local-first architecture" --hybrid
 
-# Save search results as a wiki synthesis page
+# Save results as a wiki synthesis page
 zurvan search "local-first architecture" --hybrid --save
 
-# Export expanded graph-assisted context bundle
+# Graph-assisted context bundle for an agent
 zurvan context --topic "project roadmap" --hybrid --graph --limit 10
-
-# Save context as a wiki synthesis page
-zurvan context --topic "project roadmap" --save
 
 # Render as Markdown table or Marp slides (stdout only)
 zurvan context --topic "project roadmap" --format table
 zurvan context --topic "project roadmap" --format marp
 ```
 
-### 3. MCP Server (Agent Memory Integration)
-Zurvan can act as a local Model Context Protocol (MCP) server over `stdio` to provide structured long-term memory to agents like Claude Code or Cursor. It operates in **read-only mode** by default.
+---
+
+## LLM Providers
+
+| Provider | Env var | Notes |
+|---|---|---|
+| `mock` *(default)* | — | Deterministic; safe for dev/test |
+| `openai` | `OPENAI_API_KEY` | GPT-4o / GPT-5 |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude via raw `urllib` — no SDK dependency |
+
+```bash
+export ZURVAN_LLM_PROVIDER=anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+See [Environment Variables](docs/ENVIRONMENT.md) for all options.
+
+---
+
+## MCP Server — Agent Memory Integration
+
+Zurvan acts as a local [Model Context Protocol](https://modelcontextprotocol.io/) server over `stdio`, giving agents like Claude Code and Cursor structured long-term memory.
 
 ```bash
 # Verify system readiness
 python scripts/doctor_mcp.py
 
-# Generate client configuration
+# Generate client configuration (read-only by default)
 python scripts/install_mcp_config.py --client claude-code --readonly
 ```
-For full configuration details, see the Client Integration Pack:
-- [Claude Code Setup](docs/mcp/claude-code.md)
-- [Cursor Setup](docs/mcp/cursor.md)
-- [Codex-style Agents](docs/mcp/codex-style-agents.md)
-- [MCP Security](docs/mcp/security.md)
-- [MCP Troubleshooting](docs/mcp/troubleshooting.md)
+
+**Available MCP tools:** `zurvan_search` · `zurvan_context` · `zurvan_remember` · `zurvan_decision_add` · `zurvan_graph_stats` · `zurvan_graph_neighbours` · and more.
+
+> Write mode is disabled by default. To opt in: `python scripts/mcp_server.py --write`.
+> See [MCP Security](docs/mcp/security.md) for the full security model.
+
+Client setup guides: [Claude Code](docs/mcp/claude-code.md) · [Cursor](docs/mcp/cursor.md) · [Codex-style Agents](docs/mcp/codex-style-agents.md)
+
+---
 
 ## Obsidian Integration
-Zurvan is highly compatible with [Obsidian](https://obsidian.md/). You can open the entire repository as a vault to get a beautiful graph view and seamless Markdown editing.
 
-To use Zurvan with Obsidian:
-1. Open Obsidian and select **Open folder as vault**.
-2. Select the root `Zurvan/` directory.
+Open the repo root as an Obsidian vault for a colour-coded graph view and seamless Markdown editing.
 
-We have included safe `.obsidian/` configurations that automatically ignore non-knowledge folders (like `data/` and `scripts/`) to keep your vault clean.
-See the [Obsidian Setup Guides](docs/obsidian/) for plugin recommendations and graph-view setup.
+1. Open Obsidian → **Open folder as vault** → select `Zurvan/`
+2. The vault excludes `data/`, `scripts/`, `tests/`, and `raw/` automatically
+
+**Graph colour groups** (pre-configured in `.obsidian/graph.json`):
+
+| Colour | Node type |
+|---|---|
+| 🟠 Orange | Decisions |
+| 🔵 Blue | Claims |
+| 🟣 Purple | Concepts |
+| 🟢 Green | Sessions |
+| 🔴 Red | Contradictions |
+| 🟡 Gold | Entities |
+| 🩵 Teal | Syntheses |
+
+See [Obsidian Setup Guides](docs/obsidian/) for plugin recommendations and graph-view tips.
+
+---
 
 ## Agent Workflow Orchestration
-Zurvan includes tools to structure AI agent sessions (for Claude Code, Codex, Cursor, etc.). By running these before and after edits, agents can safely maintain context and memory.
+
+Structure AI agent sessions so context is safely preserved before and after edits.
 
 ```bash
-# 1. Start a session
-python scripts/cli.py session start --topic "Database refactor"
+# Start a session
+zurvan session start --topic "Database refactor"
 
-# 2. Get dense pre-edit context
-python scripts/cli.py agent preflight --topic "database"
+# Load dense pre-edit context
+zurvan agent preflight --topic "database"
 
-# 3. Record changes
-python scripts/cli.py agent postedit --summary "Updated schema" --files db.py --checks "pytest"
+# Record changes made
+zurvan agent postedit --summary "Updated schema" --files db.py --checks "pytest"
 
-# 4. Close session
-python scripts/cli.py session close --topic "Database refactor" --summary "Done" --checks "pytest"
+# Close session
+zurvan session close --topic "Database refactor" --summary "Done" --checks "pytest"
 ```
-See the [Agent Workflow Guides](docs/agent-workflows/) for tool-specific instructions.
 
-## Snapshots & Versioning
-Zurvan supports lightweight, local snapshots to backup or migrate your knowledge graph.
-```bash
-# Check system health and version
-zurvan doctor
-zurvan version
+See [Agent Workflow Guides](docs/agent-workflows/) for Claude Code, Codex, and Cursor specifics.
 
-# Create a snapshot (excludes raw/ by default for safety)
-zurvan snapshot create
+---
 
-# Restore a snapshot (requires --force)
-zurvan snapshot restore zurvan_snapshot_XYZ.tar.gz --force
-```
-See the [Release Packaging Guides](docs/release/) for details on portability and backups.
+## Multi-Project Workspace
 
-## Managing Multiple Projects (Phase 9)
-Zurvan allows a single CLI installation to manage multiple independent knowledge bases (vaults) on your local machine securely without committing paths to a public repo.
+A single Zurvan installation can manage multiple independent vaults. Project paths are stored in `~/.zurvan/projects.json` — never committed.
 
 ```bash
-# Register a project
-zurvan project register --name my-vault --path .
-
-# List projects
+# Register vaults
+zurvan project register --name my-project --path /path/to/project
 zurvan project list
+zurvan project use my-project
 
-# Switch default project
-zurvan project use my-vault
+# Cross-vault search and context
+zurvan project search-all "MCP security"
+zurvan project context-all --topic "agent memory"
 
-# Search across all projects
-zurvan project search-all "architecture"
-
-# Decision Memory
+# Cross-vault decision memory
 zurvan project decisions-all
+zurvan project decisions-similar "read-only MCP"
 zurvan project decisions-conflicts
+zurvan project decisions-stale --days 90
 
-# Policy Radar
+# Policy radar — detect contradictions across vaults
 zurvan project radar scan
 zurvan project radar contradictions
 zurvan project radar drift
-zurvan --project my-vault search "architecture"
-```
-*Note: Your local workspace registry is safely stored in `~/.zurvan/projects.json` and is explicitly ignored by Git to protect your absolute paths.*
 
-### 🔎 Cross-Project Federation & Decision Memory
-- **Cross-Project Federation**: Search, context, and decision memory across multiple vaults.
-- **Policy Radar**: Heuristic detection of cross-project contradictions and policy drift.
-- **Evidence Pack Builder**: Generate shareable, citation-backed, redacted evidence bundles locally.
-
-## Features by Phase
-
-- Phase 1: Local Knowledge Vault
-- Phase 2: Structured Document Extraction
-- Phase 3: Agent-Facing CLI Memory Interface
-- Phase 4: Local Hybrid Search (FTS5 + Embeddings)
-- Phase 5: Knowledge Graph Lite
-- Phase 6: Local MCP Server
-- Phase 7: Agent Workflow Orchestration & Obsidian Integration
-- Phase 8: Release Packaging & Snapshots
-- Phase 9: Multi-Project Workspace Support
-- Phase 10: Cross-Project Federation
-- Phase 11: Cross-Project Decision Memory
-- Phase 12: Cross-Project Policy Radar
-- Phase 13: Evidence Pack Builder
-- Phase 14: Report Composer
-- Phase 15: Local Report Review Workbench
-- Phase 16: Review Workbench Hardening + UX Polish
-- Phase 17: Export & Publication Pack
-- **Phase 18 ✅** — Living Wiki + Provider Expansion (Anthropic provider, cross-source merge, --save, log format contract, image skeleton, --format table/marp)
-
-```bash
-# Register a project
-zurvan project register --name tizbin --path /Users/you/tizbin
-
-# Search across all registered projects
-zurvan project search-all "MCP security"
-
-# Build context from multiple projects
-zurvan project context-all --topic "agent memory"
-
-# Decision Memory
-zurvan project decisions-all
-zurvan project decisions-similar "read only mcp"
-zurvan project decisions-conflicts
-zurvan project decisions-stale --days 90
-zurvan project decision-memory rebuild
-```
-
-### Privacy Guarantee
-
-```bash
-# Check federation health
+# Federation health
 zurvan project federation doctor
 ```
-See the [Federation Guides](docs/federation/overview.md) for details on the privacy model and workflows.
 
-## Quality Gates
-Run the full testing sequence (Unit tests, extraction gauntlet, wiki audit, eval, graph tests, MCP tests) to ensure the engine is fully functional before committing changes:
+See [Federation Guides](docs/federation/overview.md) for the privacy model.
+
+---
+
+## Evidence, Reports & Publication
+
+Build citation-backed, redacted evidence packs and compose structured reports — entirely offline.
+
+```bash
+# Evidence
+zurvan evidence pack
+zurvan evidence export
+
+# Reports
+zurvan report compose
+zurvan report validate
+
+# Review workbench (localhost only)
+zurvan review serve
+
+# Publish
+zurvan publish export --format markdown
+zurvan publish bundle
+```
+
+All output is stored in `~/.zurvan/` — outside the git repo.
+
+---
+
+## Snapshots
+
+```bash
+zurvan doctor                                        # System health check
+zurvan version                                       # Version info
+zurvan snapshot create                               # Backup (excludes raw/)
+zurvan snapshot restore zurvan_snapshot_XYZ.tar.gz --force
+```
+
+See [Release Packaging Guides](docs/release/) for portability and migration details.
+
+---
+
+## Architecture
+
+```
+raw/          ← Immutable source documents (never edited)
+wiki/         ← Generated Markdown vault (human-readable, Obsidian-compatible)
+  sources/    ← One stub per ingested file
+  claims/     ← Single-fact files with citations
+  concepts/   ← Key definitions (additively compounded across sources)
+  entities/   ← Named entities (also compounded)
+  decisions/  ← Project decisions and rationales
+  syntheses/  ← Query-derived pages written via --save
+  log.md      ← Grep-parseable audit log
+data/         ← Ephemeral SQLite caches (rebuild any time from wiki/)
+  registry.sqlite   ← Ingestion deduplication
+  search.sqlite     ← FTS5 + embeddings
+  graph.sqlite      ← Knowledge graph (wikilinks + frontmatter)
+scripts/      ← Core pipeline logic
+```
+
+Full design details: [Architecture Overview](docs/ARCHITECTURE.md) · [Workflows & Script Plans](docs/workflows_and_plans.md)
+
+---
+
+## Quality Gate
+
 ```bash
 bash scripts/check.sh
 ```
+
+Runs 22 stages: unit tests · extraction gauntlet · wiki audit · retrieval eval · graph tests · MCP smoke · evidence/report/publication pipeline · review workbench.
+
+**Current:** 183 tests passing, 0 failing. See [Testing Guide](docs/TESTING.md).
+
+---
+
+## Feature History
+
+| Phase | Feature |
+|---|---|
+| 1 | Local Knowledge Vault |
+| 2 | Structured Document Extraction |
+| 3 | Agent-Facing CLI Memory Interface |
+| 4 | Local Hybrid Search (FTS5 + Embeddings) |
+| 5 | Knowledge Graph |
+| 6 | Local MCP Server |
+| 7 | Agent Workflow Orchestration + Obsidian Integration |
+| 8 | Release Packaging + Snapshots |
+| 9 | Multi-Project Workspace |
+| 10 | Cross-Project Federation |
+| 11 | Cross-Project Decision Memory |
+| 12 | Cross-Project Policy Radar |
+| 13 | Evidence Pack Builder |
+| 14 | Report Composer |
+| 15 | Local Report Review Workbench |
+| 16 | Review Workbench Hardening + UX Polish |
+| 17 | Export & Publication Pack |
+| **18 ✅** | **Living Wiki + Provider Expansion** (Anthropic, additive merge, `--save`, `--format table/marp`, image skeleton) |
+
+---
+
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [Setup](docs/SETUP.md) | Installation and initialisation |
+| [Architecture](docs/ARCHITECTURE.md) | Design principles, data flow, directory structure |
+| [Environment Variables](docs/ENVIRONMENT.md) | LLM providers, embeddings, security config |
+| [API & CLI Reference](docs/API.md) | Full CLI command reference |
+| [Testing Guide](docs/TESTING.md) | Quality gates and evaluation harness |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Common errors and fixes |
+| [Deployment](docs/DEPLOYMENT.md) | Deployment notes and limitations |
+| [Workflows & Scripts](docs/workflows_and_plans.md) | Detailed pipeline logic |
+| [Extraction Test Matrix](docs/extraction_test_matrix.md) | Formats handled by the gauntlet |
+| [Agent Rules](AGENTS.md) | Strict invariants for AI agent interaction |
+| [MCP Integration](docs/mcp/) | Claude Code, Cursor, Codex-style agent setup |
+| [Obsidian Setup](docs/obsidian/) | Vault config, plugins, graph view |
+| [Federation](docs/federation/) | Multi-vault search and privacy model |
+| [Agent Workflows](docs/agent-workflows/) | Per-tool session workflow guides |
+
+---
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for the invariants all contributors (human and AI) must follow — particularly around `raw/` immutability, citation integrity, and public repo safety.
+
+Run `bash scripts/check.sh` before submitting any changes.
