@@ -4,7 +4,7 @@
 
 **Goal:** Close the four largest gaps in Zurvan's compounding-wiki loop: add Anthropic as an LLM provider, make concept/entity pages update across sources, file query answers back into the wiki, and make the log.md grep-parseable — plus image detection stubs and two output format renders.
 
-**Architecture:** Three sequential sub-phases (18a → 18b → 18c). 18a refactors `llm.py` into a provider registry. 18b introduces `wiki_merge.py` as the canonical concept/entity writer, adds `--save` to context export, and standardises the log format. 18c adds image-skip detection and `--format table|marp` rendering. Each sub-phase ends with `check.sh` green.
+**Architecture:** Three sequential sub-phases (18a → 18b → 18c). 18a refactors `llm.py` into a provider registry with `mock` as the unset default. 18b introduces `wiki_merge.py` as the canonical concept/entity writer (preserving legacy `source_id` frontmatter), adds `--save` to both `context` and `search`, and standardises the log format. 18c adds a complete image-skip skeleton (files, embedded Markdown refs, remote URLs, PDF best-effort) with manifest JSON, and adds `--format table|marp` rendering. Each sub-phase ends with `check.sh` green.
 
 **Tech Stack:** Python 3.12, pytest, raw `urllib.request` (no new SDK dependencies), existing `safe_write.py` for all file writes.
 
@@ -14,20 +14,106 @@
 
 | File | Status | Responsibility |
 |---|---|---|
-| `scripts/llm.py` | Modify | Provider registry + Anthropic provider |
+| `scripts/filename_utils.py` | **Create** | Single shared `sanitize_filename()` used by all scripts |
+| `scripts/llm.py` | Modify | Provider registry + Anthropic + mock as default |
 | `scripts/wiki_merge.py` | **Create** | Canonical concept/entity writer; shared log formatter |
-| `scripts/extract.py` | Modify | Route concept/entity pages through `merge_extraction()` |
-| `scripts/ingest.py` | Modify | Use `append_log_ingest()` from wiki_merge; image detection |
-| `scripts/context_export.py` | Modify | Add `save`, `fmt` params; `--format table/marp` rendering |
-| `scripts/cli.py` | Modify | Add `--save`, `--format` flags to context/search parsers |
+| `scripts/extract.py` | Modify | Import `sanitize_filename` from filename_utils; route pages through `merge_extraction()` |
+| `scripts/ingest.py` | Modify | Use new log format; image detection + manifest |
+| `scripts/context_export.py` | Modify | Add `save`, `fmt` params; microsecond-safe filenames; `--format table/marp` |
+| `scripts/cli.py` | Modify | Add `--save` to context + search; add `--format` to context |
+| `tests/test_filename_utils.py` | **Create** | Tests for shared sanitize_filename |
 | `tests/test_llm.py` | Modify | Extend with 18a provider tests |
-| `tests/test_wiki_merge.py` | **Create** | Merge logic + log format tests |
-| `tests/test_context_export.py` | Modify | `--save` and format rendering tests |
-| `tests/test_ingest.py` | Modify | Image detection tests + log format test |
+| `tests/test_wiki_merge.py` | **Create** | Merge logic + log format + source_id migration tests |
+| `tests/test_context_export.py` | Modify | `--save` (context + search) and format rendering tests |
+| `tests/test_ingest.py` | Modify | Image detection tests (file, embedded, remote, PDF) + manifest |
 
 ---
 
-## Task 1: 18a — Provider registry + Anthropic (TDD)
+## Task 1: Shared filename utility
+
+**Files:**
+- Create: `tests/test_filename_utils.py`
+- Create: `scripts/filename_utils.py`
+
+- [ ] **Step 1: Write failing tests**
+
+```python
+# tests/test_filename_utils.py
+from scripts.filename_utils import sanitize_filename
+
+def test_alphanumeric_passthrough():
+    assert sanitize_filename("RAG") == "RAG"
+
+def test_spaces_become_underscores():
+    assert sanitize_filename("knowledge graph") == "knowledge_graph"
+
+def test_special_chars_become_underscores():
+    assert sanitize_filename("hello/world:test") == "hello_world_test"
+
+def test_hyphens_and_underscores_preserved():
+    assert sanitize_filename("my-concept_name") == "my-concept_name"
+
+def test_empty_string():
+    assert sanitize_filename("") == ""
+```
+
+- [ ] **Step 2: Run to verify all fail**
+
+```bash
+PYTHONPATH=. pytest tests/test_filename_utils.py -v 2>&1 | tail -10
+```
+
+Expected: 5 tests fail with `ModuleNotFoundError`.
+
+- [ ] **Step 3: Create `scripts/filename_utils.py`**
+
+```python
+def sanitize_filename(name: str) -> str:
+    """Canonical filename sanitiser. Keep alphanumerics, hyphens, underscores; replace all else with _."""
+    return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name)
+```
+
+- [ ] **Step 4: Run tests**
+
+```bash
+PYTHONPATH=. pytest tests/test_filename_utils.py -v 2>&1 | tail -10
+```
+
+Expected: all 5 pass.
+
+- [ ] **Step 5: Update `scripts/extract.py` to import from filename_utils**
+
+Find the local `sanitize_filename` definition at the top of `extract.py`:
+```python
+def sanitize_filename(name):
+    # Very basic sanitation
+    safe_name = "".join([c if c.isalnum() or c in ['-', '_'] else "_" for c in name])
+    return safe_name
+```
+
+Replace it with:
+```python
+from scripts.filename_utils import sanitize_filename
+```
+
+- [ ] **Step 6: Run full suite**
+
+```bash
+PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
+```
+
+Expected: 131+ passed, 0 failed.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/filename_utils.py scripts/extract.py tests/test_filename_utils.py
+git commit -m "refactor: Extract shared sanitize_filename() into filename_utils.py"
+```
+
+---
+
+## Task 2: 18a — Provider registry + Anthropic (TDD)
 
 **Files:**
 - Modify: `tests/test_llm.py`
@@ -41,17 +127,21 @@ Append to `tests/test_llm.py`:
 import json
 from unittest.mock import patch, MagicMock
 
-def test_provider_registry_contains_all_providers(monkeypatch):
-    monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "mock")
+def test_unset_provider_defaults_to_mock(monkeypatch):
+    monkeypatch.delenv("ZURVAN_LLM_PROVIDER", raising=False)
+    from scripts.llm import run_llm
+    result = run_llm("test")
+    assert "dummy_source" in result
+
+def test_provider_registry_contains_all_providers():
     from scripts.llm import _PROVIDERS
     assert set(_PROVIDERS.keys()) == {"mock", "openai", "ollama", "anthropic"}
 
 def test_unknown_provider_lists_valid_names(monkeypatch):
     monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "gopher")
-    from scripts import llm as llm_mod
-    import importlib; importlib.reload(llm_mod)
+    from scripts.llm import run_llm
     with pytest.raises(ValueError) as exc:
-        llm_mod.run_llm("test")
+        run_llm("test")
     msg = str(exc.value)
     assert "anthropic" in msg
     assert "mock" in msg
@@ -73,13 +163,12 @@ def test_anthropic_missing_key_raises_runtime_error(monkeypatch):
 def test_anthropic_request_shape(monkeypatch):
     monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-
     captured = {}
+
     def fake_urlopen(req):
         captured["url"] = req.full_url
         captured["headers"] = dict(req.headers)
-        body = json.loads(req.data.decode())
-        captured["body"] = body
+        captured["body"] = json.loads(req.data.decode())
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
@@ -124,8 +213,8 @@ def test_zurvan_llm_model_overrides_anthropic_default(monkeypatch):
     monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("ZURVAN_LLM_MODEL", "claude-opus-4-8")
-
     captured = {}
+
     def fake_urlopen(req):
         captured["body"] = json.loads(req.data.decode())
         mock_resp = MagicMock()
@@ -148,7 +237,7 @@ def test_zurvan_llm_model_overrides_anthropic_default(monkeypatch):
 PYTHONPATH=. pytest tests/test_llm.py -v 2>&1 | tail -20
 ```
 
-Expected: 7 new tests fail (ImportError on `_PROVIDERS` and `RuntimeError` for Anthropic).
+Expected: 8 new tests fail (no `_PROVIDERS`, wrong default behaviour, no `_call_anthropic`).
 
 - [ ] **Step 3: Rewrite `scripts/llm.py`**
 
@@ -299,13 +388,9 @@ _PROVIDERS = {
 
 
 def run_llm(prompt: str, model: str = None, temperature: float = 0.0) -> str:
-    """Send prompt to the configured LLM provider and return raw text."""
-    provider = os.environ.get("ZURVAN_LLM_PROVIDER", "").lower()
-    if not provider:
-        raise ValueError(
-            "ZURVAN_LLM_PROVIDER is not set. "
-            f"Valid providers: {', '.join(_PROVIDERS.keys())}"
-        )
+    """Send prompt to the configured LLM provider and return raw text.
+    Defaults to mock when ZURVAN_LLM_PROVIDER is unset."""
+    provider = os.environ.get("ZURVAN_LLM_PROVIDER", "mock").lower()
     if provider not in _PROVIDERS:
         raise ValueError(
             f"Unknown ZURVAN_LLM_PROVIDER: '{provider}'. "
@@ -325,9 +410,9 @@ def run_llm(prompt: str, model: str = None, temperature: float = 0.0) -> str:
 PYTHONPATH=. pytest tests/test_llm.py -v 2>&1 | tail -20
 ```
 
-Expected: all 11 tests pass.
+Expected: all 12 tests pass.
 
-- [ ] **Step 5: Run full suite to confirm nothing regressed**
+- [ ] **Step 5: Run full pytest suite**
 
 ```bash
 PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
@@ -335,16 +420,24 @@ PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
 
 Expected: 131+ passed, 0 failed.
 
-- [ ] **Step 6: Commit 18a**
+- [ ] **Step 6: Run check.sh**
+
+```bash
+PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -10
+```
+
+Expected: `🎉 All Zurvan checks passed successfully.`
+
+- [ ] **Step 7: Commit 18a**
 
 ```bash
 git add scripts/llm.py tests/test_llm.py
-git commit -m "feat(18a): Add Anthropic provider and provider registry to llm.py"
+git commit -m "feat(18a): Add Anthropic provider and provider registry; mock is default"
 ```
 
 ---
 
-## Task 2: 18b — Shared log formatter + wiki_merge.py skeleton (TDD)
+## Task 3: 18b — Log formatter + wiki_merge.py skeleton (TDD)
 
 **Files:**
 - Create: `tests/test_wiki_merge.py`
@@ -394,8 +487,7 @@ def test_log_ingest_wrapper(tmp_path, monkeypatch):
     append_log_ingest("notes.txt")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
-    assert "ingest" in log
-    assert "notes.txt" in log
+    assert "ingest" in log and "notes.txt" in log
 
 
 def test_log_merge_wrapper(tmp_path, monkeypatch):
@@ -407,9 +499,7 @@ def test_log_merge_wrapper(tmp_path, monkeypatch):
     append_log_merge("RAG", 3)
 
     log = (tmp_path / "wiki" / "log.md").read_text()
-    assert "merge" in log
-    assert "RAG" in log
-    assert "3 sources" in log
+    assert "merge" in log and "RAG" in log and "3 sources" in log
 
 
 def test_log_save_wrapper(tmp_path, monkeypatch):
@@ -421,8 +511,7 @@ def test_log_save_wrapper(tmp_path, monkeypatch):
     append_log_save("vector-search-reliability")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
-    assert "query-save" in log
-    assert "vector-search-reliability" in log
+    assert "query-save" in log and "vector-search-reliability" in log
 
 
 def test_log_image_skip_wrapper(tmp_path, monkeypatch):
@@ -442,10 +531,10 @@ def test_log_image_skip_wrapper(tmp_path, monkeypatch):
 - [ ] **Step 2: Run to verify all fail**
 
 ```bash
-PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -15
+PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -10
 ```
 
-Expected: 6 tests fail with `ModuleNotFoundError: No module named 'scripts.wiki_merge'`.
+Expected: 6 tests fail with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Create `scripts/wiki_merge.py` with log helpers only**
 
@@ -455,12 +544,13 @@ import datetime
 from typing import Dict, Any, List
 
 from scripts.safe_write import append_file_safely, write_file_safely
+from scripts.filename_utils import sanitize_filename
 
 
 # ── Log helpers ────────────────────────────────────────────────────────────────
 
 def append_log_event(kind: str, *parts: str) -> None:
-    """Shared log formatter. Produces grep-parseable ## [YYYY-MM-DD] kind | parts entries."""
+    """Shared log formatter. Produces grep-parseable ## [YYYY-MM-DD] entries."""
     log_path = os.path.join("wiki", "log.md")
     date = datetime.date.today().isoformat()
     safe_parts = [str(p).replace("|", "\\|") for p in parts]
@@ -487,7 +577,7 @@ def append_log_image_skip(filename: str) -> None:
 - [ ] **Step 4: Run log tests**
 
 ```bash
-PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -15
+PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -10
 ```
 
 Expected: all 6 pass.
@@ -501,7 +591,7 @@ git commit -m "feat(18b): Add wiki_merge.py with shared log formatter"
 
 ---
 
-## Task 3: 18b — Concept/entity merge logic (TDD)
+## Task 4: 18b — Concept/entity merge logic (TDD)
 
 **Files:**
 - Modify: `tests/test_wiki_merge.py` (append tests)
@@ -524,11 +614,10 @@ def test_merge_creates_new_concept_page(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
 
     from scripts.wiki_merge import merge_extraction
-    data = _make_extraction(
-        "source_a",
-        concepts=[{"name": "RAG", "definition": "Retrieval-Augmented Generation"}],
+    merge_extraction(
+        _make_extraction("source_a", concepts=[{"name": "RAG", "definition": "Retrieval-Augmented Generation"}]),
+        wiki_dir=str(tmp_path / "wiki"),
     )
-    merge_extraction(data, wiki_dir=str(tmp_path / "wiki"))
 
     page = tmp_path / "wiki" / "concepts" / "RAG.md"
     assert page.exists()
@@ -566,7 +655,6 @@ def test_merge_idempotent(tmp_path, monkeypatch):
     first = (tmp_path / "wiki" / "concepts" / "RAG.md").read_text()
     merge_extraction(data, wiki_dir=str(tmp_path / "wiki"))
     second = (tmp_path / "wiki" / "concepts" / "RAG.md").read_text()
-
     assert first == second
 
 
@@ -575,9 +663,8 @@ def test_merge_preserves_existing_content(tmp_path, monkeypatch):
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
-    concepts = wiki / "concepts"
-    concepts.mkdir()
-    (concepts / "RAG.md").write_text(
+    (wiki / "concepts").mkdir()
+    (wiki / "concepts" / "RAG.md").write_text(
         "---\ntype: concept\nsources: source_a\nsource_count: 1\nlast_updated: 2026-01-01\n---\n\n# RAG\n\n## Definition\nOriginal definition.\n"
     )
 
@@ -587,7 +674,7 @@ def test_merge_preserves_existing_content(tmp_path, monkeypatch):
         wiki_dir=str(wiki),
     )
 
-    content = (concepts / "RAG.md").read_text()
+    content = (wiki / "concepts" / "RAG.md").read_text()
     assert "Original definition." in content
     assert "Evidence from source_b" in content
 
@@ -597,10 +684,9 @@ def test_source_count_is_derived_not_incremented(tmp_path, monkeypatch):
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
-    concepts = wiki / "concepts"
-    concepts.mkdir()
-    # source_count is wrong on purpose — should be corrected to len(sources)
-    (concepts / "RAG.md").write_text(
+    (wiki / "concepts").mkdir()
+    # Intentionally wrong source_count — merge must fix it to len(sources)
+    (wiki / "concepts" / "RAG.md").write_text(
         "---\ntype: concept\nsources: source_a\nsource_count: 999\nlast_updated: 2026-01-01\n---\n\n# RAG\n\n## Definition\nOriginal.\n"
     )
 
@@ -610,7 +696,7 @@ def test_source_count_is_derived_not_incremented(tmp_path, monkeypatch):
         wiki_dir=str(wiki),
     )
 
-    content = (concepts / "RAG.md").read_text()
+    content = (wiki / "concepts" / "RAG.md").read_text()
     assert "source_count: 2" in content
     assert "source_count: 999" not in content
 
@@ -627,8 +713,32 @@ def test_existing_source_id_skips_cleanly(tmp_path, monkeypatch):
     before = (wiki / "concepts" / "RAG.md").read_text()
     merge_extraction(data, wiki_dir=str(wiki))
     after = (wiki / "concepts" / "RAG.md").read_text()
-
     assert before == after
+
+
+def test_legacy_source_id_frontmatter_preserved(tmp_path, monkeypatch):
+    """Old pages use source_id: not sources: — merge must not lose that history."""
+    monkeypatch.chdir(tmp_path)
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    (wiki / "log.md").write_text("")
+    (wiki / "concepts").mkdir()
+    # Legacy format: source_id instead of sources
+    (wiki / "concepts" / "RAG.md").write_text(
+        "---\ntype: concept\nsource_id: legacy_source\n---\n\n# RAG\n\n## Definition\nLegacy definition.\n"
+    )
+
+    from scripts.wiki_merge import merge_extraction
+    merge_extraction(
+        _make_extraction("new_source", concepts=[{"name": "RAG", "definition": "New evidence"}]),
+        wiki_dir=str(wiki),
+    )
+
+    content = (wiki / "concepts" / "RAG.md").read_text()
+    # Both original and new source must appear
+    assert "legacy_source" in content
+    assert "new_source" in content
+    assert "source_count: 2" in content
 
 
 def test_merge_entity_page(tmp_path, monkeypatch):
@@ -638,11 +748,13 @@ def test_merge_entity_page(tmp_path, monkeypatch):
     (wiki / "log.md").write_text("")
 
     from scripts.wiki_merge import merge_extraction
-    data = _make_extraction(
-        "source_a",
-        entities=[{"name": "Karpathy", "description": "AI researcher", "entity_type": "person"}],
+    merge_extraction(
+        _make_extraction(
+            "source_a",
+            entities=[{"name": "Karpathy", "description": "AI researcher", "entity_type": "person"}],
+        ),
+        wiki_dir=str(wiki),
     )
-    merge_extraction(data, wiki_dir=str(wiki))
 
     page = wiki / "entities" / "Karpathy.md"
     assert page.exists()
@@ -657,19 +769,13 @@ def test_merge_entity_page(tmp_path, monkeypatch):
 PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -15
 ```
 
-Expected: 7 new tests fail with `ImportError` or `AttributeError` on `merge_extraction`.
+Expected: 8 new tests fail (no `merge_extraction`).
 
-- [ ] **Step 3: Add merge logic to `scripts/wiki_merge.py`**
-
-Append after the log helpers:
+- [ ] **Step 3: Append merge logic to `scripts/wiki_merge.py`**
 
 ```python
 
 # ── Frontmatter helpers ────────────────────────────────────────────────────────
-
-def _sanitize(name: str) -> str:
-    return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in name)
-
 
 def _parse_fm(content: str):
     """Returns (fm_dict, body_str). Values are raw strings."""
@@ -729,6 +835,10 @@ def _merge_page(
     fm, body = _parse_fm(existing)
     sources = _parse_sources(fm.get("sources", ""))
 
+    # Migrate legacy pages that use source_id instead of sources
+    if not sources and fm.get("source_id"):
+        sources = [fm["source_id"]]
+
     if source_id in sources:
         return  # Idempotent
 
@@ -746,7 +856,7 @@ def merge_extraction(data: Dict[str, Any], wiki_dir: str = "wiki") -> None:
     """
     Canonical writer for concept and entity wiki pages.
     Called by extract.py instead of writing pages directly.
-    Purely additive and idempotent.
+    Purely additive, idempotent, and migrates legacy source_id frontmatter.
     """
     source_id = data.get("source_id", "unknown")
 
@@ -754,7 +864,7 @@ def merge_extraction(data: Dict[str, Any], wiki_dir: str = "wiki") -> None:
         name = concept.get("name", "")
         if not name:
             continue
-        slug = _sanitize(name)
+        slug = sanitize_filename(name)
         _merge_page(
             page_path=os.path.join(wiki_dir, "concepts", f"{slug}.md"),
             name=name,
@@ -767,7 +877,7 @@ def merge_extraction(data: Dict[str, Any], wiki_dir: str = "wiki") -> None:
         name = entity.get("name", "")
         if not name:
             continue
-        slug = _sanitize(name)
+        slug = sanitize_filename(name)
         _merge_page(
             page_path=os.path.join(wiki_dir, "entities", f"{slug}.md"),
             name=name,
@@ -784,7 +894,7 @@ def merge_extraction(data: Dict[str, Any], wiki_dir: str = "wiki") -> None:
 PYTHONPATH=. pytest tests/test_wiki_merge.py -v 2>&1 | tail -20
 ```
 
-Expected: all 13 tests pass.
+Expected: all 14 tests pass.
 
 - [ ] **Step 5: Run full suite**
 
@@ -798,21 +908,21 @@ Expected: 131+ passed, 0 failed.
 
 ```bash
 git add scripts/wiki_merge.py tests/test_wiki_merge.py
-git commit -m "feat(18b): Add merge_extraction() — canonical compounding wiki writer"
+git commit -m "feat(18b): Add merge_extraction() — compounding wiki writer with legacy migration"
 ```
 
 ---
 
-## Task 4: 18b — Route extract.py through wiki_merge
+## Task 5: 18b — Route extract.py through wiki_merge + update ingest.py log
 
 **Files:**
 - Modify: `scripts/extract.py`
+- Modify: `scripts/ingest.py`
+- Modify: `tests/test_ingest.py` (append one test)
 
-- [ ] **Step 1: Remove the inline concept/entity writing blocks from `scripts/extract.py`**
+- [ ] **Step 1: Remove inline concept/entity writing from `scripts/extract.py`**
 
-Find and replace these two blocks (around lines 55–85):
-
-Old — **Concepts block** (remove entirely):
+Find and delete the **Concepts block** (around line 55):
 ```python
     # Concepts
     concepts_dir = os.path.join("wiki", "concepts")
@@ -825,7 +935,7 @@ Old — **Concepts block** (remove entirely):
                 f.write(f"---\ntype: concept\nsource_id: {source_id}\n---\n\n# {concept['name']}\n\n## Definition\n{concept['definition']}\n")
 ```
 
-Old — **Entities block** (remove entirely):
+Find and delete the **Entities block** (around line 65):
 ```python
     # Entities
     entities_dir = os.path.join("wiki", "entities")
@@ -838,42 +948,19 @@ Old — **Entities block** (remove entirely):
                 f.write(f"---\ntype: entity\nentity_type: {ent.get('entity_type', 'other')}\nsource_id: {source_id}\n---\n\n# {ent['name']}\n\n{ent['description']}\n")
 ```
 
-Replace both blocks with:
+Replace both deleted blocks with:
 ```python
-    # Concepts and Entities: routed through wiki_merge for compounding wiki updates
+    # Concepts and Entities: canonical writer is wiki_merge (compounding wiki)
     from scripts.wiki_merge import merge_extraction
     merge_extraction(data)
 ```
 
-- [ ] **Step 2: Run full suite**
-
-```bash
-PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
-```
-
-Expected: 131+ passed, 0 failed.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add scripts/extract.py
-git commit -m "feat(18b): Route extract.py concept/entity writing through merge_extraction()"
-```
-
----
-
-## Task 5: 18b — Update ingest.py to use new log format
-
-**Files:**
-- Modify: `tests/test_ingest.py` (append test)
-- Modify: `scripts/ingest.py`
-
-- [ ] **Step 1: Append log format test to `tests/test_ingest.py`**
+- [ ] **Step 2: Append log format test to `tests/test_ingest.py`**
 
 ```python
 import re
 
-def test_append_log_ingest_format(tmp_path, monkeypatch):
+def test_append_log_uses_grep_parseable_format(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
@@ -883,17 +970,8 @@ def test_append_log_ingest_format(tmp_path, monkeypatch):
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert re.search(r"^## \[", log, re.MULTILINE)
-    assert "ingest" in log
-    assert "example.pdf" in log
+    assert "ingest" in log and "example.pdf" in log
 ```
-
-- [ ] **Step 2: Run to verify test passes** (it uses `wiki_merge.append_log_ingest`, which already exists)
-
-```bash
-PYTHONPATH=. pytest tests/test_ingest.py -v 2>&1 | tail -10
-```
-
-Expected: all pass.
 
 - [ ] **Step 3: Update `append_log()` in `scripts/ingest.py`**
 
@@ -925,13 +1003,13 @@ Expected: 131+ passed, 0 failed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/ingest.py tests/test_ingest.py
-git commit -m "feat(18b): Update ingest.py log format to grep-parseable ## [date] pattern"
+git add scripts/extract.py scripts/ingest.py tests/test_ingest.py
+git commit -m "feat(18b): Route extract.py through merge_extraction(); update log format"
 ```
 
 ---
 
-## Task 6: 18b — Add `--save` to context_export.py (TDD)
+## Task 6: 18b — Add `--save` to context_export for BOTH context and search (TDD)
 
 **Files:**
 - Modify: `tests/test_context_export.py` (append tests)
@@ -944,7 +1022,7 @@ def test_save_writes_synthesis_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
-    (tmp_path / "wiki" / "test_save_kw.md").write_text("save_unique_kw_abc123")
+    (tmp_path / "wiki" / "save_kw_test.md").write_text("save_unique_kw_abc123")
 
     from scripts.context_export import export_context
     export_context("save_unique_kw_abc123", save=True)
@@ -957,24 +1035,23 @@ def test_save_synthesis_has_required_frontmatter(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
-    (tmp_path / "wiki" / "test_fm_kw.md").write_text("fm_unique_kw_xyz789")
+    (tmp_path / "wiki" / "fm_kw_test.md").write_text("fm_unique_kw_xyz789")
 
     from scripts.context_export import export_context
     export_context("fm_unique_kw_xyz789", save=True)
 
-    syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
-    content = syntheses[0].read_text()
+    content = list((tmp_path / "wiki" / "syntheses").glob("*.md"))[0].read_text()
     assert "type: synthesis" in content
     assert "query:" in content
     assert "created_at:" in content
     assert "tags: synthesis, query-derived" in content
 
 
-def test_save_no_overwrite_same_query(tmp_path, monkeypatch):
+def test_save_no_overwrite_microsecond_collision(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
-    (tmp_path / "wiki" / "test_overwrite_kw.md").write_text("overwrite_kw_unique123")
+    (tmp_path / "wiki" / "ow_kw_test.md").write_text("overwrite_kw_unique123")
 
     from scripts.context_export import export_context
     export_context("overwrite_kw_unique123", save=True)
@@ -987,66 +1064,132 @@ def test_save_no_overwrite_same_query(tmp_path, monkeypatch):
 def test_save_false_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "test_nosave.md").write_text("nosave_kw")
+    (tmp_path / "wiki" / "nosave_kw.md").write_text("nosave_kw")
 
     from scripts.context_export import export_context
     export_context("nosave_kw", save=False)
 
     synth_dir = tmp_path / "wiki" / "syntheses"
     assert not synth_dir.exists() or not list(synth_dir.glob("*.md"))
+
+
+def test_search_save_writes_synthesis_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    (tmp_path / "wiki" / "search_save_kw.md").write_text("search_save_unique_kw_xyz")
+
+    from scripts.context_export import search_memory
+    search_memory("search_save_unique_kw_xyz", save=True)
+
+    syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
+    assert len(syntheses) == 1
+    content = syntheses[0].read_text()
+    assert "type: synthesis" in content
+
+
+def test_search_save_false_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "search_nosave.md").write_text("search_nosave_kw")
+
+    from scripts.context_export import search_memory
+    search_memory("search_nosave_kw", save=False)
+
+    synth_dir = tmp_path / "wiki" / "syntheses"
+    assert not synth_dir.exists() or not list(synth_dir.glob("*.md"))
 ```
 
-- [ ] **Step 2: Run to verify all 4 fail**
+- [ ] **Step 2: Run to verify all 6 fail**
 
 ```bash
 PYTHONPATH=. pytest tests/test_context_export.py -v 2>&1 | tail -15
 ```
 
-Expected: 4 new tests fail (`TypeError: export_context() got an unexpected keyword argument 'save'`).
+Expected: 6 new tests fail.
 
-- [ ] **Step 3: Add `save` parameter and `_save_synthesis()` to `scripts/context_export.py`**
+- [ ] **Step 3: Add `_save_synthesis()` helper and update `export_context()` and `search_memory()` in `scripts/context_export.py`**
 
-At the top of the file, add `import datetime` (it's not currently imported).
+Add this import at the top of `context_export.py` (after existing imports):
+```python
+import datetime
+```
 
-Add this helper function before `export_context`:
+Add this helper function before `search_memory`:
 
 ```python
 def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> None:
-    """Write a canonical Markdown synthesis page to wiki/syntheses/."""
-    import datetime
+    """Write a canonical Markdown synthesis page to wiki/syntheses/. Always saves markdown."""
     from scripts.wiki_merge import append_log_save
     from scripts.safe_write import write_file_safely
+    from scripts.filename_utils import sanitize_filename
 
-    slug = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in topic)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    slug = sanitize_filename(topic)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     synth_dir = os.path.join("wiki", "syntheses")
     os.makedirs(synth_dir, exist_ok=True)
-    filename = f"{datetime.date.today().isoformat()}-{timestamp}-{slug}.md"
-    synth_path = os.path.join(synth_dir, filename)
 
+    # Microsecond timestamp makes collision extremely unlikely; loop is a safety net
+    candidate = os.path.join(synth_dir, f"{datetime.date.today().isoformat()}-{timestamp}-{slug}.md")
+    counter = 2
+    while os.path.exists(candidate):
+        candidate = os.path.join(synth_dir, f"{datetime.date.today().isoformat()}-{timestamp}-{slug}-{counter}.md")
+        counter += 1
+
+    # YAML-safe: wrap query value in quotes to handle colons, hashes, pipes
+    safe_topic = topic.replace('"', '\\"')
     fm = (
-        f"---\n"
-        f"type: synthesis\n"
-        f"query: {topic}\n"
-        f"sources: {', '.join(source_paths)}\n"
-        f"created_at: {datetime.datetime.now().isoformat()}\n"
-        f"tags: synthesis, query-derived\n"
-        f"---\n\n"
+        f'---\n'
+        f'type: synthesis\n'
+        f'query: "{safe_topic}"\n'
+        f'sources: {", ".join(source_paths)}\n'
+        f'created_at: {datetime.datetime.now().isoformat()}\n'
+        f'tags: synthesis, query-derived\n'
+        f'---\n\n'
     )
-    write_file_safely(synth_path, fm + markdown_content)
+    write_file_safely(candidate, fm + markdown_content)
     append_log_save(slug)
 ```
 
-Update `export_context` signature and body — change:
+Update `search_memory` signature and body:
+
+Change:
+```python
+def search_memory(query: str, hybrid: bool = False):
+    results = _search_internal(query, hybrid, limit=10)
+    print(f"Found {len(results)} matches for '{query}':\n")
+    for i, res in enumerate(results, 1):
+        print(f"{i}. {res['source_path']} | Score: {res.get('hybrid_score', 'N/A')} | Snippet: {res['text'][:100]}...")
+```
+
+To:
+```python
+def search_memory(query: str, hybrid: bool = False, save: bool = False):
+    results = _search_internal(query, hybrid, limit=10)
+    print(f"Found {len(results)} matches for '{query}':\n")
+    lines = []
+    for i, res in enumerate(results, 1):
+        line = f"{i}. {res['source_path']} | Score: {res.get('hybrid_score', 'N/A')} | Snippet: {res['text'][:100]}..."
+        print(line)
+        lines.append(line)
+    if save:
+        source_paths = [r["source_path"] for r in results]
+        _save_synthesis(query, "\n".join(lines), source_paths)
+```
+
+Update `export_context` signature:
+
+Change:
 ```python
 def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: bool = False, depth: int = 1) -> str:
 ```
+
 To:
 ```python
 def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: bool = False, depth: int = 1, save: bool = False, fmt: str = "markdown") -> str:
 ```
 
-Add at the end of `export_context`, before `return "\n".join(output)`:
+And replace `return "\n".join(output)` at the end with:
 
 ```python
     base_output = "\n".join(output)
@@ -1057,15 +1200,13 @@ Add at the end of `export_context`, before `return "\n".join(output)`:
     return base_output
 ```
 
-(Remove the existing `return "\n".join(output)` line and replace with the block above.)
-
-- [ ] **Step 4: Run context_export tests**
+- [ ] **Step 4: Run all context_export tests**
 
 ```bash
 PYTHONPATH=. pytest tests/test_context_export.py -v 2>&1 | tail -15
 ```
 
-Expected: all 6 tests pass.
+Expected: all 8 tests pass.
 
 - [ ] **Step 5: Run full suite**
 
@@ -1079,19 +1220,19 @@ Expected: 131+ passed, 0 failed.
 
 ```bash
 git add scripts/context_export.py tests/test_context_export.py
-git commit -m "feat(18b): Add --save flag to export_context() — file answers back into wiki"
+git commit -m "feat(18b): Add --save to export_context and search_memory with collision-safe filenames"
 ```
 
 ---
 
-## Task 7: 18b — Wire `--save` into cli.py + run check.sh
+## Task 7: 18b — Wire `--save` into cli.py + run check.sh milestone
 
 **Files:**
 - Modify: `scripts/cli.py`
 
-- [ ] **Step 1: Add `--save` to the context and search parsers in `scripts/cli.py`**
+- [ ] **Step 1: Add `--save` to context parser**
 
-Find the context parser block (line ~278):
+Find (line ~283):
 ```python
     context_parser.add_argument("--depth", type=int, default=1, help="Graph expansion depth")
 ```
@@ -1099,9 +1240,18 @@ Find the context parser block (line ~278):
 Add after it:
 ```python
     context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
+    context_parser.add_argument(
+        "--format",
+        choices=["markdown", "table", "marp"],
+        default="markdown",
+        dest="output_format",
+        help="Output format for stdout. --save always writes canonical Markdown.",
+    )
 ```
 
-Find the search parser block (line ~273):
+- [ ] **Step 2: Add `--save` to search parser**
+
+Find (line ~275):
 ```python
     search_parser.add_argument("--hybrid", action="store_true", help="Use hybrid search")
 ```
@@ -1111,7 +1261,7 @@ Add after it:
     search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
 ```
 
-- [ ] **Step 2: Update the context handler (line ~683)**
+- [ ] **Step 3: Update context handler (line ~683)**
 
 Change:
 ```python
@@ -1128,11 +1278,26 @@ To:
         bundle = export_context(
             args.topic, args.limit, args.hybrid, args.graph, args.depth,
             save=getattr(args, "save", False),
+            fmt=getattr(args, "output_format", "markdown"),
         )
         print(bundle)
 ```
 
-- [ ] **Step 3: Run full suite**
+- [ ] **Step 4: Update search handler (line ~681)**
+
+Change:
+```python
+    elif args.command == "search":
+        search_memory(args.query, args.hybrid)
+```
+
+To:
+```python
+    elif args.command == "search":
+        search_memory(args.query, args.hybrid, save=getattr(args, "save", False))
+```
+
+- [ ] **Step 5: Run full suite**
 
 ```bash
 PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
@@ -1140,7 +1305,7 @@ PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
 
 Expected: 131+ passed, 0 failed.
 
-- [ ] **Step 4: Run check.sh — end of 18b milestone**
+- [ ] **Step 6: Run check.sh — end of 18b milestone**
 
 ```bash
 PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -10
@@ -1148,16 +1313,18 @@ PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -10
 
 Expected: `🎉 All Zurvan checks passed successfully.`
 
-- [ ] **Step 5: Commit 18b complete**
+- [ ] **Step 7: Commit 18b complete**
 
 ```bash
 git add scripts/cli.py
-git commit -m "feat(18b): Wire --save into CLI context/search parsers — 18b complete"
+git commit -m "feat(18b): Wire --save and --format into CLI; 18b complete"
 ```
 
 ---
 
-## Task 8: 18c — Image-aware skeleton (TDD)
+## Task 8: 18c — Complete image-aware skeleton (TDD)
+
+Covers: image files, Markdown embedded references, remote URLs (log only), PDF best-effort, manifest JSON, correct collision-safe frontmatter path.
 
 **Files:**
 - Modify: `tests/test_ingest.py` (append tests)
@@ -1167,6 +1334,9 @@ git commit -m "feat(18b): Wire --save into CLI context/search parsers — 18b co
 - [ ] **Step 1: Append image detection tests to `tests/test_ingest.py`**
 
 ```python
+import json
+import re as _re
+
 def test_image_file_produces_pending_visual_stub(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
@@ -1196,12 +1366,9 @@ def test_image_stub_path_is_relative(tmp_path, monkeypatch):
 
     ingest_image_stub(str(img))
 
-    stub = tmp_path / "wiki" / "sources" / "chart_jpg.md"
-    content = stub.read_text()
-    import re
-    path_match = re.search(r"path: (.+)", content)
-    assert path_match
-    assert not os.path.isabs(path_match.group(1).strip())
+    content = (tmp_path / "wiki" / "sources" / "chart_jpg.md").read_text()
+    path_match = _re.search(r"path: (.+)", content)
+    assert path_match and not os.path.isabs(path_match.group(1).strip())
 
 
 def test_image_stub_logs_image_skip(tmp_path, monkeypatch):
@@ -1210,14 +1377,12 @@ def test_image_stub_logs_image_skip(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
 
     from scripts.ingest import ingest_image_stub
-    img = tmp_path / "photo.png"
-    img.write_bytes(b"data")
+    (tmp_path / "photo.png").write_bytes(b"data")
 
-    ingest_image_stub(str(img))
+    ingest_image_stub(str(tmp_path / "photo.png"))
 
     log = (tmp_path / "wiki" / "log.md").read_text()
-    assert "image-skip" in log
-    assert "photo.png" in log
+    assert "image-skip" in log and "photo.png" in log
 
 
 def test_image_stub_prints_warning(tmp_path, monkeypatch, capsys):
@@ -1226,31 +1391,53 @@ def test_image_stub_prints_warning(tmp_path, monkeypatch, capsys):
     (tmp_path / "wiki" / "log.md").write_text("")
 
     from scripts.ingest import ingest_image_stub
-    img = tmp_path / "icon.gif"
-    img.write_bytes(b"data")
+    (tmp_path / "icon.gif").write_bytes(b"data")
 
-    ingest_image_stub(str(img))
+    ingest_image_stub(str(tmp_path / "icon.gif"))
 
     captured = capsys.readouterr()
     assert "Image detected but not processed" in captured.out
     assert "icon.gif" in captured.out
 
 
-def test_image_stub_handles_filename_collision(tmp_path, monkeypatch):
+def test_image_stub_collision_frontmatter_uses_actual_filename(tmp_path, monkeypatch):
+    """Collision-loop must update the frontmatter path to match the actual file written."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
     from scripts.ingest import ingest_image_stub
-    # Call twice with same name
     img = tmp_path / "image.png"
     img.write_bytes(b"data")
 
-    ingest_image_stub(str(img))
-    ingest_image_stub(str(img))
+    ingest_image_stub(str(img))  # creates image_png.md
+    ingest_image_stub(str(img))  # creates image_png-2.md
 
-    stubs = list((tmp_path / "wiki" / "sources").glob("image_png*.md"))
+    stubs = sorted((tmp_path / "wiki" / "sources").glob("image_png*.md"))
     assert len(stubs) == 2
+    # The second stub must reference image_png-2.md in its path, not image_png.md
+    content2 = stubs[1].read_text()
+    assert "image_png-2.md" in content2
+
+
+def test_image_stub_writes_manifest_json(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    (tmp_path / "data").mkdir()
+
+    from scripts.ingest import ingest_image_stub
+    (tmp_path / "diagram.png").write_bytes(b"data")
+
+    ingest_image_stub(str(tmp_path / "diagram.png"))
+
+    manifest_path = tmp_path / "data" / "image_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text())
+    assert len(manifest) == 1
+    assert manifest[0]["status"] == "pending"
+    assert manifest[0]["type"] == "image"
+    assert not os.path.isabs(manifest[0]["path"])
 
 
 def test_is_image_file_detects_extensions():
@@ -1260,21 +1447,58 @@ def test_is_image_file_detects_extensions():
     assert is_image_file("chart.webp")
     assert not is_image_file("notes.txt")
     assert not is_image_file("paper.pdf")
+
+
+def test_markdown_embedded_image_logged_but_text_continues(tmp_path, monkeypatch, capsys):
+    """Markdown with embedded images should log a skip but continue extracting text."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+
+    from scripts.ingest import scan_for_embedded_images
+    md_content = "# Title\n\n![diagram](images/arch.png)\n\nSome text here.\n\n![remote](https://example.com/fig.png)\n"
+    refs = scan_for_embedded_images(md_content)
+
+    assert len(refs) == 2
+    assert any(r["path"] == "images/arch.png" and not r["is_remote"] for r in refs)
+    assert any(r["path"] == "https://example.com/fig.png" and r["is_remote"] for r in refs)
+
+
+def test_remote_image_url_not_downloaded(tmp_path, monkeypatch):
+    """Remote image URLs must be logged but never fetched."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+
+    from unittest.mock import patch
+    from scripts.ingest import scan_for_embedded_images, log_embedded_image_refs
+    content = "![fig](https://example.com/image.png)"
+    refs = scan_for_embedded_images(content)
+
+    with patch("urllib.request.urlopen") as mock_open:
+        log_embedded_image_refs(refs)
+        mock_open.assert_not_called()
+
+    log = (tmp_path / "wiki" / "log.md").read_text()
+    assert "image-skip" in log
 ```
 
-- [ ] **Step 2: Run to verify all fail**
+- [ ] **Step 2: Run to verify new tests fail**
 
 ```bash
-PYTHONPATH=. pytest tests/test_ingest.py -v 2>&1 | tail -15
+PYTHONPATH=. pytest tests/test_ingest.py -v 2>&1 | tail -20
 ```
 
-Expected: 6 new tests fail.
+Expected: 10 new tests fail.
 
-- [ ] **Step 3: Add image detection functions to `scripts/ingest.py`**
+- [ ] **Step 3: Add image functions to `scripts/ingest.py`**
 
-Add after the existing imports:
+Add after the existing imports, before `calculate_hash`:
 
 ```python
+import json
+import re as _re
+
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
@@ -1282,8 +1506,24 @@ def is_image_file(filepath: str) -> bool:
     return os.path.splitext(filepath)[1].lower() in IMAGE_EXTENSIONS
 
 
+def scan_for_embedded_images(text: str) -> list:
+    """Return list of {path, is_remote} dicts for all ![alt](url) in text."""
+    refs = []
+    for m in _re.finditer(r"!\[.*?\]\((.+?)\)", text):
+        path = m.group(1).strip()
+        refs.append({"path": path, "is_remote": path.startswith("http://") or path.startswith("https://")})
+    return refs
+
+
+def log_embedded_image_refs(refs: list) -> None:
+    """Log each embedded image reference as image-skip. Never download anything."""
+    from scripts.wiki_merge import append_log_image_skip
+    for ref in refs:
+        append_log_image_skip(ref["path"])
+
+
 def ingest_image_stub(filepath: str) -> None:
-    """Create a pending-visual stub page for image files. No extraction, no OCR."""
+    """Create a pending-visual stub for an image file. No extraction, no OCR, no network."""
     from scripts.wiki_merge import append_log_image_skip
     from scripts.safe_write import write_file_safely
 
@@ -1293,14 +1533,16 @@ def ingest_image_stub(filepath: str) -> None:
     source_dir = os.path.join("wiki", "sources")
     os.makedirs(source_dir, exist_ok=True)
 
-    # Collision protection
+    # Collision-safe stub filename
     candidate = os.path.join(source_dir, f"{slug}.md")
     counter = 2
     while os.path.exists(candidate):
         candidate = os.path.join(source_dir, f"{slug}-{counter}.md")
         counter += 1
 
-    relative_path = f"sources/{slug}.md"
+    # Path in frontmatter must match the ACTUAL file written, not the original slug
+    relative_path = f"sources/{os.path.basename(candidate)}"
+
     content = (
         f"---\n"
         f"type: image-stub\n"
@@ -1313,24 +1555,41 @@ def ingest_image_stub(filepath: str) -> None:
         f"Image detected but not processed. Pending visual extraction.\n"
     )
     write_file_safely(candidate, content)
+
+    # Write manifest JSON entry
+    manifest_path = os.path.join("data", "image_manifest.json")
+    os.makedirs("data", exist_ok=True)
+    try:
+        with open(manifest_path) as fh:
+            manifest = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        manifest = []
+    manifest.append({
+        "type": "image",
+        "path": relative_path,
+        "original": basename,
+        "status": "pending",
+        "reason": "image-skip",
+        "ingested_at": datetime.datetime.now().isoformat(),
+    })
+    with open(manifest_path, "w") as fh:
+        json.dump(manifest, fh, indent=2)
+
     append_log_image_skip(basename)
     print(f"⚠ Image detected but not processed: {basename}")
 ```
 
-Also update `main()` in `ingest.py` to check for images before `extract_text()`:
+Also update `main()` in `ingest.py` to intercept image files. Add this block immediately before `file_hash = calculate_hash(args.filepath)`:
 
 ```python
-    # Check for image files before attempting text extraction
     if is_image_file(args.filepath):
         ingest_image_stub(args.filepath)
         return
 ```
 
-Add this block immediately before the line `file_hash = calculate_hash(args.filepath)`.
-
 - [ ] **Step 4: Add image guard to `scripts/extract.py`**
 
-At the top of `extract_source()`, after `if not os.path.exists(filepath):`, add:
+At the top of `extract_source()`, after the `if not os.path.exists(filepath):` block, add:
 
 ```python
     from scripts.ingest import is_image_file
@@ -1339,10 +1598,44 @@ At the top of `extract_source()`, after `if not os.path.exists(filepath):`, add:
         return
 ```
 
+Also add PDF image detection (best-effort) in `extract.py`. In the `extract_source` function, after `source_text = extract_text(filepath)`, add:
+
+```python
+    # Best-effort embedded image detection in PDFs (never breaks ingestion)
+    if filepath.lower().endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+            from scripts.ingest import log_embedded_image_refs
+            reader = PdfReader(filepath)
+            image_refs = []
+            for page in reader.pages:
+                if hasattr(page, "images") and page.images:
+                    for img in page.images:
+                        image_refs.append({"path": getattr(img, "name", "embedded"), "is_remote": False})
+            if image_refs:
+                log_embedded_image_refs(image_refs)
+        except Exception:
+            pass  # Best-effort: never break PDF text extraction
+```
+
+Also add Markdown embedded image scanning. After the PDF block, add:
+
+```python
+    # Scan Markdown/text sources for embedded image references
+    if filepath.lower().endswith((".md", ".txt")):
+        try:
+            from scripts.ingest import scan_for_embedded_images, log_embedded_image_refs
+            refs = scan_for_embedded_images(source_text)
+            if refs:
+                log_embedded_image_refs(refs)
+        except Exception:
+            pass
+```
+
 - [ ] **Step 5: Run all ingest tests**
 
 ```bash
-PYTHONPATH=. pytest tests/test_ingest.py -v 2>&1 | tail -15
+PYTHONPATH=. pytest tests/test_ingest.py -v 2>&1 | tail -20
 ```
 
 Expected: all tests pass.
@@ -1359,7 +1652,7 @@ Expected: 131+ passed, 0 failed.
 
 ```bash
 git add scripts/ingest.py scripts/extract.py tests/test_ingest.py
-git commit -m "feat(18c): Add image-aware skeleton — detect, stub, log, no OCR"
+git commit -m "feat(18c): Complete image-aware skeleton — stub, manifest, embedded refs, PDF best-effort"
 ```
 
 ---
@@ -1369,7 +1662,7 @@ git commit -m "feat(18c): Add image-aware skeleton — detect, stub, log, no OCR
 **Files:**
 - Modify: `tests/test_context_export.py` (append tests)
 - Modify: `scripts/context_export.py`
-- Modify: `scripts/cli.py`
+- Modify: `scripts/cli.py` (already has `--format` from Task 7)
 
 - [ ] **Step 1: Append format rendering tests to `tests/test_context_export.py`**
 
@@ -1377,10 +1670,10 @@ git commit -m "feat(18c): Add image-aware skeleton — detect, stub, log, no OCR
 def test_format_table_produces_markdown_table(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "test_table.md").write_text("table_kw_unique_abc")
+    (tmp_path / "wiki" / "test_table.md").write_text("table_kw_unique_abc999")
 
     from scripts.context_export import export_context
-    output = export_context("table_kw_unique_abc", fmt="table")
+    output = export_context("table_kw_unique_abc999", fmt="table")
 
     assert "| Source |" in output
     assert "|---|" in output
@@ -1389,25 +1682,23 @@ def test_format_table_produces_markdown_table(tmp_path, monkeypatch):
 def test_format_table_escapes_pipes_in_excerpts(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "pipe_test.md").write_text("pipe_kw_unique | has | pipes")
+    (tmp_path / "wiki" / "pipe_test.md").write_text("pipe_kw_unique999 | has | pipes")
 
     from scripts.context_export import export_context
-    output = export_context("pipe_kw_unique", fmt="table")
+    output = export_context("pipe_kw_unique999", fmt="table")
 
-    # The structural separator pipes in the table header are fine
-    # but content pipes in the excerpt must be escaped
-    lines = [l for l in output.splitlines() if "has" in l]
-    if lines:
-        assert "\\|" in lines[0]
+    excerpt_lines = [l for l in output.splitlines() if "has" in l]
+    if excerpt_lines:
+        assert "\\|" in excerpt_lines[0]
 
 
 def test_format_marp_starts_with_frontmatter(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "test_marp.md").write_text("marp_kw_unique_xyz")
+    (tmp_path / "wiki" / "test_marp.md").write_text("marp_kw_unique_xyz999")
 
     from scripts.context_export import export_context
-    output = export_context("marp_kw_unique_xyz", fmt="marp")
+    output = export_context("marp_kw_unique_xyz999", fmt="marp")
 
     assert output.startswith("---\nmarp: true\n---")
 
@@ -1417,9 +1708,9 @@ def test_format_table_empty_results_graceful(tmp_path, monkeypatch):
     (tmp_path / "wiki").mkdir()
 
     from scripts.context_export import export_context
-    output = export_context("absolutely_no_match_xyzxyz", fmt="table")
+    output = export_context("absolutely_no_match_xyzxyz999", fmt="table")
 
-    assert output  # does not crash
+    assert output
     assert "No results" in output
 
 
@@ -1428,7 +1719,7 @@ def test_format_marp_empty_results_graceful(tmp_path, monkeypatch):
     (tmp_path / "wiki").mkdir()
 
     from scripts.context_export import export_context
-    output = export_context("absolutely_no_match_xyzxyz", fmt="marp")
+    output = export_context("absolutely_no_match_xyzxyz999", fmt="marp")
 
     assert output
     assert "marp: true" in output
@@ -1437,10 +1728,10 @@ def test_format_marp_empty_results_graceful(tmp_path, monkeypatch):
 def test_format_markdown_default_unchanged(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "default_fmt.md").write_text("default_fmt_kw_abc")
+    (tmp_path / "wiki" / "default_fmt.md").write_text("default_fmt_kw_abc999")
 
     from scripts.context_export import export_context
-    output = export_context("default_fmt_kw_abc", fmt="markdown")
+    output = export_context("default_fmt_kw_abc999", fmt="markdown")
 
     assert "Zurvan Context Bundle" in output
 
@@ -1449,10 +1740,10 @@ def test_save_with_marp_format_writes_canonical_markdown(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
-    (tmp_path / "wiki" / "marp_save.md").write_text("marp_save_kw_unique")
+    (tmp_path / "wiki" / "marp_save.md").write_text("marp_save_kw_unique999")
 
     from scripts.context_export import export_context
-    export_context("marp_save_kw_unique", save=True, fmt="marp")
+    export_context("marp_save_kw_unique999", save=True, fmt="marp")
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
     assert len(syntheses) == 1
@@ -1467,11 +1758,11 @@ def test_save_with_marp_format_writes_canonical_markdown(tmp_path, monkeypatch):
 PYTHONPATH=. pytest tests/test_context_export.py -v 2>&1 | tail -20
 ```
 
-Expected: 7 new tests fail (`TypeError` on unknown `fmt` kwarg).
+Expected: 7 new tests fail (unknown `fmt` kwarg for now).
 
-- [ ] **Step 3: Add `_format_table()`, `_format_marp()`, and `fmt` param to `scripts/context_export.py`**
+- [ ] **Step 3: Add `_format_table()`, `_format_marp()`, and format dispatch to `scripts/context_export.py`**
 
-Add these two helpers before `export_context`:
+Add these two helpers just before `export_context`:
 
 ```python
 def _format_table(results: list) -> str:
@@ -1498,7 +1789,16 @@ def _format_marp(topic: str, results: list) -> str:
     return "\n".join(slides)
 ```
 
-The `fmt` parameter is already in the signature from Task 6. Now add the format dispatch at the end of `export_context`, replacing the `return base_output` line:
+Now update the end of `export_context` — the `fmt` param is already in the signature from Task 6. Replace:
+
+```python
+    if save:
+        _save_synthesis(topic, base_output, seed_paths)
+
+    return base_output
+```
+
+With:
 
 ```python
     if save:
@@ -1519,34 +1819,7 @@ PYTHONPATH=. pytest tests/test_context_export.py -v 2>&1 | tail -20
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Add `--format` flag to cli.py context parser**
-
-Find the context parser block. After the `--save` line added in Task 7, add:
-
-```python
-    context_parser.add_argument(
-        "--format",
-        choices=["markdown", "table", "marp"],
-        default="markdown",
-        dest="output_format",
-        help="Output format for stdout (markdown/table/marp). --save always writes canonical markdown.",
-    )
-```
-
-Update the context handler:
-
-```python
-    elif args.command == "context":
-        from scripts.context_export import export_context
-        bundle = export_context(
-            args.topic, args.limit, args.hybrid, args.graph, args.depth,
-            save=getattr(args, "save", False),
-            fmt=getattr(args, "output_format", "markdown"),
-        )
-        print(bundle)
-```
-
-- [ ] **Step 6: Run full suite**
+- [ ] **Step 5: Run full suite**
 
 ```bash
 PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
@@ -1554,7 +1827,7 @@ PYTHONPATH=. pytest tests/ -q 2>&1 | tail -5
 
 Expected: 131+ passed, 0 failed.
 
-- [ ] **Step 7: Run check.sh — end of 18c milestone**
+- [ ] **Step 6: Run check.sh — end of 18c milestone**
 
 ```bash
 PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -10
@@ -1562,10 +1835,10 @@ PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -10
 
 Expected: `🎉 All Zurvan checks passed successfully.`
 
-- [ ] **Step 8: Commit 18c complete**
+- [ ] **Step 7: Commit 18c complete**
 
 ```bash
-git add scripts/context_export.py scripts/cli.py tests/test_context_export.py
+git add scripts/context_export.py tests/test_context_export.py
 git commit -m "feat(18c): Add --format table/marp to context export — 18c complete"
 ```
 
@@ -1579,36 +1852,33 @@ git commit -m "feat(18c): Add --format table/marp to context export — 18c comp
 - Modify: `README.md`
 - Modify: `docs/workflows_and_plans.md`
 
-- [ ] **Step 1: Prepend Phase 18 entry to `CHANGELOG.md`**
-
-Use the `Raouf:` template. Add after `## Change Log`:
+- [ ] **Step 1: Prepend Phase 18 entry to `CHANGELOG.md`** (after `## Change Log`)
 
 ```markdown
 ### 2026-06-02 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Phase 18: Living Wiki + Provider Expansion
-- **Summary:** Closed the four largest gaps vs the Karpathy LLM Wiki vision. (18a) Refactored llm.py into a provider registry; added Anthropic/Claude as optional provider via raw urllib (no SDK). (18b) Created wiki_merge.py as canonical concept/entity writer — pages now compound across sources instead of accumulating as per-source fossils; added --save flag to zurvan context to file answers back into wiki/syntheses/; standardised log.md to grep-parseable ## [date] format. (18c) Added image-aware skeleton — image files detected, stubbed as pending-visual, logged, and skipped cleanly with no OCR or network calls; added --format table/marp stdout rendering with --save always writing canonical Markdown.
+- **Summary:** (18a) Refactored llm.py into a provider registry; added Anthropic/Claude via raw urllib, mock is now default when ZURVAN_LLM_PROVIDER is unset. (18b) Created wiki_merge.py as canonical concept/entity writer — pages compound across sources; migrates legacy source_id frontmatter; added --save to zurvan context and zurvan search to file answers into wiki/syntheses/; log.md uses grep-parseable ## [date] format with shared formatter. (18c) Complete image-aware skeleton: image files, embedded Markdown refs, remote URL logging, PDF best-effort detection — all produce pending-visual stubs with manifest JSON, no OCR or network. Added --format table/marp stdout rendering; --save always writes canonical Markdown.
 - **Files Changed:**
-  - `scripts/llm.py` — Provider registry + Anthropic provider
-  - `scripts/wiki_merge.py` — New: canonical merge writer + shared log formatter
-  - `scripts/extract.py` — Route concept/entity writing through merge_extraction()
-  - `scripts/ingest.py` — Use new log format; add image detection
-  - `scripts/context_export.py` — Add --save and --format rendering
-  - `scripts/cli.py` — Add --save and --format flags
-  - `tests/test_llm.py`, `tests/test_wiki_merge.py`, `tests/test_context_export.py`, `tests/test_ingest.py` — New/extended tests
-- **Verification:** pytest → 131+ passed, 0 failed. check.sh passed after each sub-phase.
-- **Follow-ups:** Phase 19: Review OpenAI model default (GPT-5.x). Phase 19+: Image extraction via local vision or OCR provider.
+  - `scripts/filename_utils.py` — New shared sanitize_filename()
+  - `scripts/llm.py` — Provider registry + Anthropic + mock default
+  - `scripts/wiki_merge.py` — Canonical merge writer + shared log formatter
+  - `scripts/extract.py` — Route concept/entity pages through merge_extraction()
+  - `scripts/ingest.py` — New log format; image detection + manifest JSON
+  - `scripts/context_export.py` — --save (context + search), --format table/marp
+  - `scripts/cli.py` — --save and --format flags wired
+  - `tests/test_filename_utils.py`, `tests/test_llm.py`, `tests/test_wiki_merge.py`, `tests/test_context_export.py`, `tests/test_ingest.py` — New/extended tests
+- **Verification:** pytest → 131+ passed, 0 failed. check.sh passed after 18a, 18b, and 18c.
+- **Follow-ups:** Review OpenAI model default (GPT-5.x). Phase 19+: image extraction via OCR/vision provider.
 ```
 
-- [ ] **Step 2: Prepend same entry to `AGENTS.md`**
-
-Add at the top of the entries section (after the Rules block).
+- [ ] **Step 2: Add same entry to `AGENTS.md`** (at top of entries section)
 
 - [ ] **Step 3: Mark Phase 18 complete in `README.md` and `docs/workflows_and_plans.md`**
 
-In both files, find the Phase 17 entry and add below it:
+In both files, after the Phase 17 entry add:
 ```markdown
-- **Phase 18 ✅** — Living Wiki + Provider Expansion (provider registry + Anthropic, cross-source merge, --save, log format, image skeleton, --format table/marp)
+- **Phase 18 ✅** — Living Wiki + Provider Expansion (Anthropic provider, cross-source merge, --save, log format contract, image skeleton, --format table/marp)
 ```
 
 - [ ] **Step 4: Commit docs**
@@ -1618,22 +1888,26 @@ git add CHANGELOG.md AGENTS.md README.md docs/workflows_and_plans.md
 git commit -m "docs: Mark Phase 18 complete in changelog, AGENTS, README, and workflows"
 ```
 
-- [ ] **Step 5: Final full check**
+- [ ] **Step 5: Final verification**
 
 ```bash
-PYTHONPATH=. pytest tests/ -q && bash scripts/check.sh 2>&1 | tail -5
+PYTHONPATH=. pytest tests/ -q && PYTHONPATH=. bash scripts/check.sh 2>&1 | tail -5
 ```
 
-Expected: all green.
+Expected: `🎉 All Zurvan checks passed successfully.`
 
 ---
 
-## Self-review notes
+## Self-review checklist
 
-- All `_PROVIDERS` and `_PROVIDER_DEFAULTS` keys match in Task 1 (mock/openai/ollama/anthropic) ✅
-- `merge_extraction(data, wiki_dir)` signature is consistent across Task 3, Task 4, and all test calls ✅
-- `export_context(topic, ..., save=False, fmt="markdown")` signature matches all test calls ✅
-- `_save_synthesis` always called with `base_output` (canonical markdown), never with the fmt-transformed output ✅
-- `is_image_file` and `ingest_image_stub` are imported in tests from `scripts.ingest` ✅
-- `append_log_image_skip` is defined in `scripts/wiki_merge.py` and used in `ingest.py` via import ✅
-- cli.py uses `dest="output_format"` for `--format` to avoid collision with Python built-in `format` ✅
+- `run_llm()` defaults to `"mock"` when env unset — confirmed in Task 2 Step 3 ✅
+- `--save` wired for both `context` and `search` in cli.py — Task 7 Steps 3 + 4 ✅
+- Synthesis filenames use `%Y%m%d_%H%M%S_%f` + collision loop — Task 6 Step 3 ✅
+- `_merge_page` seeds `sources` from legacy `source_id` if `sources` is empty — Task 4 Step 3 ✅
+- Both `extract.py` and `wiki_merge.py` import from `scripts.filename_utils` — Tasks 1 and 3 ✅
+- 18c covers image files, embedded Markdown refs, remote URLs, PDF best-effort — Task 8 ✅
+- Manifest JSON written in `ingest_image_stub()` — Task 8 Step 3 ✅
+- Collision loop updates `relative_path` from the final candidate, not original slug — Task 8 Step 3 ✅
+- `check.sh` run after 18a (Task 2 Step 6), 18b (Task 7 Step 6), 18c (Task 9 Step 6) ✅
+- `_save_synthesis` YAML-quotes the `query:` value to handle `:`, `#`, `|` in topics ✅
+- `dest="output_format"` used in argparse to avoid shadowing built-in `format` ✅
