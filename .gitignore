@@ -29,3 +29,17 @@ data/embeddings/
 __pycache__/
 .pytest_cache/
 .DS_Store
+
+# Ingested external knowledge (private — generated from other projects)
+# ingest.py produces <original-filename>.<ext>.md stubs in these dirs
+wiki/sources/*.md
+wiki/claims/Claim-*.md
+wiki/concepts/AutoConcept-*.md
+
+# Zurvan MCP knowledge nodes (written by zurvan_remember)
+wiki/note-*.md
+
+# Obsidian auto-generated session state (not config)
+.obsidian/workspace.json
+.obsidian/appearance.json
+*.canvas
