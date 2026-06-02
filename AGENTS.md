@@ -4,6 +4,24 @@
 
 ### 2026-06-02 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase 18: Living Wiki + Provider Expansion
+- **Summary:** (18a) Refactored llm.py into a provider registry with mock as default when ZURVAN_LLM_PROVIDER is unset; added Anthropic/Claude via raw urllib with no SDK. (18b) Created wiki_merge.py as canonical concept/entity writer — pages now compound across sources via additive merge; migrates legacy source_id frontmatter; added --save to zurvan context and zurvan search to file answers into wiki/syntheses/ with microsecond-safe filenames; standardised log.md to grep-parseable ## [date] format with shared formatter. (18c) Complete image-aware skeleton: image files, embedded Markdown refs, remote URL logging, PDF best-effort detection — all produce pending-visual stubs with manifest JSON entry, no OCR or network. Added --format table/marp stdout rendering; --save always writes canonical Markdown.
+- **Files Changed:**
+  - `scripts/filename_utils.py` — New shared sanitize_filename()
+  - `scripts/llm.py` — Provider registry + Anthropic + mock default
+  - `scripts/wiki_merge.py` — Canonical merge writer + shared log formatter
+  - `scripts/extract.py` — Route concept/entity pages through merge_extraction(); image guard; embedded image scan
+  - `scripts/ingest.py` — New log format; image detection + manifest JSON; embedded image logging
+  - `scripts/context_export.py` — --save (context + search), --format table/marp
+  - `scripts/cli.py` — --save and --format flags wired
+  - `scripts/chunk.py` — Fix chunk_id collision (use full text not text[:50])
+  - `scripts/memory.py` — Rename local sanitize_filename to _make_note_slug to avoid confusion with shared utility
+  - `tests/test_filename_utils.py`, `tests/test_llm.py`, `tests/test_wiki_merge.py`, `tests/test_context_export.py`, `tests/test_ingest.py` — New/extended tests
+- **Verification:** pytest → 183 passed, 0 failed. check.sh passed after 18a, 18b, and 18c milestones.
+- **Follow-ups:** Review OpenAI model default (GPT-5.x). Phase 19+: image extraction via OCR/vision provider.
+
+### 2026-06-02 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Full Project Audit — Test Fix + Deprecation Cleanup
 - **Summary:** 131/131 tests pass after fixing a time-bomb test failure (hardcoded date now > 30 days old in `test_find_stale_decisions`), updating all 10 Starlette `TemplateResponse` calls to the 0.50+ signature, and adding `filter="data"` to `tar.extract()` for Python 3.14 compat.
 - **Files Changed:** `tests/test_decision_compare.py`, `scripts/review_routes.py`, `scripts/restore_snapshot.py`
