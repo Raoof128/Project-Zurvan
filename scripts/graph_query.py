@@ -1,8 +1,9 @@
 import sqlite3
 from typing import Dict, Any, List, Optional
 import json
+from scripts.config import PROJECT_ROOT
 
-DB_PATH = "data/graph.sqlite"
+DB_PATH = str(PROJECT_ROOT / "data" / "graph.sqlite")
 
 def get_stats(db_path: str = DB_PATH) -> Dict[str, int]:
     conn = sqlite3.connect(db_path)

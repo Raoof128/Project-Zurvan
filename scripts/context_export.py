@@ -6,13 +6,14 @@ from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from scripts.graph_context import expand_graph_context
+from scripts.config import PROJECT_ROOT
 
 def _search_internal(query: str, hybrid: bool = False, limit: int = 10) -> List[Dict[str, Any]]:
     if hybrid:
         from scripts.hybrid_search import search_hybrid
         return search_hybrid(query, limit)
 
-    wiki_files = glob.glob("wiki/**/*.md", recursive=True)
+    wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True)
     matches = []
     keywords = query.lower().split()
     
@@ -40,7 +41,7 @@ def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> No
 
     slug = sanitize_filename(topic)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    synth_dir = os.path.join("wiki", "syntheses")
+    synth_dir = str(PROJECT_ROOT / "wiki" / "syntheses")
     os.makedirs(synth_dir, exist_ok=True)
 
     # Microsecond timestamp makes collision extremely unlikely; loop is safety net

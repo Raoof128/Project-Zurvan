@@ -6,6 +6,7 @@ import json
 import re as _re_ingest
 from pypdf import PdfReader
 from scripts.db import register_source
+from scripts.config import PROJECT_ROOT
 
 def calculate_hash(filepath):
     sha256 = hashlib.sha256()
@@ -111,7 +112,7 @@ def ingest_image_stub(filepath: str) -> None:
     basename = os.path.basename(filepath)
     slug = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in basename)
 
-    source_dir = os.path.join("wiki", "sources")
+    source_dir = str(PROJECT_ROOT / "wiki" / "sources")
     os.makedirs(source_dir, exist_ok=True)
 
     # Collision-safe: loop until we find an unused filename
@@ -140,8 +141,8 @@ def ingest_image_stub(filepath: str) -> None:
         f.write(content)
 
     # Append to manifest JSON
-    manifest_path = os.path.join("data", "image_manifest.json")
-    os.makedirs("data", exist_ok=True)
+    manifest_path = str(PROJECT_ROOT / "data" / "image_manifest.json")
+    os.makedirs(str(PROJECT_ROOT / "data"), exist_ok=True)
     try:
         with open(manifest_path, encoding="utf-8") as fh:
             manifest = json.load(fh)
