@@ -4,6 +4,14 @@
 
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Fix: CWD-independent absolute paths via PROJECT_ROOT
+- **Summary:** Added `PROJECT_ROOT = Path(__file__).parent.parent.resolve()` to `scripts/config.py`. Updated 9 scripts and 4 test files to use it. MCP server now works from any working directory. 183 tests pass.
+- **Files Changed:** `scripts/config.py`, `scripts/graph_query.py`, `scripts/graph_schema.py`, `scripts/hybrid_search.py`, `scripts/rebuild_search_index.py`, `scripts/memory.py`, `scripts/context_export.py`, `scripts/mcp_resources.py`, `scripts/wiki_merge.py`, `scripts/ingest.py`, `tests/test_wiki_merge.py`, `tests/test_context_export.py`, `tests/test_ingest.py`, `tests/test_cli.py`
+- **Verification:** `pytest` → 183 passed, 0 failed. `public_repo_guard.py` passed.
+- **Follow-ups:** Remaining scripts using relative paths (`eval_search.py`, `graph_build.py`, `extract.py`, etc.) are non-MCP-critical; migrate incrementally.
+
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Add Apache 2.0 LICENSE
 - **Summary:** Added LICENSE file (Apache 2.0, copyright 2026 Mohammad Raouf Abedini). Added license badge to README.md.
 - **Files Changed:** `LICENSE`, `README.md`

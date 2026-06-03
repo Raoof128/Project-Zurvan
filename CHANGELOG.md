@@ -2,6 +2,27 @@
 
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Fix: CWD-independent absolute paths via PROJECT_ROOT
+- **Summary:** Eliminated all relative `data/` and `wiki/` path strings so Zurvan works correctly regardless of the process working directory. Added `PROJECT_ROOT = Path(__file__).parent.parent.resolve()` to `scripts/config.py`. Updated 8 scripts to import and use it: `graph_query.py`, `graph_schema.py`, `hybrid_search.py`, `memory.py`, `context_export.py`, `mcp_resources.py`, `wiki_merge.py`, `ingest.py`, `rebuild_search_index.py`. Also fixed `rebuild_search_index.py` to use `INSERT OR IGNORE` to handle the 30 pre-existing duplicate chunk_ids in the wiki. Updated 4 test files (`test_wiki_merge.py`, `test_context_export.py`, `test_ingest.py`, `test_cli.py`) to replace `monkeypatch.chdir` with `monkeypatch.setattr(..., "PROJECT_ROOT", tmp_path)` so tests remain isolated without relying on CWD. Restored `~/.claude.json` MCP config to clean `python` command (no bash wrapper needed).
+- **Files Changed:**
+  - `scripts/config.py` — Added `PROJECT_ROOT`
+  - `scripts/graph_query.py`, `scripts/graph_schema.py` — Absolute `data/graph.sqlite`
+  - `scripts/hybrid_search.py` — Absolute `data/search.sqlite`
+  - `scripts/rebuild_search_index.py` — Absolute `data/search.sqlite` + `INSERT OR IGNORE`
+  - `scripts/memory.py` — Absolute all `wiki/` paths
+  - `scripts/context_export.py` — Absolute wiki glob + syntheses dir
+  - `scripts/mcp_resources.py` — Absolute `wiki/` and `eval/` paths
+  - `scripts/wiki_merge.py` — Absolute `wiki/log.md`
+  - `scripts/ingest.py` — Absolute `wiki/sources` and `data/image_manifest.json`
+  - `tests/test_wiki_merge.py` — Replace `chdir` with `setattr PROJECT_ROOT`
+  - `tests/test_context_export.py` — Replace `chdir` with `setattr PROJECT_ROOT`
+  - `tests/test_ingest.py` — Replace `chdir` with `setattr PROJECT_ROOT`
+  - `tests/test_cli.py` — Fix assertion to accept absolute path in output
+- **Verification:** `pytest` → 183 passed, 0 failed. `public_repo_guard.py` passed.
+- **Follow-ups:** Remaining scripts (`eval_search.py`, `graph_build.py`, `extract.py`, etc.) still use relative paths but are not MCP-critical; can be migrated incrementally.
+
+### 2026-06-03 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Add Apache 2.0 LICENSE
 - **Summary:** Added LICENSE file (Apache 2.0, copyright 2026 Mohammad Raouf Abedini). Added license badge to README.md.
 - **Files Changed:** `LICENSE`, `README.md`

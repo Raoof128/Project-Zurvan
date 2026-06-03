@@ -1,6 +1,14 @@
 import os
 import pytest
+import scripts.wiki_merge as _wiki_merge
+import scripts.ingest as _ingest
 from scripts.ingest import extract_text, calculate_hash
+
+
+def _patch_roots(monkeypatch, tmp_path):
+    """Redirect PROJECT_ROOT in wiki_merge and ingest to tmp_path."""
+    monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(_ingest, "PROJECT_ROOT", tmp_path)
 
 def test_calculate_hash(tmp_path):
     f = tmp_path / "test.txt"
@@ -21,12 +29,11 @@ def test_extract_text_unsupported():
 import re
 
 def test_append_log_uses_grep_parseable_format(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_ingest
-    append_log_ingest("example.pdf")
+    _wiki_merge.append_log_ingest("example.pdf")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert re.search(r"^## \[", log, re.MULTILINE)
@@ -40,7 +47,7 @@ import re as _re
 
 
 def test_image_file_produces_pending_visual_stub(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -58,7 +65,7 @@ def test_image_file_produces_pending_visual_stub(tmp_path, monkeypatch):
 
 
 def test_image_stub_path_is_relative(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -74,7 +81,7 @@ def test_image_stub_path_is_relative(tmp_path, monkeypatch):
 
 
 def test_image_stub_logs_image_skip(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -88,7 +95,7 @@ def test_image_stub_logs_image_skip(tmp_path, monkeypatch):
 
 
 def test_image_stub_prints_warning(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -104,7 +111,7 @@ def test_image_stub_prints_warning(tmp_path, monkeypatch, capsys):
 
 def test_image_stub_collision_frontmatter_uses_actual_filename(tmp_path, monkeypatch):
     """Collision-loop must update the frontmatter path to match the actual file written."""
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -124,7 +131,7 @@ def test_image_stub_collision_frontmatter_uses_actual_filename(tmp_path, monkeyp
 
 
 def test_image_stub_writes_manifest_json(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "data").mkdir()
@@ -153,7 +160,7 @@ def test_is_image_file_detects_extensions():
 
 
 def test_markdown_embedded_image_refs_detected(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -167,7 +174,7 @@ def test_markdown_embedded_image_refs_detected(tmp_path, monkeypatch):
 
 
 def test_remote_image_url_not_downloaded(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -185,7 +192,7 @@ def test_remote_image_url_not_downloaded(tmp_path, monkeypatch):
 
 
 def test_image_stub_handles_filename_collision_with_counter(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 

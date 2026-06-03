@@ -4,7 +4,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-DB_PATH = "data/graph.sqlite"
+from scripts.config import PROJECT_ROOT
+DB_PATH = str(PROJECT_ROOT / "data" / "graph.sqlite")
 
 def setup_graph_schema(db_path: str = DB_PATH) -> None:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)

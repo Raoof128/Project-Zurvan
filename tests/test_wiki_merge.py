@@ -1,16 +1,21 @@
 import os
 import re
 import pytest
+import scripts.wiki_merge as _wiki_merge
 from pathlib import Path
 
 
+def _patch_root(monkeypatch, tmp_path):
+    """Redirect PROJECT_ROOT to tmp_path so log writes go to the temp wiki."""
+    monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
+
+
 def test_log_event_matches_grep_pattern(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_event
-    append_log_event("ingest", "example.pdf")
+    _wiki_merge.append_log_event("ingest", "example.pdf")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert re.search(r"^## \[", log, re.MULTILINE)
@@ -19,60 +24,55 @@ def test_log_event_matches_grep_pattern(tmp_path, monkeypatch):
 
 
 def test_log_event_escapes_pipe_in_parts(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_event
-    append_log_event("query-save", "my|topic|with|pipes")
+    _wiki_merge.append_log_event("query-save", "my|topic|with|pipes")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert "my\\|topic\\|with\\|pipes" in log
 
 
 def test_log_ingest_wrapper(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_ingest
-    append_log_ingest("notes.txt")
+    _wiki_merge.append_log_ingest("notes.txt")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert "ingest" in log and "notes.txt" in log
 
 
 def test_log_merge_wrapper(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_merge
-    append_log_merge("RAG", 3)
+    _wiki_merge.append_log_merge("RAG", 3)
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert "merge" in log and "RAG" in log and "3 sources" in log
 
 
 def test_log_save_wrapper(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_save
-    append_log_save("vector-search-reliability")
+    _wiki_merge.append_log_save("vector-search-reliability")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert "query-save" in log and "vector-search-reliability" in log
 
 
 def test_log_image_skip_wrapper(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
-    from scripts.wiki_merge import append_log_image_skip
-    append_log_image_skip("diagram.png")
+    _wiki_merge.append_log_image_skip("diagram.png")
 
     log = (tmp_path / "wiki" / "log.md").read_text()
     assert "image-skip" in log

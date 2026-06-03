@@ -14,7 +14,8 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     return dot / (norm_v1 * norm_v2)
 
 def search_hybrid(query: str, limit: int = 10) -> List[Dict]:
-    db_path = "data/search.sqlite"
+    from scripts.config import PROJECT_ROOT
+    db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
     if not os.path.exists(db_path):
         print("Error: Search index not found. Run 'zurvan index rebuild' first.")
         return []
