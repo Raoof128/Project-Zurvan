@@ -1,5 +1,6 @@
 import pytest
 import subprocess
+import os
 
 def test_cli_help(capsys):
     res = subprocess.run(["python", "scripts/cli.py", "--help"], capture_output=True, text=True)
@@ -12,4 +13,4 @@ def test_cli_remember():
     # Test just calling it to ensure argparse is set up correctly (will write to wiki but that's safe in test)
     res = subprocess.run(["python", "scripts/cli.py", "remember", "--title", "Test Note", "--body", "Test body"], capture_output=True, text=True)
     assert res.returncode == 0
-    assert "Created wiki/note-test-note.md" in res.stdout
+    assert os.path.join("wiki", "note-test-note.md") in res.stdout

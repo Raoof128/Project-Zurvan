@@ -1,8 +1,16 @@
 import pytest
 import os
+import scripts.context_export as _context_export
+import scripts.wiki_merge as _wiki_merge
 from scripts.context_export import export_context, search_memory
 import io
 import sys
+
+
+def _patch_roots(monkeypatch, tmp_path):
+    """Redirect PROJECT_ROOT in context_export and wiki_merge to tmp_path."""
+    monkeypatch.setattr(_context_export, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
 
 def test_search_memory(capsys):
     # Ensure there's a file to find
@@ -32,12 +40,11 @@ def test_export_context(capsys):
 
 
 def test_save_writes_synthesis_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "save_kw_test.md").write_text("save_unique_kw_abc123")
 
-    from scripts.context_export import export_context
     export_context("save_unique_kw_abc123", save=True)
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
@@ -45,12 +52,11 @@ def test_save_writes_synthesis_file(tmp_path, monkeypatch):
 
 
 def test_save_synthesis_has_required_frontmatter(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "fm_kw_test.md").write_text("fm_unique_kw_xyz789")
 
-    from scripts.context_export import export_context
     export_context("fm_unique_kw_xyz789", save=True)
 
     content = list((tmp_path / "wiki" / "syntheses").glob("*.md"))[0].read_text()
@@ -61,12 +67,11 @@ def test_save_synthesis_has_required_frontmatter(tmp_path, monkeypatch):
 
 
 def test_save_no_overwrite_microsecond_collision(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "ow_kw_test.md").write_text("overwrite_kw_unique123")
 
-    from scripts.context_export import export_context
     export_context("overwrite_kw_unique123", save=True)
     export_context("overwrite_kw_unique123", save=True)
 
@@ -87,12 +92,11 @@ def test_save_false_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_search_save_writes_synthesis_file(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "search_save_kw.md").write_text("search_save_unique_kw_xyz")
 
-    from scripts.context_export import search_memory
     search_memory("search_save_unique_kw_xyz", save=True)
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
@@ -114,11 +118,10 @@ def test_search_save_false_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_format_table_produces_markdown_table(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "test_table.md").write_text("table_kw_unique_abc999")
 
-    from scripts.context_export import export_context
     output = export_context("table_kw_unique_abc999", fmt="table")
 
     assert "| Source |" in output
@@ -183,12 +186,11 @@ def test_format_markdown_default_unchanged(tmp_path, monkeypatch):
 
 
 def test_save_with_marp_format_writes_canonical_markdown(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "marp_save.md").write_text("marp_save_kw_unique999")
 
-    from scripts.context_export import export_context
     export_context("marp_save_kw_unique999", save=True, fmt="marp")
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))

@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 
 from scripts.safe_write import write_file_safely
 from scripts.filename_utils import sanitize_filename
+from scripts.config import PROJECT_ROOT
 
 
 # ── Log helpers ────────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ def append_log_event(kind: str, *parts: str) -> None:
     safe_write.is_safe_path also rejects tmp_path in tests (it checks against the
     physical project root, not CWD), which would silently swallow all log writes.
     """
-    log_path = os.path.join("wiki", "log.md")
+    log_path = str(PROJECT_ROOT / "wiki" / "log.md")
     date = datetime.date.today().isoformat()
     safe_parts = [str(p).replace("|", "\\|") for p in parts]
     entry = f"\n## [{date}] {kind} | {' | '.join(safe_parts)}\n"
