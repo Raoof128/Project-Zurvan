@@ -3,10 +3,11 @@ import os
 import json
 from scripts.chunk import chunk_all_markdown
 from scripts.embed import get_embedding
+from scripts.config import PROJECT_ROOT
 
 def rebuild_search_index():
-    os.makedirs("data", exist_ok=True)
-    db_path = "data/search.sqlite"
+    os.makedirs(str(PROJECT_ROOT / "data"), exist_ok=True)
+    db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
     
     # Reset DB
     if os.path.exists(db_path):
@@ -50,18 +51,20 @@ def rebuild_search_index():
     print(f"Found {len(chunks)} chunks to index.")
     
     for c in chunks:
-        # Insert chunk
+        # Insert chunk — OR IGNORE handles identical content in multiple wiki files
         cursor.execute("""
-            INSERT INTO chunks (chunk_id, source_path, heading, text, content_hash, indexed_at)
+            INSERT OR IGNORE INTO chunks (chunk_id, source_path, heading, text, content_hash, indexed_at)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (c['chunk_id'], c['source_path'], c['heading'], c['text'], c['content_hash'], c['indexed_at']))
-        
+        if cursor.rowcount == 0:
+            continue
+
         # Insert FTS
         cursor.execute("""
             INSERT INTO chunks_fts (rowid, chunk_id, heading, text)
             VALUES (last_insert_rowid(), ?, ?, ?)
         """, (c['chunk_id'], c['heading'], c['text']))
-        
+
         # Insert Embedding
         emb = get_embedding(c['text'])
         cursor.execute("""

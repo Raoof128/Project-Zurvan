@@ -4,9 +4,10 @@ import re
 from datetime import datetime
 from typing import List, Optional
 from scripts.safe_write import write_file_safely, append_file_safely, escape_yaml_string
+from scripts.config import PROJECT_ROOT
 
 def append_to_log(action: str, details: str):
-    log_path = os.path.join("wiki", "log.md")
+    log_path = str(PROJECT_ROOT / "wiki" / "log.md")
     timestamp = datetime.now().isoformat()
     entry = f"\n- **{timestamp}**: {action} - {details}"
     append_file_safely(log_path, entry)
@@ -18,7 +19,7 @@ def _make_note_slug(name: str) -> str:
 
 def add_decision(title: str, reason: str, status: str, tags: List[str]):
     filename = f"{_make_note_slug(title)}.md"
-    filepath = os.path.join("wiki", "decisions", filename)
+    filepath = str(PROJECT_ROOT / "wiki" / "decisions" / filename)
     
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
@@ -47,7 +48,7 @@ tags:
 
 def add_note(title: str, body: str, tags: List[str]):
     filename = f"note-{_make_note_slug(title)}.md"
-    filepath = os.path.join("wiki", filename)
+    filepath = str(PROJECT_ROOT / "wiki" / filename)
     
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
@@ -84,7 +85,7 @@ def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List
         
     claim_id = str(uuid.uuid4())[:8]
     filename = f"claim-{claim_id}.md"
-    filepath = os.path.join("wiki", "claims", filename)
+    filepath = str(PROJECT_ROOT / "wiki" / "claims" / filename)
     
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
@@ -111,7 +112,7 @@ tags:
 
 def add_question(question: str, reason: str, tags: List[str]):
     q_id = str(uuid.uuid4())[:8]
-    questions_path = os.path.join("wiki", "open-questions.md")
+    questions_path = str(PROJECT_ROOT / "wiki" / "open-questions.md")
     
     tags_str = ", ".join(tags)
     entry = f"\n## Q: {question}\n- **ID**: {q_id}\n- **Reason**: {reason}\n- **Tags**: {tags_str}\n"

@@ -1251,3 +1251,171 @@
 ## [2026-06-03] ingest | shane_fletcher_BSB50820_status_20260218.md.md
 
 ## [2026-06-03] ingest | MASTER_Assessments_Tracking_Readme.md.md
+
+- **2026-06-03T17:18:35.802104**: Note Added - Raoof128 — GitHub Profile README
+- **2026-06-03T17:18:46.462575**: Note Added - The Invisible Window — Research Paper
+- **2026-06-03T17:18:53.404672**: Note Added - Raouf Abedini — Identity and Background
+- **2026-06-03T17:19:00.890682**: Note Added - Raouf Key Projects
+- **2026-06-03T17:19:04.276993**: Decision Added - Use individual skillicons.dev badge links in Raoof128 README
+- **2026-06-03T17:21:32.612002**: Note Added - Zurvan MCP bash-wrapper fix
+- **2026-06-03T17:25:30.354568**: Note Added - Test Note
+## [2026-06-03] query-save | save_unique_kw_abc123
+
+## [2026-06-03] query-save | fm_unique_kw_xyz789
+
+## [2026-06-03] query-save | overwrite_kw_unique123
+
+## [2026-06-03] query-save | overwrite_kw_unique123
+
+## [2026-06-03] query-save | search_save_unique_kw_xyz
+
+## [2026-06-03] query-save | marp_save_kw_unique999
+
+## [2026-06-03] ingest | example.pdf
+
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] image-skip | chart.jpg | pending visual extraction
+
+## [2026-06-03] image-skip | photo.png | pending visual extraction
+
+## [2026-06-03] image-skip | icon.gif | pending visual extraction
+
+## [2026-06-03] image-skip | image.png | pending visual extraction
+
+## [2026-06-03] image-skip | image.png | pending visual extraction
+
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] image-skip | https://example.com/image.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+- **2026-06-03T17:25:48.451036**: Note Added - MCP test
+## [2026-06-03] ingest | example.pdf
+
+## [2026-06-03] query-save | my\|topic\|with\|pipes
+
+## [2026-06-03] ingest | notes.txt
+
+## [2026-06-03] merge | RAG | 3 sources
+
+## [2026-06-03] query-save | vector-search-reliability
+
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | Karpathy | 1 sources
+
+## [2026-06-03] ingest | example.pdf
+
+## [2026-06-03] query-save | my\|topic\|with\|pipes
+
+## [2026-06-03] ingest | notes.txt
+
+## [2026-06-03] merge | RAG | 3 sources
+
+## [2026-06-03] query-save | vector-search-reliability
+
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | Karpathy | 1 sources
+
+- **2026-06-03T17:25:57.875331**: Note Added - Test Note
+## [2026-06-03] query-save | save_unique_kw_abc123
+
+## [2026-06-03] ingest | example.pdf
+
+- **2026-06-03T17:26:44.684018**: Note Added - Test Note
+- **2026-06-03T17:31:29.845243**: Note Added - Test Note
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] image-skip | chart.jpg | pending visual extraction
+
+## [2026-06-03] image-skip | icon.gif | pending visual extraction
+
+## [2026-06-03] image-skip | image.png | pending visual extraction
+
+## [2026-06-03] image-skip | image.png | pending visual extraction
+
+## [2026-06-03] image-skip | diagram.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+## [2026-06-03] image-skip | test.png | pending visual extraction
+
+- **2026-06-03T17:31:46.549410**: Note Added - MCP test
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | Karpathy | 1 sources
+
+- **2026-06-03T17:32:03.439115**: Note Added - Test Note
+- **2026-06-03T17:32:19.645120**: Note Added - MCP test
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | RAG | 1 sources
+
+## [2026-06-03] merge | RAG | 2 sources
+
+## [2026-06-03] merge | Karpathy | 1 sources
