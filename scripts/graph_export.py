@@ -5,8 +5,12 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from scripts.graph_schema import DB_PATH
+from scripts.config import PROJECT_ROOT
 
-def export_markdown(db_path: str = DB_PATH, out_path: str = "data/graph_export.md"):
+DEFAULT_MD_EXPORT = str(PROJECT_ROOT / "data" / "graph_export.md")
+DEFAULT_DOT_EXPORT = str(PROJECT_ROOT / "data" / "graph_export.dot")
+
+def export_markdown(db_path: str = DB_PATH, out_path: str = DEFAULT_MD_EXPORT):
     if not os.path.exists(db_path):
         print(f"Error: {db_path} not found.")
         return
@@ -27,7 +31,9 @@ def export_markdown(db_path: str = DB_PATH, out_path: str = "data/graph_export.m
     edges = cursor.fetchall()
     conn.close()
     
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write("# Knowledge Graph Export\n\n")
         f.write("## Nodes\n")
@@ -40,7 +46,7 @@ def export_markdown(db_path: str = DB_PATH, out_path: str = "data/graph_export.m
             
     print(f"Exported markdown to {out_path}")
 
-def export_dot(db_path: str = DB_PATH, out_path: str = "data/graph_export.dot"):
+def export_dot(db_path: str = DB_PATH, out_path: str = DEFAULT_DOT_EXPORT):
     if not os.path.exists(db_path):
         print(f"Error: {db_path} not found.")
         return
@@ -61,7 +67,9 @@ def export_dot(db_path: str = DB_PATH, out_path: str = "data/graph_export.dot"):
     edges = cursor.fetchall()
     conn.close()
     
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write("digraph KnowledgeGraph {\n")
         f.write("  node [shape=box, style=rounded];\n")

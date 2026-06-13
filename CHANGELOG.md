@@ -1,5 +1,27 @@
 ## Change Log
 
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full audit — update OpenAI default model (GPT-5.x) + temperature safety
+- **Summary:** Closed the second documented follow-up (deferred from Phase 18 to "a separate small PR"). Verified current OpenAI API model naming against official docs (developers.openai.com): `gpt-4o` is superseded by the GPT-5 family. Bumped the openai provider default from `gpt-4o` to `gpt-5.4-mini` (current cost-efficient model with JSON mode + large context; override via `ZURVAN_LLM_MODEL`, e.g. `gpt-5.5`). Critically, the GPT-5 family and o-series reasoning models **reject** any non-default `temperature` (HTTP 400 "Only the default (1) value is supported"), but `_call_openai` unconditionally sent `temperature=0.0` — so a naive model bump would have broken every OpenAI call. Added `_openai_supports_custom_temperature()` which omits the `temperature` field for `gpt-5*` and `o1/o3/o4*` models while still sending it for legacy models (gpt-4o etc.). `response_format=json_object` retained (still supported). Updated `docs/ENVIRONMENT.md` to match; left the Phase 18 design spec as a historical record.
+- **Files Changed:**
+  - `scripts/llm.py` — `gpt-5.4-mini` default + conditional temperature gating
+  - `tests/test_llm.py` — 4 new tests (default model, GPT-5 + o-series omit temperature, legacy sends it)
+  - `docs/ENVIRONMENT.md` — Updated model column/defaults + temperature note
+- **Verification:** `pytest` → 187 passed (was 183; +4 new), 0 failed. `public_repo_guard.py` passed.
+- **Follow-ups:** None outstanding from the documented list.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full audit — finish CWD-independence for remaining non-MCP scripts
+- **Summary:** Completed the outstanding follow-up from the 2026-06-03 PROJECT_ROOT migration. Audited every script for working-directory–dependent file I/O and fixed the three genuine offenders. `graph_build.py` walked `os.walk('.')`, so building from any directory other than the repo root silently produced an empty graph; it now walks `PROJECT_ROOT` while keeping node identity repo-relative (via `os.path.relpath`) so existing `node_id` hashes and path-based type detection are unchanged. `get_file_content()` now resolves relative paths against `PROJECT_ROOT` before reading. `graph_export.py` default Markdown/DOT output paths are now absolute (`PROJECT_ROOT/data/...`) and the `makedirs` call is guarded against a bare filename. `eval_search.py` now resolves the gold file, every `expected_paths` existence check, and the keyword-fallback `wiki/`+`docs/` globs against `PROJECT_ROOT` via a new `_resolve()` helper. Confirmed the remaining `data/`-prefixed strings in `snapshot.py` (joined onto its own `ROOT`) and `public_repo_guard.py` (compared against repo-relative `git ls-files` output) are correct by design and need no change.
+- **Files Changed:**
+  - `scripts/graph_build.py` — Walk `PROJECT_ROOT`, relative node identity, abs content reads
+  - `scripts/graph_export.py` — Absolute default export paths + guarded `makedirs`
+  - `scripts/eval_search.py` — `_resolve()` helper for gold file, expected paths, and globs
+- **Verification:** `pytest` → 183 passed, 0 failed. Ran `graph_build`, `eval_search --validate`, and `graph_export` from `/tmp` (with `PYTHONPATH` set): graph built 830 nodes / 746 edges (was 0 before the fix), gold validated, export wrote to the repo `data/` dir. `eval_search --hybrid --min-top3 0.6` → top-3 100%. Node `path` column confirmed still repo-relative (`AGENTS.md`).
+- **Follow-ups:** Review OpenAI model default in `llm.py` (GPT-5.x) — left untouched as it is a configuration judgment, not a correctness bug.
+
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Fix: CWD-independent absolute paths via PROJECT_ROOT
