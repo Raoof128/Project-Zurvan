@@ -4,6 +4,20 @@ import urllib.request
 from urllib.error import URLError, HTTPError
 
 
+def _openai_supports_custom_temperature(model: str) -> bool:
+    # The GPT-5 family and the o-series reasoning models only accept the
+    # default temperature (1); sending any other value returns a 400 error
+    # ("temperature ... Only the default (1) value is supported"). For those
+    # models we omit the field entirely. Older models (gpt-4o etc.) honour it.
+    m = model.lower()
+    return not (
+        m.startswith("gpt-5")
+        or m.startswith("o1")
+        or m.startswith("o3")
+        or m.startswith("o4")
+    )
+
+
 def _call_openai(prompt: str, model: str, temperature: float) -> str:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -15,13 +29,14 @@ def _call_openai(prompt: str, model: str, temperature: float) -> str:
     }
     data = {
         "model": model,
-        "temperature": temperature,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": "You must output valid JSON only."},
             {"role": "user", "content": prompt},
         ],
     }
+    if _openai_supports_custom_temperature(model):
+        data["temperature"] = temperature
     req = urllib.request.Request(
         url, data=json.dumps(data).encode("utf-8"), headers=headers, method="POST"
     )
@@ -136,7 +151,9 @@ def _call_mock(prompt: str, model: str, temperature: float) -> str:
 
 _PROVIDER_DEFAULTS = {
     "mock": "mock",
-    "openai": "gpt-4o",
+    # gpt-5.4-mini: current cost-efficient model with JSON mode + large context.
+    # Override per-call or via ZURVAN_LLM_MODEL (e.g. "gpt-5.5" for frontier).
+    "openai": "gpt-5.4-mini",
     "ollama": "llama3",
     "anthropic": "claude-sonnet-4-6",
 }
