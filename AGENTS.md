@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** MCP server — per-argument schema docs + structured output
+- **Summary:** Added `Annotated[..., Field(description=...)]` to every parameter of all 11 MCP tools (per-arg descriptions + bounds: `limit` 1–50, `depth` 1–5, `min_top3` 0–1). Added structured output to `zurvan_graph_stats` via a `GraphStats` TypedDict — FastMCP now emits `outputSchema` + `structuredContent` `{nodes, edges}` plus a JSON text fallback. Text-rich tools (`search`/`context`) intentionally kept as curated text.
+- **Files Changed:** `scripts/mcp_server.py`, `scripts/mcp_tools.py`, `tests/test_mcp_tools.py`
+- **Verification:** `pytest` → 188 passed (+1). `e2e_mcp_smoke.py` full pass. Per-arg descriptions confirmed in inputSchema; graph_stats returns structuredContent + outputSchema. `public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP server full audit — LLM usability + correctness fixes
 - **Summary:** All 11 MCP tools had empty descriptions (FastMCP reads the wrapper `__doc__`, not the `tools.*` docstrings) — rewrote `mcp_server.py` with rich model-facing docstrings + `Literal` enums (`remember.type`, `decision.status`, `claim.confidence`) + resource descriptions. Fixed CWD bugs: `is_safe_path`/`resource_file` now anchor to `PROJECT_ROOT`. Eval tools run in-process with stdout capture (was a relative `subprocess` to `python`) — also avoids corrupting the stdio stream. Dropped no-op `depth` from `zurvan_graph_neighbours`; `zurvan_remember` now keeps `type` as a tag; `zurvan_search` returns heading+snippet.
 - **Files Changed:** `scripts/mcp_server.py`, `scripts/mcp_tools.py`, `scripts/mcp_security.py`, `scripts/mcp_resources.py`

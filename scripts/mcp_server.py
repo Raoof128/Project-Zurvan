@@ -1,4 +1,6 @@
-from typing import Literal
+from typing import Annotated, Literal, TypedDict
+
+from pydantic import Field
 
 from mcp.server.fastmcp import FastMCP
 import scripts.mcp_tools as tools
@@ -17,85 +19,84 @@ mcp = FastMCP("Zurvan", dependencies=["mcp"])
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
+def zurvan_search(
+    query: Annotated[str, Field(description="Natural-language or keyword query.")],
+    hybrid: Annotated[bool, Field(description="Blend FTS5 keyword scoring with local embeddings (best for conceptual queries). False = pure keyword scan.")] = True,
+    limit: Annotated[int, Field(description="Maximum number of results to return.", ge=1, le=50)] = 10,
+) -> str:
     """Search the Zurvan knowledge base and return ranked matches.
 
     Use this first to orient yourself on any topic before answering or editing.
     Returns a numbered list of matching wiki pages, each with a relevance score
     and (in hybrid mode) the matched heading plus a short text snippet, so you
     can judge relevance without opening every file.
-
-    Args:
-        query: Natural-language or keyword query.
-        hybrid: True (default) blends FTS5 keyword scoring with local embeddings;
-            False uses a pure keyword scan. Prefer hybrid for conceptual queries.
-        limit: Maximum number of results to return (default 10).
     """
     return tools.tool_zurvan_search(query, hybrid, limit)
 
 @mcp.tool()
-def zurvan_context(topic: str, hybrid: bool = True, graph: bool = True, limit: int = 10) -> str:
+def zurvan_context(
+    topic: Annotated[str, Field(description="The subject to assemble context for.")],
+    hybrid: Annotated[bool, Field(description="Use hybrid (keyword + embedding) retrieval.")] = True,
+    graph: Annotated[bool, Field(description="Also pull in linked graph neighbours of the top hits.")] = True,
+    limit: Annotated[int, Field(description="Maximum number of seed matches.", ge=1, le=50)] = 10,
+) -> str:
     """Build a ready-to-read Markdown context bundle for a topic.
 
     Higher-level than zurvan_search: it gathers the top matches AND (when
     graph=True) their graph neighbours into a single Markdown digest you can
     read in one shot. Use this when you need to understand the decisions,
     claims, and related concepts around a topic before making a change.
-
-    Args:
-        topic: The subject to assemble context for.
-        hybrid: Use hybrid retrieval (default True).
-        graph: Also pull in linked graph neighbours of the top hits (default True).
-        limit: Maximum number of seed matches (default 10).
     """
     return tools.tool_zurvan_context(topic, hybrid, graph, limit)
 
+class GraphStats(TypedDict):
+    """Structured node/edge counts for the knowledge graph."""
+    nodes: int
+    edges: int
+
 @mcp.tool()
-def zurvan_graph_stats() -> str:
-    """Return a one-line summary of the knowledge graph (node and edge counts).
+def zurvan_graph_stats() -> GraphStats:
+    """Return the knowledge graph size as structured {nodes, edges} counts.
 
     Use as a quick health/size check of the graph before relying on graph tools.
+    Emits machine-readable structured output (plus a JSON text fallback).
     """
-    return tools.tool_zurvan_graph_stats()
+    return tools.tool_zurvan_graph_stats_struct()
 
 @mcp.tool()
-def zurvan_graph_neighbours(path_or_node_id: str) -> str:
+def zurvan_graph_neighbours(
+    path_or_node_id: Annotated[str, Field(description='A wiki path (e.g. "wiki/decisions/foo.md") or a node id.')],
+) -> str:
     """List the direct (one-hop) graph neighbours of a node.
 
     Use after a search to see what a specific page links to or is linked from
     (decisions, claims, concepts, sources). For multi-hop expansion use
     zurvan_graph_expand instead.
-
-    Args:
-        path_or_node_id: A wiki path (e.g. "wiki/decisions/foo.md") or a node id.
     """
     return tools.tool_zurvan_graph_neighbours(path_or_node_id)
 
 @mcp.tool()
-def zurvan_graph_expand(path_or_node_id: str, depth: int = 2) -> str:
+def zurvan_graph_expand(
+    path_or_node_id: Annotated[str, Field(description="A wiki path or node id to expand from.")],
+    depth: Annotated[int, Field(description="Number of hops to traverse outward.", ge=1, le=5)] = 2,
+) -> str:
     """Expand the graph around a node up to `depth` hops for broad context.
 
     Use to discover nearby concepts and notes when building a comprehensive
     picture. Each line is annotated with its hop distance, node type, and the
     relation that connected it.
-
-    Args:
-        path_or_node_id: A wiki path or node id to expand from.
-        depth: Number of hops to traverse (default 2).
     """
     return tools.tool_zurvan_graph_expand(path_or_node_id, depth)
 
 @mcp.tool()
-def zurvan_eval_search(hybrid: bool = True, min_top3: float = 0.6) -> str:
+def zurvan_eval_search(
+    hybrid: Annotated[bool, Field(description="Evaluate the hybrid retriever (vs. pure keyword).")] = True,
+    min_top3: Annotated[float, Field(description="Minimum acceptable top-3 accuracy; the report flags a failure below this.", ge=0.0, le=1.0)] = 0.6,
+) -> str:
     """Run the retrieval-quality evaluation against the gold question set.
 
     Use to confirm search is healthy after reindexing or large wiki changes.
     Reports top-1/top-3 accuracy and mean reciprocal rank. Read-only and safe.
-
-    Args:
-        hybrid: Evaluate the hybrid retriever (default True).
-        min_top3: Minimum acceptable top-3 accuracy; the report flags a failure
-            below this threshold (default 0.6).
     """
     return tools.tool_zurvan_eval_search(hybrid, min_top3)
 
@@ -117,10 +118,10 @@ def zurvan_validate_gold() -> str:
 
 @mcp.tool()
 def zurvan_remember(
-    type: Literal["note", "insight", "reference", "todo", "risk"],
-    title: str,
-    body: str,
-    tags: list[str],
+    type: Annotated[Literal["note", "insight", "reference", "todo", "risk"], Field(description="Category label for the note; preserved as its first tag.")],
+    title: Annotated[str, Field(description="Short, descriptive title.")],
+    body: Annotated[str, Field(description="The note content (Markdown allowed).")],
+    tags: Annotated[list[str], Field(description="Topical tags to aid later retrieval.")],
 ) -> str:
     """Store a free-form project note in Zurvan memory for future agents.
 
@@ -128,70 +129,49 @@ def zurvan_remember(
     those, prefer the dedicated tools: zurvan_decision_add (architectural
     choices), zurvan_claim_add (evidence-backed facts), zurvan_question_add
     (open questions). Requires write mode (ZURVAN_MCP_READONLY=0).
-
-    Args:
-        type: Category label for the note; preserved as its first tag.
-        title: Short, descriptive title.
-        body: The note content (Markdown allowed).
-        tags: Topical tags to aid later retrieval.
     """
     return tools.tool_zurvan_remember(type, title, body, tags)
 
 @mcp.tool()
 def zurvan_decision_add(
-    title: str,
-    reason: str,
-    status: Literal["proposed", "accepted", "rejected", "superseded", "deprecated"],
-    tags: list[str],
+    title: Annotated[str, Field(description='The decision, stated as an outcome (e.g. "Use SQLite FTS5 for search").')],
+    reason: Annotated[str, Field(description="The rationale and any considered alternatives.")],
+    status: Annotated[Literal["proposed", "accepted", "rejected", "superseded", "deprecated"], Field(description="Lifecycle state of the decision.")],
+    tags: Annotated[list[str], Field(description="Topical tags.")],
 ) -> str:
     """Record an architectural/engineering decision (ADR-style) in Zurvan.
 
     Use whenever a non-trivial choice is made so future agents respect it.
     Requires write mode (ZURVAN_MCP_READONLY=0).
-
-    Args:
-        title: The decision, stated as an outcome (e.g. "Use SQLite FTS5 for search").
-        reason: The rationale and any considered alternatives.
-        status: Lifecycle state of the decision.
-        tags: Topical tags.
     """
     return tools.tool_zurvan_decision_add(title, reason, status, tags)
 
 @mcp.tool()
 def zurvan_claim_add(
-    text: str,
-    source: str,
-    evidence: str,
-    confidence: Literal["low", "medium", "high"],
-    tags: list[str],
+    text: Annotated[str, Field(description="The claim being asserted.")],
+    source: Annotated[str, Field(description='Repo-relative path to the supporting file (no absolute paths, no "../", no raw/ unless ZURVAN_MCP_ALLOW_RAW_READ=1).')],
+    evidence: Annotated[str, Field(description="An exact quote from the source file that supports the claim (must appear verbatim).")],
+    confidence: Annotated[Literal["low", "medium", "high"], Field(description="How strongly the evidence supports the claim.")],
+    tags: Annotated[list[str], Field(description="Topical tags.")],
 ) -> str:
     """Record an evidence-backed claim, anchored to a source file.
 
     The `evidence` text MUST appear verbatim in the `source` file or the claim
     is rejected (no fabricated citations). `source` must be a safe repo-relative
     path. Requires write mode (ZURVAN_MCP_READONLY=0).
-
-    Args:
-        text: The claim being asserted.
-        source: Repo-relative path to the supporting file (no absolute paths,
-            no "../", no raw/ unless ZURVAN_MCP_ALLOW_RAW_READ=1).
-        evidence: An exact quote from the source file that supports the claim.
-        confidence: How strongly the evidence supports the claim.
-        tags: Topical tags.
     """
     return tools.tool_zurvan_claim_add(text, source, evidence, confidence, tags)
 
 @mcp.tool()
-def zurvan_question_add(question: str, reason: str, tags: list[str]) -> str:
+def zurvan_question_add(
+    question: Annotated[str, Field(description="The open question.")],
+    reason: Annotated[str, Field(description="Why it matters / what is blocked on it.")],
+    tags: Annotated[list[str], Field(description="Topical tags.")],
+) -> str:
     """Record an open question / unknown for later investigation.
 
     Use to capture gaps surfaced during research or editing. Requires write
     mode (ZURVAN_MCP_READONLY=0).
-
-    Args:
-        question: The open question.
-        reason: Why it matters / what is blocked on it.
-        tags: Topical tags.
     """
     return tools.tool_zurvan_question_add(question, reason, tags)
 

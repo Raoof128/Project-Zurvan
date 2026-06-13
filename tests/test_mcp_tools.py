@@ -1,5 +1,10 @@
 import os
-from scripts.mcp_tools import tool_zurvan_search, tool_zurvan_context, tool_zurvan_remember
+from scripts.mcp_tools import (
+    tool_zurvan_search,
+    tool_zurvan_context,
+    tool_zurvan_remember,
+    tool_zurvan_graph_stats_struct,
+)
 
 def test_tool_zurvan_search():
     # Write a test file
@@ -11,6 +16,12 @@ def test_tool_zurvan_search():
     assert "test_mcp_search.md" in result
     
     os.remove("wiki/test_mcp_search.md")
+
+def test_tool_zurvan_graph_stats_struct():
+    stats = tool_zurvan_graph_stats_struct()
+    assert set(stats.keys()) == {"nodes", "edges"}
+    assert isinstance(stats["nodes"], int)
+    assert isinstance(stats["edges"], int)
 
 def test_tool_zurvan_remember(monkeypatch):
     monkeypatch.setenv("ZURVAN_MCP_READONLY", "1")
