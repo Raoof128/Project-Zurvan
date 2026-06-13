@@ -50,12 +50,19 @@ def tool_zurvan_context(topic: str, hybrid: bool = True, graph: bool = True, lim
         return f"Error: {str(e)}"
 
 def tool_zurvan_graph_stats() -> str:
-    """Returns graph stats."""
+    """Returns graph stats as a human-readable string."""
     try:
         stats = get_stats()
         return f"Graph stats: {stats['nodes']} nodes, {stats['edges']} edges"
     except Exception as e:
         return f"Error: {str(e)}"
+
+def tool_zurvan_graph_stats_struct() -> dict:
+    """Returns graph stats as a structured {nodes, edges} dict for the MCP
+    structured-output channel. Raises on failure so the MCP layer surfaces a
+    proper tool error rather than an object that violates the output schema."""
+    stats = get_stats()
+    return {"nodes": int(stats["nodes"]), "edges": int(stats["edges"])}
 
 def tool_zurvan_graph_neighbours(path_or_node_id: str, depth: int = 1) -> str:
     """Shows neighbours of a node."""
