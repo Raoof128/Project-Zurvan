@@ -2,6 +2,17 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** MCP server — per-argument schema docs + structured output
+- **Summary:** Implemented the two follow-ups from the MCP audit. (1) Added `Annotated[..., Field(description=...)]` to every parameter of all 11 tools, so the JSON input schema now carries per-argument descriptions (not just the tool-level docstring) — the LLM sees exactly what each arg means. Added numeric bounds where sensible (`limit` 1–50, `depth` 1–5, `min_top3` 0–1) so out-of-range calls are rejected with a clear schema error. (2) Added structured output to `zurvan_graph_stats`: it now returns a `GraphStats` TypedDict (`{nodes, edges}`), so FastMCP emits a proper `outputSchema` and `structuredContent` alongside a JSON text fallback — machine-parseable for clients that support it. Kept the text-rich tools (`search`/`context`) as curated human+LLM-readable text by design, since that format already carries all fields and reads better than raw JSON.
+- **Files Changed:**
+  - `scripts/mcp_server.py` — `Annotated`/`Field` per-arg descriptions + bounds on all tools; `GraphStats` TypedDict structured output
+  - `scripts/mcp_tools.py` — `tool_zurvan_graph_stats_struct()` returning typed `{nodes, edges}`
+  - `tests/test_mcp_tools.py` — test for the structured stats result
+- **Verification:** `pytest` → 188 passed (was 187; +1), 0 failed. `e2e_mcp_smoke.py` → full pass. Confirmed per-arg descriptions present in `inputSchema` and that `zurvan_graph_stats` returns both `structuredContent` `{'nodes': 830, 'edges': 746}` and a JSON text fallback with a generated `outputSchema`. `public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP server full audit — LLM usability + correctness fixes
 - **Summary:** Audited all five MCP modules and fixed both correctness bugs and (the main goal) discoverability for calling LLMs. **Biggest win:** every one of the 11 `@mcp.tool()` wrappers in `mcp_server.py` exposed an *empty* description to the LLM — FastMCP reads the wrapper's `__doc__`, but the rich docstrings lived only on the underlying `tools.*` functions. Rewrote `mcp_server.py` with detailed, model-facing docstrings (what/when/args/returns) for every tool, resource, and prompt, plus `description=` on all resources. Added `Literal` enums so the schema tells the LLM the valid values: `zurvan_remember.type`, `zurvan_decision_add.status`, `zurvan_claim_add.confidence`. **Correctness:** (1) `mcp_security.is_safe_path` and `mcp_resources.resource_file` anchored to `Path(".")`/CWD instead of `PROJECT_ROOT`, so `zurvan://file/{path}` broke when the server launched from another directory — now anchored to `PROJECT_ROOT`. (2) `tool_zurvan_eval_search`/`tool_zurvan_validate_gold` shelled out via `subprocess.run(["python", "scripts/eval_search.py"...])` (relative path + wrong-interpreter risk + CWD-dependent); rewrote to run in-process with `contextlib.redirect_stdout` capture (also prevents eval `print()` from corrupting the stdio JSON-RPC stream) and catch `SystemExit`. (3) Dropped the no-op `depth` arg from `zurvan_graph_neighbours` (it was accepted but never used). (4) `zurvan_remember` silently discarded `type`; it is now preserved as the note's first tag. (5) `zurvan_search` now returns heading + a whitespace-collapsed snippet per hit, not just path+score, so the LLM can judge relevance without extra reads.
 - **Files Changed:**
