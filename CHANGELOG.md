@@ -2,6 +2,18 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** MCP install — verify Claude Code + add Codex client
+- **Summary:** Installed/verified the Zurvan MCP server on both local agents. **Claude Code:** already registered in `~/.claude.json` and reported `✔ Connected` by `claude mcp list`, pointing at the live `scripts/mcp_server.py`, so it auto-picks-up all the recent server improvements — no reinstall needed. **Codex:** added globally with `codex mcp add zurvan` using the absolute Anaconda interpreter (`/opt/anaconda3/bin/python3`, which has `mcp` 1.25 + `pydantic` 2.12) and the absolute server path; verified via `codex mcp get zurvan` and a launch smoke-test (`list_tools()` → 11 tools). Made it reproducible: extended `scripts/install_mcp_config.py` with a `codex` client target that emits both a ready-to-run `codex mcp add` command and a `[mcp_servers.zurvan]` TOML block (uses `sys.executable` so the launch doesn't depend on Codex's PATH). Added `docs/mcp/codex.md`.
+- **Files Changed:**
+  - `scripts/install_mcp_config.py` — `get_codex_config()`, `render_codex_toml()`, `render_codex_cli()`, `codex` choice
+  - `tests/test_install_mcp_config.py` — 3 new tests (codex config, render, main)
+  - `docs/mcp/codex.md` — New Codex integration guide
+  - (machine state) `~/.codex/config.toml` — `zurvan` MCP server added
+- **Verification:** `pytest` → 191 passed (was 188; +3), 0 failed. `claude mcp list` → `zurvan ✔ Connected`. `codex mcp get zurvan` shows the server; launch smoke-test exposed 11 tools with the Codex interpreter+env. `public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP server — per-argument schema docs + structured output
 - **Summary:** Implemented the two follow-ups from the MCP audit. (1) Added `Annotated[..., Field(description=...)]` to every parameter of all 11 tools, so the JSON input schema now carries per-argument descriptions (not just the tool-level docstring) — the LLM sees exactly what each arg means. Added numeric bounds where sensible (`limit` 1–50, `depth` 1–5, `min_top3` 0–1) so out-of-range calls are rejected with a clear schema error. (2) Added structured output to `zurvan_graph_stats`: it now returns a `GraphStats` TypedDict (`{nodes, edges}`), so FastMCP emits a proper `outputSchema` and `structuredContent` alongside a JSON text fallback — machine-parseable for clients that support it. Kept the text-rich tools (`search`/`context`) as curated human+LLM-readable text by design, since that format already carries all fields and reads better than raw JSON.
 - **Files Changed:**
