@@ -10,12 +10,16 @@ from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from scripts.graph_schema import setup_graph_schema, DB_PATH
+from scripts.config import PROJECT_ROOT
 
 def generate_node_id(path: str) -> str:
     return hashlib.sha256(path.encode('utf-8')).hexdigest()
 
 def get_file_content(path: str) -> str:
-    with open(path, 'r', encoding='utf-8') as f:
+    # Node identity is kept relative (e.g. "wiki/foo.md") but content is read
+    # from an absolute location so building is CWD-independent.
+    abs_path = path if os.path.isabs(path) else os.path.join(PROJECT_ROOT, path)
+    with open(abs_path, 'r', encoding='utf-8') as f:
         return f.read()
 
 def parse_frontmatter(content: str) -> Tuple[Dict[str, str], str]:
@@ -135,15 +139,19 @@ def build_graph(db_path: str = DB_PATH):
     # Pass 1: Gather nodes
     paths_to_process = []
     
-    for root, dirs, files in os.walk('.'):
+    for root, dirs, files in os.walk(PROJECT_ROOT):
         dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
-        if not any(root.startswith(f"./{d}") or root == f"./{d}" or root == "." for d in target_dirs):
-            if root != ".":
-                continue
-                
+        rel_root = os.path.relpath(root, PROJECT_ROOT)
+        top = rel_root.split(os.sep)[0] if rel_root != "." else "."
+        # Only descend into the repo root and the target directories.
+        if top != "." and top not in target_dirs:
+            continue
+
         for file in files:
             if file.endswith('.md'):
-                filepath = os.path.normpath(os.path.join(root, file))
+                # Node identity stays relative to the repo root so node_ids
+                # remain stable no matter where the process is launched from.
+                filepath = os.path.normpath(os.path.join(rel_root, file)) if rel_root != "." else file
                 # Skip if it's in root and not in target_files
                 if os.path.dirname(filepath) == "" and file not in target_files:
                     continue

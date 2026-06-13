@@ -2,6 +2,22 @@
 
 ## Project Constraints and Rules
 
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full audit — update OpenAI default model (GPT-5.x) + temperature safety
+- **Summary:** Verified current OpenAI model naming against official docs; bumped openai default `gpt-4o` → `gpt-5.4-mini` (override via `ZURVAN_LLM_MODEL`). Added `_openai_supports_custom_temperature()` so the `temperature` field is omitted for GPT-5 family and o-series models (they 400 on non-default temperature) but still sent for legacy models. Updated `docs/ENVIRONMENT.md`.
+- **Files Changed:** `scripts/llm.py`, `tests/test_llm.py`, `docs/ENVIRONMENT.md`
+- **Verification:** `pytest` → 187 passed (+4 new). `public_repo_guard.py` passed.
+- **Follow-ups:** None outstanding from the documented list.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Full audit — finish CWD-independence for remaining non-MCP scripts
+- **Summary:** Closed the documented PROJECT_ROOT follow-up. `graph_build.py` now walks `PROJECT_ROOT` (was `os.walk('.')`, which produced an empty graph from any other CWD) while keeping node identity repo-relative; `get_file_content()` reads via absolute paths. `graph_export.py` default export paths are absolute with a guarded `makedirs`. `eval_search.py` resolves the gold file, expected-path checks, and fallback globs against `PROJECT_ROOT` via a new `_resolve()` helper. `snapshot.py` and `public_repo_guard.py` confirmed correct by design (own `ROOT` join / `git ls-files`-relative).
+- **Files Changed:** `scripts/graph_build.py`, `scripts/graph_export.py`, `scripts/eval_search.py`
+- **Verification:** `pytest` → 183 passed. Ran graph build / eval / export from `/tmp`: 830 nodes / 746 edges (was 0), gold validated, export to repo `data/`. `eval_search --hybrid --min-top3 0.6` → top-3 100%.
+- **Follow-ups:** Review OpenAI model default in `llm.py` (GPT-5.x) — config judgment, not a bug.
+
 ### 2026-06-03 (Australia/Sydney)
 **Raouf:**
 - **Scope:** Fix: CWD-independent absolute paths via PROJECT_ROOT

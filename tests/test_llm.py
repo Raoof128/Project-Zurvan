@@ -142,6 +142,61 @@ def test_anthropic_zero_text_blocks_raises_runtime_error(monkeypatch):
         with pytest.raises(RuntimeError, match="no text content"):
             run_llm("test")
 
+def _openai_capture(monkeypatch):
+    """Helper: stub urlopen for the openai provider and capture the request body."""
+    monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    captured = {}
+
+    def fake_urlopen(req):
+        captured["body"] = json.loads(req.data.decode())
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.read.return_value = json.dumps({
+            "choices": [{"message": {"content": '{"result": "ok"}'}}]
+        }).encode()
+        return mock_resp
+
+    return captured, fake_urlopen
+
+
+def test_openai_default_model_is_gpt5(monkeypatch):
+    captured, fake_urlopen = _openai_capture(monkeypatch)
+    monkeypatch.delenv("ZURVAN_LLM_MODEL", raising=False)
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        run_llm("test")
+    assert captured["body"]["model"] == "gpt-5.4-mini"
+
+
+def test_openai_omits_temperature_for_gpt5_family(monkeypatch):
+    captured, fake_urlopen = _openai_capture(monkeypatch)
+    monkeypatch.delenv("ZURVAN_LLM_MODEL", raising=False)
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        run_llm("test", temperature=0.0)
+    # GPT-5 family rejects non-default temperature, so it must not be sent.
+    assert "temperature" not in captured["body"]
+
+
+def test_openai_sends_temperature_for_legacy_models(monkeypatch):
+    captured, fake_urlopen = _openai_capture(monkeypatch)
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        run_llm("test", model="gpt-4o", temperature=0.0)
+    assert captured["body"]["model"] == "gpt-4o"
+    assert captured["body"]["temperature"] == 0.0
+
+
+def test_openai_omits_temperature_for_o_series(monkeypatch):
+    captured, fake_urlopen = _openai_capture(monkeypatch)
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        from scripts.llm import run_llm
+        run_llm("test", model="o3-mini", temperature=0.2)
+    assert "temperature" not in captured["body"]
+
+
 def test_anthropic_http_error_raises_runtime_error(monkeypatch):
     from urllib.error import HTTPError
     monkeypatch.setenv("ZURVAN_LLM_PROVIDER", "anthropic")
