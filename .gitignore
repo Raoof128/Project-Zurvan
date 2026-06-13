@@ -24,6 +24,12 @@ data/*.db
 data/embeddings/
 !data/.gitkeep
 
+# Graph exports are regenerated from the full (private) knowledge base and
+# embed source/AutoConcept node titles & paths — never commit them.
+data/graph_export.md
+data/graph_export.dot
+data/image_manifest.json
+
 # Python/local noise
 .venv/
 __pycache__/
