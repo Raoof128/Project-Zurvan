@@ -7,8 +7,17 @@ from scripts.metrics import calculate_top_k_hit, calculate_reciprocal_rank, calc
 # We need a keyword search implementation or we can just reuse hybrid search without the semantic part, 
 # but the prompt says to use keyword or hybrid search.
 from scripts.hybrid_search import search_hybrid
+from scripts.config import PROJECT_ROOT
+
+DEFAULT_GOLD = str(PROJECT_ROOT / "eval" / "search_gold.jsonl")
+
+def _resolve(path: str) -> str:
+    """Resolve a repo-relative path against PROJECT_ROOT so evaluation is
+    CWD-independent. Absolute paths are returned unchanged."""
+    return path if os.path.isabs(path) else str(PROJECT_ROOT / path)
 
 def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
+    filepath = _resolve(filepath)
     if not os.path.exists(filepath):
         print(f"Error: Gold dataset '{filepath}' not found.")
         sys.exit(1)
@@ -38,7 +47,7 @@ def validate_gold_dataset(filepath: str) -> bool:
     all_valid = True
     for item in dataset:
         for path in item['expected_paths']:
-            if not os.path.exists(path):
+            if not os.path.exists(_resolve(path)):
                 print(f"Error: Gold dataset references missing path: {path}")
                 all_valid = False
                 
@@ -48,7 +57,7 @@ def validate_gold_dataset(filepath: str) -> bool:
     print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
-def run_search_evaluation(gold_file: str = "eval/search_gold.jsonl", hybrid: bool = False, min_top3: float = 0.0):
+def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0):
     validate_gold_dataset(gold_file)
     dataset = load_gold_dataset(gold_file)
     if not dataset:
@@ -85,7 +94,8 @@ def run_search_evaluation(gold_file: str = "eval/search_gold.jsonl", hybrid: boo
             # We'll just call search_hybrid and rely on its BM25 component implicitly or just use search_hybrid directly.
             # To be strict, if hybrid is False, we just use standard search_memory logic which scans files.
             import glob
-            wiki_files = glob.glob("wiki/**/*.md", recursive=True) + glob.glob("docs/**/*.md", recursive=True)
+            wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True) + \
+                glob.glob(str(PROJECT_ROOT / "docs" / "**" / "*.md"), recursive=True)
             keywords = query.lower().split()
             matches = []
             for filepath in wiki_files:
@@ -139,7 +149,7 @@ def run_search_evaluation(gold_file: str = "eval/search_gold.jsonl", hybrid: boo
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gold", default="eval/search_gold.jsonl")
+    parser.add_argument("--gold", default=DEFAULT_GOLD)
     parser.add_argument("--hybrid", action="store_true")
     parser.add_argument("--min-top3", type=float, default=0.0)
     parser.add_argument("--validate", action="store_true")
