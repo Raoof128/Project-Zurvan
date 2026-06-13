@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** MCP install — verify Claude Code + add Codex client
+- **Summary:** Claude Code already `✔ Connected` (live `mcp_server.py`, no reinstall needed). Added Codex via `codex mcp add zurvan` (absolute Anaconda python + absolute server path; verified `codex mcp get` + launch smoke-test, 11 tools). Made it reproducible: added a `codex` target to `install_mcp_config.py` (emits `codex mcp add` command + `[mcp_servers.zurvan]` TOML via `sys.executable`) and `docs/mcp/codex.md`.
+- **Files Changed:** `scripts/install_mcp_config.py`, `tests/test_install_mcp_config.py`, `docs/mcp/codex.md` (+ machine `~/.codex/config.toml`)
+- **Verification:** `pytest` → 191 passed (+3). `claude mcp list` → connected. `codex mcp get zurvan` OK. `public_repo_guard.py` passed.
+- **Follow-ups:** None.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP server — per-argument schema docs + structured output
 - **Summary:** Added `Annotated[..., Field(description=...)]` to every parameter of all 11 MCP tools (per-arg descriptions + bounds: `limit` 1–50, `depth` 1–5, `min_top3` 0–1). Added structured output to `zurvan_graph_stats` via a `GraphStats` TypedDict — FastMCP now emits `outputSchema` + `structuredContent` `{nodes, edges}` plus a JSON text fallback. Text-rich tools (`search`/`context`) intentionally kept as curated text.
 - **Files Changed:** `scripts/mcp_server.py`, `scripts/mcp_tools.py`, `tests/test_mcp_tools.py`
