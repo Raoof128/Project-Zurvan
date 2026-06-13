@@ -36,21 +36,23 @@ def resource_eval_baseline() -> str:
     return get_static_resource(str(PROJECT_ROOT / "eval" / "README.md"))
 
 def resource_file(path: str) -> str:
-    """Dynamic resource reader for safe relative paths."""
+    """Dynamic resource reader for safe relative paths (relative to PROJECT_ROOT)."""
     allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
     if not is_safe_path(path, allow_raw=allow_raw):
         return f"Error: Path {path} failed safety checks."
-    
-    if not os.path.exists(path):
+
+    # Resolve relative to the repo root so reads are CWD-independent.
+    abs_path = str(PROJECT_ROOT / path)
+    if not os.path.exists(abs_path):
         return f"Error: File {path} not found."
-        
+
     # Guard max file size (e.g., 256 KB)
     try:
-        size = os.path.getsize(path)
+        size = os.path.getsize(abs_path)
         if size > 256 * 1024:
             return "Error: File too large (> 256 KB)."
-            
-        with open(path, 'r', encoding='utf-8') as f:
+
+        with open(abs_path, 'r', encoding='utf-8') as f:
             return f.read()
     except UnicodeDecodeError:
         return "Error: File appears to be binary."
