@@ -1,5 +1,7 @@
 import os
+import io
 import sys
+import contextlib
 from typing import List, Optional
 
 from scripts.mcp_security import enforce_read_only, is_safe_path
@@ -7,7 +9,15 @@ from scripts.context_export import search_memory, export_context
 from scripts.graph_query import get_stats, get_neighbours
 from scripts.graph_context import expand_graph_context
 from scripts.memory import add_decision, add_note, add_claim, add_question
-import subprocess
+
+
+def _snippet(text: str, limit: int = 200) -> str:
+    """Collapse whitespace and truncate to a short, single-line preview."""
+    if not text:
+        return ""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[:limit].rstrip() + "…"
+
 
 def tool_zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
     """Searches Zurvan memory."""
@@ -17,8 +27,17 @@ def tool_zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
         if not results:
             return "No matches found."
         output = []
-        for r in results:
-            output.append(f"- {r['source_path']} (Score: {r.get('hybrid_score', 'N/A')})")
+        for i, r in enumerate(results, 1):
+            score = r.get("hybrid_score", "N/A")
+            score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+            heading = r.get("heading")
+            snippet = _snippet(r.get("text", ""))
+            line = f"{i}. {r['source_path']} (score {score_str})"
+            if heading:
+                line += f"\n   heading: {heading}"
+            if snippet:
+                line += f"\n   {snippet}"
+            output.append(line)
         return "\n".join(output)
     except Exception as e:
         return f"Error: {str(e)}"
@@ -65,30 +84,46 @@ def tool_zurvan_graph_expand(path_or_node_id: str, depth: int = 2) -> str:
         return f"Error: {str(e)}"
 
 def tool_zurvan_eval_search(hybrid: bool = True, min_top3: float = 0.6) -> str:
-    """Evaluates search retrieval against gold set."""
+    """Evaluates search retrieval against gold set.
+
+    Runs in-process (no subprocess / no `python` interpreter assumption) and
+    captures stdout so the eval's print() output never corrupts the MCP stdio
+    JSON-RPC stream. eval_search calls sys.exit() on a failing threshold, so
+    SystemExit is caught and its captured output returned instead."""
+    from scripts.eval_search import run_search_evaluation
+    buf = io.StringIO()
     try:
-        cmd = ["python", "scripts/eval_search.py", "--min-top3", str(min_top3)]
-        if hybrid:
-            cmd.append("--hybrid")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.stdout + "\n" + result.stderr
+        with contextlib.redirect_stdout(buf):
+            run_search_evaluation(hybrid=hybrid, min_top3=min_top3)
+    except SystemExit:
+        pass  # threshold/validation failure — message already captured in buf
     except Exception as e:
         return f"Error: {str(e)}"
+    return buf.getvalue().strip() or "No output."
 
 def tool_zurvan_validate_gold() -> str:
-    """Validates gold dataset."""
+    """Validates gold dataset (in-process, stdout captured)."""
+    from scripts.eval_search import validate_gold_dataset, DEFAULT_GOLD
+    buf = io.StringIO()
     try:
-        cmd = ["python", "scripts/eval_search.py", "--validate"]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.stdout + "\n" + result.stderr
+        with contextlib.redirect_stdout(buf):
+            validate_gold_dataset(DEFAULT_GOLD)
+    except SystemExit:
+        pass
     except Exception as e:
         return f"Error: {str(e)}"
+    return buf.getvalue().strip() or "No output."
 
 @enforce_read_only
 def tool_zurvan_remember(type: str, title: str, body: str, tags: List[str]) -> str:
-    """Remembers a project note."""
+    """Remembers a project note. The `type` label is preserved as the first tag
+    so it is not silently discarded (use zurvan_decision_add / zurvan_claim_add /
+    zurvan_question_add for those structured node kinds)."""
+    tags = list(tags or [])
+    if type and type not in tags:
+        tags = [type] + tags
     if add_note(title, body, tags):
-        return f"Note added successfully: {title}"
+        return f"Note added successfully ({type}): {title}"
     return "Failed to add note."
 
 @enforce_read_only

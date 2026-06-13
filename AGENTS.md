@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** MCP server full audit — LLM usability + correctness fixes
+- **Summary:** All 11 MCP tools had empty descriptions (FastMCP reads the wrapper `__doc__`, not the `tools.*` docstrings) — rewrote `mcp_server.py` with rich model-facing docstrings + `Literal` enums (`remember.type`, `decision.status`, `claim.confidence`) + resource descriptions. Fixed CWD bugs: `is_safe_path`/`resource_file` now anchor to `PROJECT_ROOT`. Eval tools run in-process with stdout capture (was a relative `subprocess` to `python`) — also avoids corrupting the stdio stream. Dropped no-op `depth` from `zurvan_graph_neighbours`; `zurvan_remember` now keeps `type` as a tag; `zurvan_search` returns heading+snippet.
+- **Files Changed:** `scripts/mcp_server.py`, `scripts/mcp_tools.py`, `scripts/mcp_security.py`, `scripts/mcp_resources.py`
+- **Verification:** `pytest` → 187 passed. `e2e_mcp_smoke.py` full pass. Tool descriptions confirmed non-empty; `resource_file` works from `/tmp`; traversal blocked. `public_repo_guard.py` passed.
+- **Follow-ups:** Optional: per-arg `Field(description=...)` and structured JSON output.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Full audit — update OpenAI default model (GPT-5.x) + temperature safety
 - **Summary:** Verified current OpenAI model naming against official docs; bumped openai default `gpt-4o` → `gpt-5.4-mini` (override via `ZURVAN_LLM_MODEL`). Added `_openai_supports_custom_temperature()` so the `temperature` field is omitted for GPT-5 family and o-series models (they 400 on non-default temperature) but still sent for legacy models. Updated `docs/ENVIRONMENT.md`.
 - **Files Changed:** `scripts/llm.py`, `tests/test_llm.py`, `docs/ENVIRONMENT.md`
