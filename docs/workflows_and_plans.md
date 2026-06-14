@@ -234,8 +234,8 @@ Zurvan stores replayable audit traces as local JSON plus Git-friendly Markdown m
 Zurvan can now write opt-in trace records for retrieval commands without changing normal retrieval behavior.
 
 1. **Trigger**: Users pass `--trace` to `search` or `context`.
-2. **Search trace**: `search --trace` records query, mode (`keyword` or `hybrid`), limit, result count, source paths, headings, chunk IDs, and available keyword/semantic/hybrid scores.
-3. **Context trace**: `context --trace` records the same retrieval event and, when `--graph` is enabled, a graph-context event containing depth, node count, relation, node type, title, and source node ID.
+2. **Search trace**: `search --trace` records `retrieval.query` and `retrieval.result` events containing query settings, ordered results, source paths, headings, chunk IDs, and available keyword/semantic/hybrid scores.
+3. **Context trace**: `context --trace` records the same retrieval events plus `context.assembled`, which stores ordered included chunk IDs and dropped chunk IDs with reasons. When `--graph` is enabled, it also records a graph-context event containing depth, node count, relation, node type, title, and source node ID.
 4. **Storage**: Trace JSON is written under `data/traces/`; the Markdown mirror is written under `wiki/traces/`.
 5. **Replay**: Generated trace IDs can be inspected with:
    ```bash
@@ -247,8 +247,22 @@ Zurvan can now write opt-in trace records for retrieval commands without changin
 - Tracing is explicit only. No trace is written unless `--trace` is passed.
 - Normal `search` and `context` output stays unchanged when tracing is disabled.
 - Retrieval ranking logic is unchanged.
+- Legacy R2 traces with a single coarse `retrieval` event remain valid under `zurvan.trace.v1`.
 - Trace payload paths are normalized to repo-relative paths when they are under the project root.
 - Raw sources are not read by trace writing or replay.
+
+## Phase R2 Step 1A: Minimal Trace Granularity Enrichment ✅
+
+The retrieval trace schema was enriched additively before the provenance evaluation harness.
+
+1. **Event types added**:
+   - `retrieval.query`: command, query, mode, and limit.
+   - `retrieval.result`: ordered result list, result count, source paths, chunk IDs, headings, and available scores.
+   - `context.assembled`: ordered included chunk IDs and dropped chunk IDs with reasons.
+2. **Compatibility**: The original coarse `retrieval` event type remains valid for old R1/R2 traces.
+3. **Schema version**: `schema_version` remains `zurvan.trace.v1`; payload hashes still use deterministic SHA-256 over the event payload only.
+4. **Deferred fields**: Token-budget counts and timing metadata are intentionally excluded from the hashed payload until a later scoped design.
+5. **Research path**: Step 1A precedes `eval_provenance.py`; MCP trace integration remains frozen until the provenance harness ships.
 
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.

@@ -2,6 +2,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 1A — minimal trace granularity enrichment
+- **Summary:** Added fine-grained retrieval trace events `retrieval.query`, `retrieval.result`, and `context.assembled` while keeping legacy coarse `retrieval` traces valid under `zurvan.trace.v1`. Context assembly now records ordered included chunk IDs and dropped entries; keyword traces derive deterministic fallback chunk IDs for trace provenance only. Retrieval ranking, scoring, stdout behavior, schema version, and payload-hash rules are unchanged.
+- **Files Changed:** `scripts/trace_schema.py`, `scripts/context_export.py`, `tests/test_trace_replay.py`, `tests/test_trace_retrieval_integration.py`, `README.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
+- **Verification:** `python -m compileall scripts/trace_schema.py scripts/trace_writer.py scripts/trace_validate.py scripts/trace_replay.py scripts/context_export.py scripts/hybrid_search.py scripts/graph_context.py scripts/cli.py` passed. Focused trace tests → 20 passed. Full `pytest` → 211 passed, 2 dependency warnings. Temp-root E2E `context --trace` produced `retrieval.query` → `retrieval.result` → `context.assembled`; `trace validate` and `trace replay` accepted it. Legacy single-`retrieval` replay regression passed. `public_repo_guard.py` passed. `git diff --check` passed.
+- **Follow-ups:** Build Step 2 provenance evaluation harness next. R3 MCP trace integration remains frozen.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 — retrieval trace integration
 - **Summary:** Added opt-in retrieval tracing for `search --trace` and `context --trace` without changing normal retrieval output or ranking when tracing is off. Traces reuse the Phase R1 schema and write JSON to `data/traces/` plus Markdown mirrors to `wiki/traces/`. Retrieval events record command, query, mode, limit, result count, source paths, and available keyword/semantic/hybrid scores; graph-enabled context traces also record graph depth, node count, relation, node type, title, and source node ID. Unsafe trace IDs now fail cleanly without traceback.
 - **Files Changed:** `scripts/context_export.py`, `scripts/cli.py`, `scripts/trace_schema.py`, `tests/test_trace_retrieval_integration.py`, `tests/test_trace_schema.py`, `README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
