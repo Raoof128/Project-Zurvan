@@ -12,6 +12,9 @@ TRACE_ID_RE = re.compile(r"^trace-[A-Za-z0-9][A-Za-z0-9_.-]{7,127}$")
 EVENT_ID_RE = re.compile(r"^evt-[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$")
 ALLOWED_EVENT_TYPES = {
     "retrieval",
+    "retrieval.query",
+    "retrieval.result",
+    "context.assembled",
     "graph_context",
     "tool_call",
     "resource_read",

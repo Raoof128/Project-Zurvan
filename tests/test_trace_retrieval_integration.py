@@ -55,12 +55,18 @@ def test_export_context_trace_writes_retrieval_and_graph_events(tmp_path, monkey
 
     assert "Trace written:" in output
     assert mirror_path.exists()
-    assert [event["event_type"] for event in data["events"]] == ["retrieval", "graph_context"]
+    assert [event["event_type"] for event in data["events"]] == [
+        "retrieval.query",
+        "retrieval.result",
+        "context.assembled",
+        "graph_context",
+    ]
     assert data["events"][0]["payload"]["mode"] == "hybrid"
-    assert data["events"][0]["payload"]["results"][0]["keyword_score"] == 0.75
-    assert data["events"][0]["payload"]["results"][0]["hybrid_score"] == 0.65
-    assert data["events"][1]["payload"]["depth"] == 2
-    assert data["events"][1]["payload"]["nodes"][0]["relation"] == "outgoing:mentions"
+    assert data["events"][1]["payload"]["results"][0]["keyword_score"] == 0.75
+    assert data["events"][1]["payload"]["results"][0]["hybrid_score"] == 0.65
+    assert data["events"][2]["payload"] == {"included_chunk_ids": ["chunk-001"], "dropped": []}
+    assert data["events"][3]["payload"]["depth"] == 2
+    assert data["events"][3]["payload"]["nodes"][0]["relation"] == "outgoing:mentions"
     assert "# Trace Replay: Retrieval context: MCP provenance" in replay_trace_file(trace_path)
 
 
@@ -93,6 +99,7 @@ def test_search_memory_trace_writes_replayable_trace(tmp_path, monkeypatch, caps
     data = json.loads(trace_path.read_text())
 
     assert "Trace written:" in captured.out
+    assert [event["event_type"] for event in data["events"]] == ["retrieval.query", "retrieval.result"]
     assert data["events"][0]["payload"]["command"] == "search"
     assert "Trace Replay" in replay_trace_file(trace_path)
 
@@ -144,6 +151,9 @@ def test_cli_context_trace_uses_project_root_override(tmp_path):
     assert result.returncode == 0
     assert "Trace written:" in result.stdout
     assert trace_path.exists()
+    data = json.loads(trace_path.read_text())
+    assert data["events"][1]["payload"]["results"][0]["chunk_id"]
+    assert len(data["events"][2]["payload"]["included_chunk_ids"]) == 1
 
 
 def test_cli_search_trace_uses_project_root_override(tmp_path):
