@@ -283,6 +283,24 @@ Zurvan can now evaluate trace provenance against a local JSONL gold set.
    python scripts/cli.py eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
    ```
 
+## Phase R2 Step 2B: Stronger Provenance Gold Set ✅
+
+The provenance evaluation harness now has a broader fixture set.
+
+1. **Positive baseline**: `eval/provenance_gold.jsonl` has six cases covering
+   normal `search --trace`, normal `context --trace`, `context --graph
+   --trace`, legacy coarse `retrieval`, a controlled Step 2 fixture, and a
+   stale/superseded note case labelled for later policy-aware scoring.
+2. **Negative/failure fixtures**:
+   - `eval/provenance_gold_negative.jsonl` checks raw-path invariant failure and
+     an incomplete trace.
+   - `eval/provenance_gold_incomplete.jsonl` isolates provenance-completeness
+     threshold failure.
+   - `eval/provenance_gold_low_recall.jsonl` isolates expected-source-recall
+     threshold failure.
+3. **Scope**: Step 2B changes only evaluation fixtures, tests, and docs. It does
+   not change MCP tracing, retrieval ranking, graph behavior, or trace schema.
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
