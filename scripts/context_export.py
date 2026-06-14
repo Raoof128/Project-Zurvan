@@ -2,6 +2,7 @@ import os
 import glob
 import sys
 import datetime
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -106,12 +107,15 @@ def _trace_source_path(path: str) -> str:
 
 
 def _result_trace_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+    chunk_id = _result_chunk_id(result)
     payload = {
         "source_path": _trace_source_path(str(result.get("source_path", ""))),
         "hybrid_score": result.get("hybrid_score", 0),
     }
+    if chunk_id is not None:
+        payload["chunk_id"] = chunk_id
     for key in ("chunk_id", "heading", "keyword_score", "semantic_score"):
-        if key in result:
+        if key in result and key not in payload:
             payload[key] = result[key]
     return payload
 
@@ -124,6 +128,29 @@ def _graph_trace_payload(node: Dict[str, Any]) -> Dict[str, Any]:
         "depth": node.get("depth", 0),
         "relation": node.get("relation", ""),
         "source_id": node.get("source_id", ""),
+    }
+
+
+def _result_chunk_id(result: Dict[str, Any]) -> str | None:
+    chunk_id = result.get("chunk_id")
+    if chunk_id is not None:
+        return str(chunk_id)
+    source_path = _trace_source_path(str(result.get("source_path", "")))
+    text = result.get("text")
+    if not source_path or text is None:
+        return None
+    encoded = f"{source_path}::root::{text}".encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _assembled_context_payload(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "included_chunk_ids": [
+            chunk_id
+            for chunk_id in (_result_chunk_id(result) for result in results)
+            if chunk_id is not None
+        ],
+        "dropped": [],
     }
 
 
@@ -143,7 +170,7 @@ def _write_retrieval_trace(
     events = [
         TraceEvent(
             event_id="evt-001",
-            event_type="retrieval",
+            event_type="retrieval.query",
             timestamp=utc_now(),
             actor="zurvan",
             payload={
@@ -151,17 +178,39 @@ def _write_retrieval_trace(
                 "query": query,
                 "mode": mode,
                 "limit": limit,
+            },
+        ),
+        TraceEvent(
+            event_id="evt-002",
+            event_type="retrieval.result",
+            timestamp=utc_now(),
+            actor="zurvan",
+            payload={
+                "command": command,
                 "result_count": len(results),
                 "results": [_result_trace_payload(result) for result in results],
             },
-        )
+        ),
     ]
+
+    next_event_number = 3
+    if command == "context":
+        events.append(
+            TraceEvent(
+                event_id=f"evt-{next_event_number:03d}",
+                event_type="context.assembled",
+                timestamp=utc_now(),
+                actor="zurvan",
+                payload=_assembled_context_payload(results),
+            )
+        )
+        next_event_number += 1
 
     if graph_enabled:
         nodes = graph_nodes or []
         events.append(
             TraceEvent(
-                event_id="evt-002",
+                event_id=f"evt-{next_event_number:03d}",
                 event_type="graph_context",
                 timestamp=utc_now(),
                 actor="zurvan",

@@ -59,6 +59,37 @@ Observed results:
 - Public repo guard: passed.
 - Diff whitespace check: passed.
 
+## Step 1A Granularity Enrichment
+
+Step 1A enriches retrieval trace resolution before the provenance evaluation harness.
+
+Event-schema diff:
+
+- Added `retrieval.query`: command, query, mode, and limit.
+- Added `retrieval.result`: command, ordered result list, result count, source path, chunk ID, heading, and available keyword/semantic/hybrid scores.
+- Added `context.assembled`: ordered `included_chunk_ids` and `dropped` entries shaped as `{chunk_id, reason}`.
+- Kept legacy `retrieval` in the allowed event types for old R1/R2 traces.
+- Kept `schema_version` as `zurvan.trace.v1`.
+- Kept the deterministic payload-hash rule unchanged.
+
+Scope controls:
+
+- No retrieval ranking, scoring, fusion, or stdout behavior change.
+- Tracing remains opt-in through `--trace`.
+- Token-budget capture is deferred.
+- R3 MCP trace integration remains frozen until provenance evaluation ships.
+
+Step 1A observed results:
+
+- Focused trace tests: 20 passed.
+- Full test suite: 211 passed, 2 dependency warnings.
+- Temp-root E2E trace generated ordered events: `retrieval.query`, `retrieval.result`, `context.assembled`.
+- `trace validate` accepted the generated Step 1A trace.
+- `trace replay` rendered the generated Step 1A trace in event order.
+- Legacy single-`retrieval` trace validation and replay regression: passed.
+- Public repo guard: passed.
+- Diff whitespace check: passed.
+
 ## Residual Risks
 
 - R2 records retrieval metadata but does not yet instrument MCP tool calls directly. That belongs to Phase R3.
