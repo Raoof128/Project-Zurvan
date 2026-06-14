@@ -100,6 +100,21 @@ python scripts/cli.py trace validate <trace-id>
 python scripts/cli.py trace replay <trace-id>
 ```
 
+### Evaluation
+```bash
+# Validate retrieval gold paths
+python scripts/cli.py eval validate-gold --gold eval/search_gold.jsonl
+
+# Evaluate retrieval quality
+python scripts/cli.py eval search --hybrid --min-top3 0.6
+
+# Evaluate trace provenance invariants and graded metrics
+python scripts/cli.py eval provenance \
+  --gold eval/provenance_gold.jsonl \
+  --min-source-recall 1.0 \
+  --min-provenance-completeness 1.0
+```
+
 ## 2. MCP Server (`scripts/mcp_server.py`)
 
 Zurvan provides a native MCP server implementation to directly plug into agents like Claude Code or Cursor.
