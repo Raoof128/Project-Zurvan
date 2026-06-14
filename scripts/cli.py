@@ -340,6 +340,13 @@ def main():
     eval_search_parser.add_argument("--gold", default="eval/search_gold.jsonl")
     eval_search_parser.add_argument("--hybrid", action="store_true")
     eval_search_parser.add_argument("--min-top3", type=float, default=0.0)
+
+    eval_provenance_parser = eval_sub.add_parser("provenance", help="Evaluate retrieval trace provenance")
+    eval_provenance_parser.add_argument("--gold", default="eval/provenance_gold.jsonl")
+    eval_provenance_parser.add_argument("--validate", action="store_true")
+    eval_provenance_parser.add_argument("--min-source-recall", type=float, default=0.0)
+    eval_provenance_parser.add_argument("--min-provenance-completeness", type=float, default=0.0)
+    eval_provenance_parser.add_argument("--min-graph-context-presence", type=float, default=0.0)
     
     eval_validate_parser = eval_sub.add_parser("validate-gold", help="Validate gold dataset")
     eval_validate_parser.add_argument("--gold", default="eval/search_gold.jsonl")
@@ -808,6 +815,17 @@ def main():
             "--gold", args.gold,
             "--validate"
         ])
+    elif args.command == "eval" and args.action == "provenance":
+        from scripts.eval_provenance import run_provenance_evaluation, validate_gold_dataset
+        if args.validate:
+            validate_gold_dataset(args.gold)
+        else:
+            run_provenance_evaluation(
+                args.gold,
+                min_source_recall=args.min_source_recall,
+                min_provenance_completeness=args.min_provenance_completeness,
+                min_graph_context_presence=args.min_graph_context_presence,
+            )
     elif args.command == "graph":
         if args.action == "rebuild":
             subprocess.run(["python", "scripts/graph_build.py"])
