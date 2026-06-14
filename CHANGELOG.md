@@ -2,6 +2,22 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 — retrieval trace integration
+- **Summary:** Added opt-in retrieval tracing for `search --trace` and `context --trace` without changing normal retrieval output or ranking when tracing is off. Traces reuse the Phase R1 schema and write JSON to `data/traces/` plus Markdown mirrors to `wiki/traces/`. Retrieval events record command, query, mode, limit, result count, source paths, and available keyword/semantic/hybrid scores; graph-enabled context traces also record graph depth, node count, relation, node type, title, and source node ID. Unsafe trace IDs now fail cleanly without traceback.
+- **Files Changed:** `scripts/context_export.py`, `scripts/cli.py`, `scripts/trace_schema.py`, `tests/test_trace_retrieval_integration.py`, `tests/test_trace_schema.py`, `README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
+- **Verification:** `PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py tests/test_trace_retrieval_integration.py` → 19 passed. `PYTHONPATH=. pytest` → 210 passed, 2 dependency warnings. `public_repo_guard.py` passed. `git diff --check` passed in the branch. E2E temp-root `context --trace` and `search --trace` produced replayable traces; unsafe `../raw/secret` trace ID returned nonzero cleanly.
+- **Follow-ups:** Phase R3 MCP trace integration remains frozen until provenance granularity and `eval_provenance.py` are complete.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase R1 — local audit trace core
+- **Summary:** Added `zurvan.trace.v1` local audit traces with deterministic payload hashes, safe trace/event IDs, JSON storage under `data/traces/`, Markdown mirrors under `wiki/traces/`, validation, and replay. Added CLI commands: `zurvan trace list`, `inspect`, `validate`, and `replay`. Replay validates trace integrity before rendering and does not execute tools, read raw sources, or call networks.
+- **Files Changed:** `scripts/trace_schema.py`, `scripts/trace_writer.py`, `scripts/trace_validate.py`, `scripts/trace_replay.py`, `scripts/cli.py`, `tests/test_trace_schema.py`, `tests/test_trace_writer.py`, `tests/test_trace_validate.py`, `tests/test_trace_replay.py`, `tests/test_trace_cli.py`, `data/traces/.gitkeep`, `wiki/traces/.gitkeep`, `README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r1-trace-core-audit-2026-06-14.md`, `docs/audits/phase-r1-trace-core-audit-2026-06-14.html`
+- **Verification:** R1 was rechecked as part of the Phase R2 branch gate. Trace and retrieval-trace focused tests → 19 passed. Full `pytest` → 210 passed, 2 dependency warnings. `public_repo_guard.py` passed. `git diff --check` passed in the branch.
+- **Follow-ups:** Retrieval tracing shipped in R2. MCP trace integration remains Phase R3 and is intentionally frozen.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP install — verify Claude Code + add Codex client
 - **Summary:** Installed/verified the Zurvan MCP server on both local agents. **Claude Code:** already registered in `~/.claude.json` and reported `✔ Connected` by `claude mcp list`, pointing at the live `scripts/mcp_server.py`, so it auto-picks-up all the recent server improvements — no reinstall needed. **Codex:** added globally with `codex mcp add zurvan` using the absolute Anaconda interpreter (`/opt/anaconda3/bin/python3`, which has `mcp` 1.25 + `pydantic` 2.12) and the absolute server path; verified via `codex mcp get zurvan` and a launch smoke-test (`list_tools()` → 11 tools). Made it reproducible: extended `scripts/install_mcp_config.py` with a `codex` client target that emits both a ready-to-run `codex mcp add` command and a `[mcp_servers.zurvan]` TOML block (uses `sys.executable` so the launch doesn't depend on Codex's PATH). Added `docs/mcp/codex.md`.
 - **Files Changed:**

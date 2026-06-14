@@ -64,8 +64,8 @@ Negative path:
 ## Verification Commands
 
 ```bash
-python -m compileall scripts/trace_schema.py scripts/trace_writer.py scripts/trace_validate.py scripts/trace_replay.py scripts/cli.py
-PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py
+python -m compileall scripts/trace_schema.py scripts/trace_writer.py scripts/trace_validate.py scripts/trace_replay.py scripts/context_export.py scripts/hybrid_search.py scripts/graph_context.py scripts/cli.py
+PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py tests/test_trace_retrieval_integration.py
 PYTHONPATH=. pytest
 PYTHONPATH=. python scripts/public_repo_guard.py
 git diff --check
@@ -73,8 +73,8 @@ git diff --check
 
 Observed results:
 
-- Trace tests: 10 passed.
-- Full test suite: 201 passed, 2 dependency warnings.
+- Trace and retrieval-trace tests: 19 passed.
+- Full test suite: 210 passed, 2 dependency warnings.
 - Public repo guard: passed.
 - Diff whitespace check: passed.
 
