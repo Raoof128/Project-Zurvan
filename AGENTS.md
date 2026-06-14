@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2 — provenance evaluation harness
+- **Summary:** Added local `eval_provenance.py` plus `eval/provenance_gold.jsonl` to evaluate saved trace provenance. Hard invariants (`raw_leak_rate=0%`, `hash_integrity_rate=100%`) run before graded metrics (`expected_source_recall`, `provenance_completeness`, `graph_context_presence`). Gold schema includes optional `expected_chunk_ids` for future claim-to-chunk faithfulness. Added CLI command `zurvan eval provenance`.
+- **Files Changed:** `scripts/eval_provenance.py`, `scripts/cli.py`, `eval/provenance_gold.jsonl`, `data/traces/trace-20260614T151617Z-prov0001.json`, `tests/test_eval_provenance.py`, `docs/evaluation/provenance.md`, `eval/README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
+- **Verification:** TDD red run failed on missing module; CLI red run failed on missing action; compileall passed; focused provenance+trace tests `25 passed`; full suite `216 passed` (2 dependency warnings); `eval_provenance.py --validate` passed; CLI `eval provenance` returned 100% built-scope metrics; `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** R3 remains frozen; `retrieval.fusion` and `graph.expand` are not scored until implemented.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 retrieval trace — Step 0 reconcile + Step 1A granularity
 - **Summary:** Step 0 reconciled stale test counts (`201/10` → reproduced `210/19`) across README/docs/CHANGELOG and R1/R2 audits (commit `44a76f2`). Step 1A added granular, opt-in retrieval provenance events — `retrieval.query`, `retrieval.result`, `context.assembled` — while keeping legacy `retrieval` valid, `schema_version=zurvan.trace.v1`, and the payload-hash rule unchanged (commit `cc87e5d`). No ranking/scoring/fusion/stdout change; tracing opt-in via `--trace`.
 - **Files Changed:** `scripts/trace_schema.py`, `scripts/context_export.py`, `tests/test_trace_replay.py`, `tests/test_trace_retrieval_integration.py`, `CHANGELOG.md`, `README.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
