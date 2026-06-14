@@ -1,0 +1,115 @@
+{
+  "created_at": "2026-06-14T08:56:15Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "search",
+        "limit": 10,
+        "mode": "hybrid",
+        "query": "why was vector search delayed"
+      },
+      "payload_hash": "sha256:a68e16770a264f0607018cd907f831feb284a983bef8a8a113bdbd5a6efeebc0",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "search",
+        "result_count": 10,
+        "results": [
+          {
+            "chunk_id": "4f86647d0c76296d93c7f6ad3632fb5fbd0b235d2229ee5e1011baa30cd3e863",
+            "heading": "Evidence",
+            "hybrid_score": 0.8013898119026368,
+            "keyword_score": 1.0,
+            "semantic_score": 0.5034745297565919,
+            "source_path": "wiki/claims/claim-5f9a7a02.md"
+          },
+          {
+            "chunk_id": "a6a4356d6fa0c137cd27f5c84529b4b8b5b4a09f46a3aa4f01e71a040322d411",
+            "heading": "Evidence",
+            "hybrid_score": 0.8013898119026368,
+            "keyword_score": 1.0,
+            "semantic_score": 0.5034745297565919,
+            "source_path": "wiki/claims/claim-0f6698a7.md"
+          },
+          {
+            "chunk_id": "52474e3fc8241f1916cbbea2600756c283c9210a250318fede82849da5b0d616",
+            "heading": "Reason",
+            "hybrid_score": 0.7077644777963888,
+            "keyword_score": 0.7654962641315695,
+            "semantic_score": 0.621166798293618,
+            "source_path": "wiki/templates/decision.md"
+          },
+          {
+            "chunk_id": "d2870a5dfc4b729d1dc6a1bfe0e23be56c702e5df6617b10c8e8ed91dac5a1a5",
+            "heading": "Reason",
+            "hybrid_score": 0.6581766615372076,
+            "keyword_score": 0.7007715623227592,
+            "semantic_score": 0.5942843103588802,
+            "source_path": "wiki/decisions/delay-vector-search.md"
+          },
+          {
+            "chunk_id": "ba33c6c5ec0b631579ec5ca56eb2bc5132d7539b5cadee859e6838b11ca602d2",
+            "heading": "Extracted Text",
+            "hybrid_score": 0.5884898631368347,
+            "keyword_score": 0.7082007391775142,
+            "semantic_score": 0.4089235490758156,
+            "source_path": "wiki/sources/e2e_smoke_note.txt.md"
+          },
+          {
+            "chunk_id": "90f93668d6bdc52ac573b5335cac8a7e081048257c6a1d7c857ec4456ced8943",
+            "heading": "[2026-06-03] query-save | vector-search-reliability",
+            "hybrid_score": 0.5159003709432715,
+            "keyword_score": 0.48332589648744534,
+            "semantic_score": 0.5647620826270108,
+            "source_path": "wiki/log.md"
+          },
+          {
+            "chunk_id": "a53d92d664eda9e7605c515e22a8722b1d2cb4e578640981b4ed9c0094b87a8e",
+            "heading": "Render context as a Markdown table (stdout only)",
+            "hybrid_score": 0.49637819833551117,
+            "keyword_score": 0.34887220937094676,
+            "semantic_score": 0.7176371817823577,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "703e046c4d5aa5b664681c2fbe58c63ca9dfd6da61a4fb40c4170c659f2befeb",
+            "heading": "wiki/claims/claim-abc.md (0.88)",
+            "hybrid_score": 0.49283847270215175,
+            "keyword_score": 0.35169054964958885,
+            "semantic_score": 0.7045603572809962,
+            "source_path": "docs/superpowers/specs/2026-06-02-phase18-living-wiki-design.md"
+          },
+          {
+            "chunk_id": "d4399441b100ffc83ddce84c7afd763ee057cd54b6e326a66e8b9f22db9f8904",
+            "heading": "Delay vector search",
+            "hybrid_score": 0.49110347567259227,
+            "keyword_score": 0.520735813513832,
+            "semantic_score": 0.44665496891073264,
+            "source_path": "wiki/decisions/delay-vector-search.md"
+          },
+          {
+            "chunk_id": "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+            "heading": "Graph-Assisted Context Bundle",
+            "hybrid_score": 0.4733225336053861,
+            "keyword_score": 0.3808645297576565,
+            "semantic_score": 0.6120095393769805,
+            "source_path": "docs/API.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:9935e6c6145bc49da9639608710b61be9e43c40c472141f11e27b27bda987133",
+      "timestamp": "2026-06-14T08:56:15Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan search.",
+  "title": "Retrieval context: why was vector search delayed",
+  "trace_id": "trace-20260614T171000Z-real0004"
+}

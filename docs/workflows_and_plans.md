@@ -301,6 +301,23 @@ The provenance evaluation harness now has a broader fixture set.
 3. **Scope**: Step 2B changes only evaluation fixtures, tests, and docs. It does
    not change MCP tracing, retrieval ranking, graph behavior, or trace schema.
 
+## Phase R2 Step 2C: Real-Corpus Provenance Pilot ✅
+
+Zurvan now has an initial real-corpus provenance evaluation result.
+
+1. **Freeze**: `eval/provenance_real_queries.jsonl` was committed before trace
+   generation.
+2. **Dataset**: 12 fixed queries across MCP safety/trace system, retrieval/graph
+   context, evidence/report, decision memory/policy radar, and hard ambiguous
+   categories.
+3. **Execution**: Existing `search --trace`, `context --trace`, and selected
+   `context --graph --trace` commands generated replayable traces.
+4. **Result**: `eval/provenance_real_gold.jsonl` scored 0% raw leak rate, 100%
+   hash integrity, 12/12 trace validate/replay, 86% expected source recall,
+   100% built-scope provenance completeness, and 100% graph context presence.
+5. **Report**:
+   `docs/evaluation/provenance-real-run-2026-06-14.md`.
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
