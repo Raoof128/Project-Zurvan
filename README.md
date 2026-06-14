@@ -61,8 +61,14 @@ zurvan search "local-first architecture" --hybrid
 # Save results as a wiki synthesis page
 zurvan search "local-first architecture" --hybrid --save
 
+# Opt-in retrieval trace
+zurvan search "local-first architecture" --hybrid --trace
+
 # Graph-assisted context bundle for an agent
 zurvan context --topic "project roadmap" --hybrid --graph --limit 10
+
+# Opt-in context trace with graph provenance
+zurvan context --topic "project roadmap" --hybrid --graph --trace
 
 # Render as Markdown table or Marp slides (stdout only)
 zurvan context --topic "project roadmap" --format table

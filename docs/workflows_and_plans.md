@@ -229,6 +229,27 @@ Zurvan stores replayable audit traces as local JSON plus Git-friendly Markdown m
 - Trace replay is read-only and rendering-only.
 - Raw sources remain immutable and are not read by the trace core.
 
+## Phase R2: Retrieval Trace Integration ✅
+
+Zurvan can now write opt-in trace records for retrieval commands without changing normal retrieval behavior.
+
+1. **Trigger**: Users pass `--trace` to `search` or `context`.
+2. **Search trace**: `search --trace` records query, mode (`keyword` or `hybrid`), limit, result count, source paths, headings, chunk IDs, and available keyword/semantic/hybrid scores.
+3. **Context trace**: `context --trace` records the same retrieval event and, when `--graph` is enabled, a graph-context event containing depth, node count, relation, node type, title, and source node ID.
+4. **Storage**: Trace JSON is written under `data/traces/`; the Markdown mirror is written under `wiki/traces/`.
+5. **Replay**: Generated trace IDs can be inspected with:
+   ```bash
+   python scripts/cli.py trace validate <trace-id>
+   python scripts/cli.py trace replay <trace-id>
+   ```
+
+**R2 guardrails**:
+- Tracing is explicit only. No trace is written unless `--trace` is passed.
+- Normal `search` and `context` output stays unchanged when tracing is disabled.
+- Retrieval ranking logic is unchanged.
+- Trace payload paths are normalized to repo-relative paths when they are under the project root.
+- Raw sources are not read by trace writing or replay.
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
