@@ -2,6 +2,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2 — provenance evaluation harness
+- **Summary:** Added `scripts/eval_provenance.py` and `eval/provenance_gold.jsonl` to evaluate saved trace provenance with hard invariant gates before graded scoring. The harness checks `raw_leak_rate=0%` and `hash_integrity_rate=100%` before scoring `expected_source_recall`, `provenance_completeness`, and `graph_context_presence`. Gold schema includes optional `expected_chunk_ids` for later claim-to-chunk faithfulness without a file-shape rewrite. CLI wiring added as `zurvan eval provenance`.
+- **Files Changed:** `scripts/eval_provenance.py`, `scripts/cli.py`, `eval/provenance_gold.jsonl`, `data/traces/trace-20260614T151617Z-prov0001.json`, `tests/test_eval_provenance.py`, `docs/evaluation/provenance.md`, `eval/README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
+- **Verification:** TDD red run failed on missing `scripts.eval_provenance`; CLI red run failed on missing `eval provenance` action. `python -m compileall scripts/eval_provenance.py scripts/cli.py scripts/trace_schema.py scripts/trace_validate.py scripts/trace_replay.py scripts/context_export.py` passed. Focused provenance+trace tests → 25 passed. Full `pytest` → 216 passed, 2 dependency warnings. `eval_provenance.py --validate` passed. CLI `eval provenance` returned 100% for all built-scope metrics. `public_repo_guard.py` passed. `git diff --check` passed.
+- **Follow-ups:** R3 MCP trace integration remains frozen. Future provenance events `retrieval.fusion` and `graph.expand` are intentionally outside the current scoring scope.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 Step 1A — minimal trace granularity enrichment
 - **Summary:** Added fine-grained retrieval trace events `retrieval.query`, `retrieval.result`, and `context.assembled` while keeping legacy coarse `retrieval` traces valid under `zurvan.trace.v1`. Context assembly now records ordered included chunk IDs and dropped entries; keyword traces derive deterministic fallback chunk IDs for trace provenance only. Retrieval ranking, scoring, stdout behavior, schema version, and payload-hash rules are unchanged.
 - **Files Changed:** `scripts/trace_schema.py`, `scripts/context_export.py`, `tests/test_trace_replay.py`, `tests/test_trace_retrieval_integration.py`, `README.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`

@@ -264,6 +264,25 @@ The retrieval trace schema was enriched additively before the provenance evaluat
 4. **Deferred fields**: Token-budget counts and timing metadata are intentionally excluded from the hashed payload until a later scoped design.
 5. **Research path**: Step 1A precedes `eval_provenance.py`; MCP trace integration remains frozen until the provenance harness ships.
 
+## Phase R2 Step 2: Provenance Evaluation Harness ✅
+
+Zurvan can now evaluate trace provenance against a local JSONL gold set.
+
+1. **Gold Dataset**: `eval/provenance_gold.jsonl` maps saved trace files to expected source paths, required event types, optional expected chunk IDs, and graph-context expectations.
+2. **Hard Invariants**:
+   - `raw_leak_rate` must be `0%`.
+   - `hash_integrity_rate` must be `100%`.
+   These run before graded metrics and fail fast.
+3. **Graded Metrics**:
+   - `expected_source_recall`
+   - `provenance_completeness`
+   - `graph_context_presence`
+4. **Built-scope scoring**: The current gold set reflects Step 1A events and does not penalize future-only events such as `retrieval.fusion` or `graph.expand`.
+5. **CLI**:
+   ```bash
+   python scripts/cli.py eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
+   ```
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.
