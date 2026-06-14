@@ -1419,3 +1419,228 @@
 ## [2026-06-03] merge | RAG | 2 sources
 
 ## [2026-06-03] merge | Karpathy | 1 sources
+
+- **2026-06-03T17:34:21.687620**: Note Added - MCP path fix test
+- **2026-06-03T17:35:39.345798**: Note Added - PROJECT_ROOT fix confirmed working without bash wrapper
+- **2026-06-04T12:20:42.019389**: Note Added - Paper Evaluation: Automated Test Suite Breakdown (Preprint v1.0)
+- **2026-06-04T12:20:53.880684**: Note Added - Paper Evaluation: Security Audit Results (Preprint v1.0)
+- **2026-06-04T12:21:10.508544**: Note Added - Paper Evaluation: False-Positive Calibration & Risk Sensitivity (Preprint v1.0)
+- **2026-06-04T12:21:17.343823**: Note Added - Paper Evaluation: Performance Characterisation (Preprint v1.0, Table V)
+- **2026-06-04T12:21:26.459200**: Note Added - Future Work: Agent Shield (Stage 3) — LLM Session Integrity
+- **2026-06-04T12:21:34.675576**: Note Added - Future Work: Hardware-Rooted Attestation via TPM / Secure Enclave
+- **2026-06-04T12:21:45.290549**: Note Added - Remaining Attack Surface: Lying Daemon & OS-Level Manipulation
+- **2026-06-04T12:21:50.412230**: Note Added - LLM-Assisted Development Methodology Disclosure (Paper Section VIII-K)
+- **2026-06-04T12:22:02.683986**: Note Added - Deployment Governance Checklist — 8 Pre-Deployment Gates (Paper Section X-C)
+- **2026-06-04T12:22:09.470141**: Note Added - Nonce TTL and Replay Safety Analysis (Paper Section VIII-I)
+- **2026-06-04T12:24:48.135912**: Note Added - Display Fidelity Property — Formal Definition (Paper Section II-B)
+- **2026-06-04T12:24:57.103811**: Note Added - Table IV: Browser-Only vs. Daemon-Augmented Detection — 4-Scenario Comparison
+- **2026-06-04T12:25:10.055596**: Note Added - What Simurgh Cannot Detect — Full Enumeration (Paper Section IX-B)
+- **2026-06-04T12:25:16.989244**: Note Added - Risk Scoring Verdict Strings — Exact Hard-Coded Text (Paper Section IV-C)
+- **2026-06-04T12:25:26.704525**: Note Added - Future Work: Privacy-Preserving Visual Verification (Paper Section XII-C)
+- **2026-06-04T12:25:33.347386**: Note Added - Industry Statistic: 35% Cheating Sign Rate in 2026 — Empirical Context (Paper Section II-A)
+- **2026-06-04T12:25:48.071704**: Note Added - Paper Conclusion — Four Core Contributions Synthesised (Section XIII)
+- **2026-06-04T12:25:54.833608**: Note Added - Linux CI Display-Server Validation — Mandatory Xvfb + 16-Scenario Smoke (Paper Section VIII-E)
+- **2026-06-04T12:26:41.650187**: Note Added - What Simurgh Detects — Full Anomaly Signal Enumeration (Paper Section IX-A)
+- **2026-06-04T12:29:44.146160**: Note Added - IW Paper: Formal Display Fidelity Definition + Fidelity Violation Observation (Section III-B)
+- **2026-06-04T12:29:54.371680**: Note Added - IW Paper: WDA Flag Values — Exact Definitions and Hex Codes (Section II-B)
+- **2026-06-04T12:30:05.114702**: Note Added - IW Paper: Five Contributions (Introduction)
+- **2026-06-04T12:30:13.391167**: Note Added - IW Paper: Three-Phase Attack Methodology (Section IV-A)
+- **2026-06-04T12:30:26.430632**: Note Added - IW Paper: Four Attack Variants (Section IV-B–D)
+- **2026-06-04T12:30:35.177320**: Note Added - IW Paper: Table I — Screen Capture Evasion Results Across All Platforms (Section V-C)
+- **2026-06-04T12:30:51.391776**: Note Added - IW Paper: Pixel-Level Forensic Analysis — Windows and macOS 26 (Section V-C, V-D)
+- **2026-06-04T12:31:06.757400**: Note Added - IW Paper: Behavioural Detection Results — Gaze, Mouse, Process (Section V-C)
+- **2026-06-04T12:31:28.259626**: Note Added - IW Paper: Countermeasure Assessment — Table II Full Matrix (Section VI)
+- **2026-06-04T12:31:43.835403**: Note Added - IW Paper: Vendor Responses and Disclosure Timeline — Table III (Section VII-A/B)
+- **2026-06-04T12:32:04.957759**: Note Added - IW Paper: AI Capability Uplift Case Study — Full Section IX
+- **2026-06-04T12:32:13.571087**: Note Added - IW Paper: Dual-Use Publication Justification — Four Reasons (Section VII-C)
+- **2026-06-04T12:32:43.406040**: Note Added - IW Paper: Commercial Exploitation In-the-Wild — Named Tools (Section VIII-F)
+- **2026-06-04T12:32:50.632201**: Note Added - IW Paper: Study Limitations (Section V-E)
+- **2026-06-04T12:33:05.101869**: Note Added - IW Paper: Conclusion Synthesis (Section X)
+- **2026-06-04T12:33:12.155825**: Note Added - IW Paper: Browser-Based Proctoring Architecture — 5-Layer Model (Section II-C)
+- **2026-06-04T12:33:33.425061**: Note Added - IW Paper: Luijben Security Requirements Mapping — IW Violates Requirement 2 (Section II-D)
+- **2026-06-04T12:33:40.178591**: Note Added - IW Paper: Impact on Students and Structural Unsoundness Argument (Section VII-D)
+- **2026-06-04T12:36:20.034213**: Note Added - Aion Paper: The Retrieval-Faithfulness Split — Central Concept (Section 1)
+- **2026-06-04T12:36:26.970755**: Note Added - Aion Paper: Four Contributions (Section 1)
+- **2026-06-04T12:36:42.028740**: Note Added - Aion Paper: Table 1 — Coarse Retrieval Ablation v1→v3 (Section 3.5)
+- **2026-06-04T12:36:49.495588**: Note Added - Aion Paper: Table 2 — Benchmark Category Distribution (Section 4.1)
+- **2026-06-04T12:37:05.151637**: Note Added - Aion Paper: Table 3 — citation_support Scoring Rubric (Section 4.3)
+- **2026-06-04T12:37:16.112312**: Note Added - Aion Paper: Table 4+5 — v3 Main Results and Per-Category Breakdown (Section 5)
+- **2026-06-04T12:37:30.036235**: Note Added - Aion Paper: Table 6 — Two-Judge Robustness Panel (Section 5.4)
+- **2026-06-04T12:37:37.018719**: Note Added - Aion Paper: Table 7 — Failure Taxonomy (Section 6.2)
+- **2026-06-04T12:37:52.251529**: Note Added - Aion Paper: aion_027 Grace Drift — Deep Case Study (Section 6.3)
+- **2026-06-04T12:38:00.184663**: Note Added - Aion Paper: v4 Architecture Roadmap — search_verses_in_chapter RPC (Section 6.4)
+- **2026-06-04T12:38:18.711511**: Note Added - Aion Paper: Five Named Limitations (Limitations Section)
+- **2026-06-04T12:38:31.413217**: Note Added - Aion Paper: 4-Layer Retrieval Architecture Detail (Section 3.3)
+- **2026-06-14T08:56:31.646594**: Note Added - Test Note
+- **2026-06-14T08:57:02.124464**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T08:59:45.487446**: Note Added - Test Note
+- **2026-06-14T09:00:02.039545**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:04:51.004935**: Note Added - Test Note
+- **2026-06-14T09:05:07.515176**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:14:40.400326**: Note Added - MCP test
+- **2026-06-14T09:14:48.420921**: Note Added - Test Note
+- **2026-06-14T09:15:04.464374**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:15:23.811539**: Note Added - MCP E2E write mode smoke 0d3f7d7e
+- **2026-06-14T09:15:23.816443**: Question Added - Should MCP write mode stay disabled by default? 0d3f7d7e
+- **2026-06-14T09:19:12.483809**: Note Added - Test Note
+- **2026-06-14T09:19:27.345783**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:19:34.050951**: Note Added - MCP E2E write mode smoke 396e5628
+- **2026-06-14T09:19:34.055715**: Question Added - Should MCP write mode stay disabled by default? 396e5628
+- **2026-06-14T09:21:29.769281**: Note Added - Test Note
+- **2026-06-14T09:21:46.074911**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:21:52.782169**: Note Added - MCP E2E write mode smoke 6143ee53
+- **2026-06-14T09:21:52.787363**: Question Added - Should MCP write mode stay disabled by default? 6143ee53
+- **2026-06-14T09:22:12.190022**: Note Added - MCP test
+- **2026-06-14T09:22:41.827316**: Note Added - Test Note
+- **2026-06-14T09:22:56.830664**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+- **2026-06-14T09:27:11.721047**: Note Added - Test Note
+- **2026-06-14T09:27:29.005095**: Note Added - MCP test
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | RAG | 1 sources
+
+## [2026-06-14] merge | RAG | 2 sources
+
+## [2026-06-14] merge | Karpathy | 1 sources
+
+## [2026-06-14] ingest | Banking_Shield_Machine_Checked_Absence_Claims_Preprint_v1.2.pdf.md
+
+## [2026-06-14] ingest | aion-bibleqa-citation-faithfulness-bible-rag.pdf.md
+
+## [2026-06-14] ingest | Project_Simurgh_Voting_Adjacent_Supplement_Phase_C_Preprint_v1.0.pdf.md
