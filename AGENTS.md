@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 retrieval trace — Step 0 reconcile + Step 1A granularity
+- **Summary:** Step 0 reconciled stale test counts (`201/10` → reproduced `210/19`) across README/docs/CHANGELOG and R1/R2 audits (commit `44a76f2`). Step 1A added granular, opt-in retrieval provenance events — `retrieval.query`, `retrieval.result`, `context.assembled` — while keeping legacy `retrieval` valid, `schema_version=zurvan.trace.v1`, and the payload-hash rule unchanged (commit `cc87e5d`). No ranking/scoring/fusion/stdout change; tracing opt-in via `--trace`.
+- **Files Changed:** `scripts/trace_schema.py`, `scripts/context_export.py`, `tests/test_trace_replay.py`, `tests/test_trace_retrieval_integration.py`, `CHANGELOG.md`, `README.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
+- **Verification:** focused trace suite `20 passed`; full suite `211 passed` (2 dependency warnings); legacy single-`retrieval` replay regression passed; `public_repo_guard.py` passed; `git diff --check` passed on branch.
+- **Follow-ups:** `context.assembled.dropped` always empty (awaits token-budget policy); `retrieval.fusion`/`graph.expand` not yet implemented; branch pushed, NOT merged to `main` (dirty `main` + `wiki/index.md:669`); next is Step 2 `eval_provenance.py`.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP install — verify Claude Code + add Codex client
 - **Summary:** Claude Code already `✔ Connected` (live `mcp_server.py`, no reinstall needed). Added Codex via `codex mcp add zurvan` (absolute Anaconda python + absolute server path; verified `codex mcp get` + launch smoke-test, 11 tools). Made it reproducible: added a `codex` target to `install_mcp_config.py` (emits `codex mcp add` command + `[mcp_servers.zurvan]` TOML via `sys.executable`) and `docs/mcp/codex.md`.
 - **Files Changed:** `scripts/install_mcp_config.py`, `tests/test_install_mcp_config.py`, `docs/mcp/codex.md` (+ machine `~/.codex/config.toml`)
