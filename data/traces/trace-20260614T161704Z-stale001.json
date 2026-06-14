@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-06-14T16:17:00Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 10,
+        "mode": "keyword",
+        "query": "stale superseded note"
+      },
+      "payload_hash": "sha256:2d602b49cb105d9fa4278633657c3d51222cb2a7f18cf8b0b2bde2f2d676a8ce",
+      "timestamp": "2026-06-14T16:17:00Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 1,
+        "results": [
+          {
+            "chunk_id": "chunk-stale-001",
+            "hybrid_score": 1,
+            "source_path": "wiki/notes/stale-superseded-note.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:7a0657b085850d915dba23f54fc6dbe00b4c6d34d17a8fb52800ec73b97f4535",
+      "timestamp": "2026-06-14T16:17:00Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "chunk-stale-001"
+        ]
+      },
+      "payload_hash": "sha256:33e35d69346548b71b6abf414e59fb202b063c07a94f573d71159f744461329d",
+      "timestamp": "2026-06-14T16:17:00Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Step 2B provenance gold fixture.",
+  "title": "trace-20260614T161704Z-stale001",
+  "trace_id": "trace-20260614T161704Z-stale001"
+}
