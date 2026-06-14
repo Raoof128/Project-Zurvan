@@ -58,15 +58,22 @@ def test_export_context_trace_writes_retrieval_and_graph_events(tmp_path, monkey
     assert [event["event_type"] for event in data["events"]] == [
         "retrieval.query",
         "retrieval.result",
+        "retrieval.fusion",
         "context.assembled",
         "graph_context",
     ]
     assert data["events"][0]["payload"]["mode"] == "hybrid"
     assert data["events"][1]["payload"]["results"][0]["keyword_score"] == 0.75
     assert data["events"][1]["payload"]["results"][0]["hybrid_score"] == 0.65
-    assert data["events"][2]["payload"] == {"included_chunk_ids": ["chunk-001"], "dropped": []}
-    assert data["events"][3]["payload"]["depth"] == 2
-    assert data["events"][3]["payload"]["nodes"][0]["relation"] == "outgoing:mentions"
+    assert data["events"][2]["payload"]["weights"] == {"fts": 0.6, "embedding": 0.4}
+    assert data["events"][2]["payload"]["ranked"][0]["chunk_id"] == "chunk-001"
+    assert data["events"][3]["payload"] == {
+        "included_chunk_ids": ["chunk-001"],
+        "dropped": [],
+        "dropped_reason": "no_dropped_context",
+    }
+    assert data["events"][4]["payload"]["depth"] == 2
+    assert data["events"][4]["payload"]["nodes"][0]["relation"] == "outgoing:mentions"
     assert "# Trace Replay: Retrieval context: MCP provenance" in replay_trace_file(trace_path)
 
 
@@ -99,7 +106,11 @@ def test_search_memory_trace_writes_replayable_trace(tmp_path, monkeypatch, caps
     data = json.loads(trace_path.read_text())
 
     assert "Trace written:" in captured.out
-    assert [event["event_type"] for event in data["events"]] == ["retrieval.query", "retrieval.result"]
+    assert [event["event_type"] for event in data["events"]] == [
+        "retrieval.query",
+        "retrieval.result",
+        "retrieval.fusion",
+    ]
     assert data["events"][0]["payload"]["command"] == "search"
     assert "Trace Replay" in replay_trace_file(trace_path)
 
