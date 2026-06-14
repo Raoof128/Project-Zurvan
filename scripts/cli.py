@@ -10,10 +10,17 @@ from scripts.context_export import search_memory, export_context
 def main():
     args_list = sys.argv[1:]
     project_name = None
+    project_root_override = None
     if "--project" in args_list:
         idx = args_list.index("--project")
         if idx + 1 < len(args_list):
             project_name = args_list[idx + 1]
+            args_list.pop(idx)
+            args_list.pop(idx)
+    if "--project-root" in args_list:
+        idx = args_list.index("--project-root")
+        if idx + 1 < len(args_list):
+            project_root_override = Path(args_list[idx + 1]).resolve()
             args_list.pop(idx)
             args_list.pop(idx)
     
@@ -234,6 +241,21 @@ def main():
     
     pub_val = publish_sub.add_parser("validate")
     pub_val.add_argument("report_id")
+
+    # zurvan trace
+    trace_parser = subparsers.add_parser("trace", help="Inspect and replay audit traces")
+    trace_sub = trace_parser.add_subparsers(dest="trace_action")
+
+    trace_sub.add_parser("list", help="List saved traces")
+
+    trace_inspect = trace_sub.add_parser("inspect", help="Print a trace JSON document")
+    trace_inspect.add_argument("trace_id")
+
+    trace_validate = trace_sub.add_parser("validate", help="Validate a trace JSON document")
+    trace_validate.add_argument("trace_id")
+
+    trace_replay = trace_sub.add_parser("replay", help="Render a deterministic trace replay")
+    trace_replay.add_argument("trace_id")
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -634,7 +656,6 @@ def main():
     elif args.command == "publish":
         if args.publish_action == "export":
             from scripts.publication_export import export_publication
-            from pathlib import Path
             out_dir = Path(args.output_dir) if args.output_dir else None
             try:
                 out = export_publication(args.report_id, args.format, args.force, out_dir)
@@ -644,7 +665,6 @@ def main():
                 sys.exit(1)
         elif args.publish_action == "bundle":
             from scripts.publication_bundle import create_bundle
-            from pathlib import Path
             out_dir = Path(args.output_dir) if args.output_dir else None
             try:
                 out = create_bundle(args.report_id, args.format, args.force, out_dir)
@@ -673,6 +693,53 @@ def main():
             for w in audit["warnings"]: print(f"WARN: {w}")
             for f in audit["failures"]: print(f"FAIL: {f}")
             if audit["status"] == "fail": sys.exit(1)
+
+    elif args.command == "trace":
+        from scripts.trace_replay import replay_trace_file
+        from scripts.trace_validate import validate_trace_file
+        from scripts.trace_writer import TraceStore
+        import json
+
+        store = TraceStore(project_root=project_root_override or Path(__file__).parent.parent)
+        if args.trace_action == "list":
+            traces = store.list()
+            if not traces:
+                print("No traces found.")
+            for trace in traces:
+                print(
+                    f"- {trace['trace_id']} | {trace['title']} | "
+                    f"events: {trace['event_count']} | created: {trace['created_at']}"
+                )
+        elif args.trace_action == "inspect":
+            try:
+                print(json.dumps(store.read(args.trace_id), indent=2, sort_keys=True))
+            except FileNotFoundError as exc:
+                print(str(exc))
+                sys.exit(1)
+            except ValueError as exc:
+                print(str(exc))
+                sys.exit(1)
+        elif args.trace_action == "validate":
+            try:
+                result = validate_trace_file(store.trace_path(args.trace_id))
+            except ValueError as exc:
+                print(str(exc))
+                sys.exit(1)
+            if result.valid:
+                print(f"Trace {args.trace_id} is valid.")
+            else:
+                print(f"Trace {args.trace_id} has issues:")
+                for issue in result.issues:
+                    print(f" - {issue}")
+                sys.exit(1)
+        elif args.trace_action == "replay":
+            try:
+                print(replay_trace_file(store.trace_path(args.trace_id)), end="")
+            except (FileNotFoundError, ValueError) as exc:
+                print(str(exc))
+                sys.exit(1)
+        else:
+            trace_parser.print_help()
 
                 
     elif args.command == "remember":
