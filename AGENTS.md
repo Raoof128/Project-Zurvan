@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2C — real-corpus provenance pilot
+- **Summary:** Added an auditable real-corpus pilot before R3. Committed `eval/provenance_real_queries.jsonl` first as a frozen 12-query set (`48a8c27`) with manual expected-source annotations from wiki/docs. Then generated traces using existing `search --trace`, `context --trace`, and selected `context --graph --trace`; linked them in `eval/provenance_real_gold.jsonl`; and documented the run in `docs/evaluation/provenance-real-run-2026-06-14.md`. Pilot metrics: 0% raw leak rate, 100% hash integrity, 12/12 trace validate/replay, 86% expected source recall, 100% built-scope provenance completeness, 100% graph context presence. No R3, MCP tracing, ranking, graph behavior, schema, or evaluator scoring changes.
+- **Files Changed:** `eval/provenance_real_queries.jsonl`, `eval/provenance_real_gold.jsonl`, `data/traces/trace-20260614T171000Z-real*.json`, `wiki/traces/trace-20260614T171000Z-real*.md`, `docs/evaluation/provenance-real-run-2026-06-14.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
+- **Verification:** Search/graph indexes rebuilt; all 12 queries traced successfully; real gold validation passed; real evaluation reported 12 cases, 0% raw leaks, 100% hash integrity, 86% expected source recall, 100% provenance completeness, 100% graph context presence; trace validate/replay rate 12/12; compileall passed; provenance tests `7 passed`; full suite `218 passed` (2 dependency warnings); `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** Treat as pilot evidence, not benchmark evidence; expand real-world gold and annotation review later; keep R3 frozen until merge/review.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 Step 2B — stronger provenance gold set
 - **Summary:** Expanded provenance evaluation beyond one controlled fixture. Passing baseline now has six cases: `search --trace`, `context --trace`, `context --graph --trace`, legacy coarse `retrieval`, the original Step 2 controlled fixture, and a stale/superseded note case labelled for later. Added isolated negative/failure gold files for raw-path invariant failure, incomplete trace completeness failure, and missing expected source recall failure. No MCP tracing, retrieval ranking, graph behavior, or schema changes.
 - **Files Changed:** `eval/provenance_gold*.jsonl`, `data/traces/trace-20260614T16170*.json`, `tests/test_eval_provenance.py`, `README.md`, `docs/TESTING.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
