@@ -1,6 +1,6 @@
 import pytest
 import os
-from scripts.chunk import extract_chunks_from_markdown, hash_content
+from scripts.chunk import extract_chunks_from_markdown, hash_content, scan_markdown_files
 
 def test_extract_chunks_from_markdown(tmp_path):
     md_file = tmp_path / "test.md"
@@ -21,6 +21,21 @@ Line 4"""
     assert "Line 3" in chunks[1]['text']
     assert chunks[2]['heading'] == "Subheader"
     assert "Line 4" in chunks[2]['text']
+
+def test_scan_excludes_derived_trace_mirrors(tmp_path, monkeypatch):
+    # Trace mirror pages are derived audit artifacts and must not be indexed:
+    # they are self-referential and pollute retrieval with the query's own terms.
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "traces").mkdir()
+    (tmp_path / "wiki" / "real.md").write_text("# Real\nknowledge")
+    (tmp_path / "wiki" / "traces" / "trace-x.md").write_text("# Trace Replay\nquery echo")
+    monkeypatch.chdir(tmp_path)
+
+    found = scan_markdown_files()
+
+    assert any(f.endswith("real.md") for f in found)
+    assert not any("traces" in f.split(os.sep) for f in found)
+
 
 def test_chunk_id_is_deterministic(tmp_path):
     md_file = tmp_path / "test.md"

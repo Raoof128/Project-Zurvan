@@ -1,0 +1,207 @@
+{
+  "created_at": "2026-06-14T09:21:55Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "cross project search federation privacy"
+      },
+      "payload_hash": "sha256:e8355ce493b460ecff220b9c933577d79b69970fd031752751579bec883326b3",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "heading": "Phase 10: Cross-Project Search + Federation \u2705",
+            "hybrid_score": 0.8628347096335347,
+            "keyword_score": 1.0,
+            "semantic_score": 0.6570867740838366,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "heading": "Phase 11: Cross-Project Decision Memory \u2705",
+            "hybrid_score": 0.6943786755880503,
+            "keyword_score": 0.6779990676447769,
+            "semantic_score": 0.7189480875029605,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+            "heading": "Phase 12: Cross-Project Contradiction + Policy Radar \u2705",
+            "hybrid_score": 0.6848467408765645,
+            "keyword_score": 0.7779020786767573,
+            "semantic_score": 0.5452637341762754,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "31ec79ac44b86629df4cf090241a33305132c34f7edb7feb365b27d1396b1ba6",
+            "heading": "Zurvan Multi-Project Workspace and Federation",
+            "hybrid_score": 0.6323699514899852,
+            "keyword_score": 0.7570735322959565,
+            "semantic_score": 0.44531458028102827,
+            "source_path": "wiki/note-zurvan-multi-project-workspace-and-federation.md"
+          },
+          {
+            "chunk_id": "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8",
+            "heading": "Cross-Project Search",
+            "hybrid_score": 0.615080932631803,
+            "keyword_score": 0.7061222715679973,
+            "semantic_score": 0.4785189242275113,
+            "source_path": "docs/federation/cross-project-search.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:cdb9eb18ed867c748e1dc1de2e83a9b0d7ff0a425f3cb4cd5b49c232c555d798",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "retrieval.fusion",
+      "payload": {
+        "fusion": "weighted_sum",
+        "mode": "hybrid",
+        "ranked": [
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "embedding_score": 0.6570867740838366,
+            "fts_score": 1.0,
+            "fused_score": 0.8628347096335347,
+            "rank": 1
+          },
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "embedding_score": 0.7189480875029605,
+            "fts_score": 0.6779990676447769,
+            "fused_score": 0.6943786755880503,
+            "rank": 2
+          },
+          {
+            "chunk_id": "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+            "embedding_score": 0.5452637341762754,
+            "fts_score": 0.7779020786767573,
+            "fused_score": 0.6848467408765645,
+            "rank": 3
+          },
+          {
+            "chunk_id": "31ec79ac44b86629df4cf090241a33305132c34f7edb7feb365b27d1396b1ba6",
+            "embedding_score": 0.44531458028102827,
+            "fts_score": 0.7570735322959565,
+            "fused_score": 0.6323699514899852,
+            "rank": 4
+          },
+          {
+            "chunk_id": "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8",
+            "embedding_score": 0.4785189242275113,
+            "fts_score": 0.7061222715679973,
+            "fused_score": 0.615080932631803,
+            "rank": 5
+          }
+        ],
+        "weights": {
+          "embedding": 0.4,
+          "fts": 0.6
+        }
+      },
+      "payload_hash": "sha256:5e031b5c5bddf07c2f84f38d52be39f8069ff61e0df7ecee224f72c43ebdfc89",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [
+          {
+            "chunk_id": "8d706b50661d8cf2c3cc1457a4276146a0d78c280c874b32afe32b90c53ae5ef",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "eff9aaf5ed7979979c1e9d5c6e488fcebd83f840c82f6c040b3273de7ae37fd2",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "6b2ce33c6ec175dcf2cb51fd38ba2bd443b823f7eb47b8839c8f1032a592d78c",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "dbea152520f0fa083bb646d50a11ae182b67e23e344cbc63cfc0d33b2b754173",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "ffee4904601833e94ad780a27d0dc2feb50b7e92c0d809291f66d7bd2023e96c",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "2da9f7274dc050144dec370eca021acf85051b1f2e2e52fe129bf8860a3a49c9",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "5b3910feaff191bf6b9e50c2b1e39ec798d2672aba3c16f92d2dad73e2aea123",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "8bf1450aa4090a643af72f2d5c33514cf8907ed4fa8dd9456cbf63aee321a601",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "77d62f2f00b5d146051a657d3f2f2847851a8b714ee53b4f93349f2e4d1e85ae",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "7e69ed021d38b5d4fd6c4c4633cde4620f9d2482e625c25c21a1d70da6102bc5",
+            "reason": "budget"
+          }
+        ],
+        "included_chunk_ids": [
+          "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+          "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+          "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+          "31ec79ac44b86629df4cf090241a33305132c34f7edb7feb365b27d1396b1ba6",
+          "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8"
+        ]
+      },
+      "payload_hash": "sha256:e302892db42b548f857babbb1726a2a7c9db9b33bd0e891f9200df8f7cad6cc4",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-005",
+      "event_type": "graph_context",
+      "payload": {
+        "depth": 1,
+        "enabled": true,
+        "node_count": 1,
+        "nodes": [
+          {
+            "depth": 1,
+            "node_type": "note",
+            "path": "README.md",
+            "relation": "incoming:mentions",
+            "source_id": "47bb6fd4ebef2d7466a316b64a8678dcaaaa84ffcd3de9e1a7d55136dc02f799",
+            "title": "README"
+          }
+        ]
+      },
+      "payload_hash": "sha256:2df83e1c62f0b5201901304e28dfc4180ae0f0d8e0580acfaec254884ac8d4eb",
+      "timestamp": "2026-06-14T09:21:55Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: cross project search federation privacy",
+  "trace_id": "trace-20260614T180000Z-r1b00006"
+}

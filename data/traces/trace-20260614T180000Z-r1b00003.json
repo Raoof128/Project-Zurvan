@@ -1,0 +1,185 @@
+{
+  "created_at": "2026-06-14T09:21:54Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "Phase R2 retrieval trace integration audit"
+      },
+      "payload_hash": "sha256:faa901e5021f16ab7ce93c59236ff159c410b0a1c8036cefe36d3c64d3f07d10",
+      "timestamp": "2026-06-14T09:21:54Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "a7797266eeb202fe079eaafda7d0064e4251987201cf309360611532b08e5b5d",
+            "heading": "Phase R2 Retrieval Trace Integration Audit",
+            "hybrid_score": 0.7379014550345884,
+            "keyword_score": 1.0,
+            "semantic_score": 0.3447536375864709,
+            "source_path": "docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md"
+          },
+          {
+            "chunk_id": "9acce7ff847bf36006f8817196210aef8da6a1c146e41857d5b8c7dee3ab341a",
+            "heading": "Phase R1 Trace Core Audit",
+            "hybrid_score": 0.5454378692682103,
+            "keyword_score": 0.4263233395908469,
+            "semantic_score": 0.7241096637842555,
+            "source_path": "docs/audits/phase-r1-trace-core-audit-2026-06-14.md"
+          },
+          {
+            "chunk_id": "4a926b8d0c9561f5f821957803ef7d76aaf11debaa759d54194f880fafbcb358",
+            "heading": "Phase R2 Step 1A: Minimal Trace Granularity Enrichment \u2705",
+            "hybrid_score": 0.5308623409426014,
+            "keyword_score": 0.49447844980354716,
+            "semantic_score": 0.5854381776511827,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "1c092685f7af13b328621802ca7378d29b405f416538786764219e1b8c17a5f6",
+            "heading": "Phase R2: Retrieval Trace Integration \u2705",
+            "hybrid_score": 0.5301664805654707,
+            "keyword_score": 0.5462455868196325,
+            "semantic_score": 0.5060478211842278,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "d6ee692017293a45e7e5ad354d7a977c0399f2b0114f083d385de5798db8526b",
+            "heading": "Phase R2 Step 2B: Stronger Provenance Gold Set \u2705",
+            "hybrid_score": 0.516713762832464,
+            "keyword_score": 0.395037732370838,
+            "semantic_score": 0.6992278085249028,
+            "source_path": "docs/workflows_and_plans.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:6196a0098854db5c311940489740b030dbad1207f61e31bfe3bed7e33ebd9d18",
+      "timestamp": "2026-06-14T09:21:54Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "retrieval.fusion",
+      "payload": {
+        "fusion": "weighted_sum",
+        "mode": "hybrid",
+        "ranked": [
+          {
+            "chunk_id": "a7797266eeb202fe079eaafda7d0064e4251987201cf309360611532b08e5b5d",
+            "embedding_score": 0.3447536375864709,
+            "fts_score": 1.0,
+            "fused_score": 0.7379014550345884,
+            "rank": 1
+          },
+          {
+            "chunk_id": "9acce7ff847bf36006f8817196210aef8da6a1c146e41857d5b8c7dee3ab341a",
+            "embedding_score": 0.7241096637842555,
+            "fts_score": 0.4263233395908469,
+            "fused_score": 0.5454378692682103,
+            "rank": 2
+          },
+          {
+            "chunk_id": "4a926b8d0c9561f5f821957803ef7d76aaf11debaa759d54194f880fafbcb358",
+            "embedding_score": 0.5854381776511827,
+            "fts_score": 0.49447844980354716,
+            "fused_score": 0.5308623409426014,
+            "rank": 3
+          },
+          {
+            "chunk_id": "1c092685f7af13b328621802ca7378d29b405f416538786764219e1b8c17a5f6",
+            "embedding_score": 0.5060478211842278,
+            "fts_score": 0.5462455868196325,
+            "fused_score": 0.5301664805654707,
+            "rank": 4
+          },
+          {
+            "chunk_id": "d6ee692017293a45e7e5ad354d7a977c0399f2b0114f083d385de5798db8526b",
+            "embedding_score": 0.6992278085249028,
+            "fts_score": 0.395037732370838,
+            "fused_score": 0.516713762832464,
+            "rank": 5
+          }
+        ],
+        "weights": {
+          "embedding": 0.4,
+          "fts": 0.6
+        }
+      },
+      "payload_hash": "sha256:462c6e14c3e876a4ed6706a66a6a22fb42b52f35f4a88bec3205d1ea7c033da0",
+      "timestamp": "2026-06-14T09:21:54Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [
+          {
+            "chunk_id": "c38f195cca7be7b76178ac94dbd35d0bec93b74abee3f4c506af615122157081",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "f894518d304f3d5fcb548e3fc44299345372b37516b937b25eba61d37d8965a9",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "7698402127a2e2fb48579783d018ad58c28b434d64897ad6c745e7d74b715a7e",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "3d1b84ea6e72fceb1fd85dc8648d6f668ec97907576e327d29bbe75c059a2a1b",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "e94295ab8f53430bbc3030ab71927b91d0f8db5f7e4773a3f7eea9f22729f729",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "c48bc81a400579db36296d8e61e6122fc8e1594a334cfa6f7bcde9f3f9fce200",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "e78e9bdf600c504a8cf6090cf1d48a538ba44b4c1978f687622a187d0e58cd23",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "3a0df4a0985e5a025f61c10defbd894ad1112a244bf4d778d62ca3c09fca69c4",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "29d4e1a9372e03927accad4e2c07290c5d2bf134483b51bd614d4b226fd3edca",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "d3587c037aa69b77de6d5195ea9123251163fb93340d46df3a0905ebbf718771",
+            "reason": "budget"
+          }
+        ],
+        "included_chunk_ids": [
+          "a7797266eeb202fe079eaafda7d0064e4251987201cf309360611532b08e5b5d",
+          "9acce7ff847bf36006f8817196210aef8da6a1c146e41857d5b8c7dee3ab341a",
+          "4a926b8d0c9561f5f821957803ef7d76aaf11debaa759d54194f880fafbcb358",
+          "1c092685f7af13b328621802ca7378d29b405f416538786764219e1b8c17a5f6",
+          "d6ee692017293a45e7e5ad354d7a977c0399f2b0114f083d385de5798db8526b"
+        ]
+      },
+      "payload_hash": "sha256:e9d196bf1821c14d78d7aca4307a055b110e93adb6d8cd0208e7c7ddbc80b3f7",
+      "timestamp": "2026-06-14T09:21:54Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: Phase R2 retrieval trace integration audit",
+  "trace_id": "trace-20260614T180000Z-r1b00003"
+}

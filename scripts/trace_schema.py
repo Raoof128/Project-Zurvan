@@ -14,6 +14,7 @@ ALLOWED_EVENT_TYPES = {
     "retrieval",
     "retrieval.query",
     "retrieval.result",
+    "retrieval.fusion",
     "context.assembled",
     "graph_context",
     "tool_call",
