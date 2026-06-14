@@ -62,32 +62,62 @@ pipeline**. The Step 2C ceiling scored a 3-event subset
 (`retrieval.query`, `retrieval.result`, `context.assembled`). This run adds
 `retrieval.fusion` to the scored expectation for every (hybrid) query, and all
 12 traces genuinely contain it — so completeness stays 100% over a larger
-denominator. The headline did not drop because the frozen pilot contains no
-keyword-only query that would legitimately *lack* a fusion event; with an
-all-hybrid set there is no honest gap to expose. The substantive gain is that
-`context.assembled.dropped` is no longer an empty stub: 7/7 context traces
-record real `budget` drops with concrete chunk IDs.
+denominator.
 
-`expected_source_recall` moved 86% → 79%. This is **corpus drift, not the
-enrichment**: the enrichment is ranking-neutral (unit-tested), so the included
-results are unchanged for a fixed index. The current index has more competing
-docs than when the 2C pilot's index was built, which pushes two genuinely
-borderline queries (`real-retrieval-graph-03`, `real-hard-ambiguous-01`) below
-their pilot recall. The frozen 2C pilot still scores 86% against its own
-committed traces.
+Two cautions on reading this number. First, with the conditional scorer
+(`retrieval.fusion` expected *iff* the query is hybrid), `provenance_completeness`
+measures **instrumentation coverage** — "did the trace capture the events this
+command type is supposed to capture" — not reconstruction faithfulness. It will
+read ~100% on any correct run. It is a useful integrity check, but it is **not**
+the RQ1 headline; `expected_source_recall` is. Adding a keyword-only query would
+*not* "make completeness honest" (fusion is correctly not expected there, so
+completeness stays 100%); what it buys is validation of the scorer's **negative
+branch** on real data (see Residual). Second, the substantive gain this run does
+deliver is qualitative: `context.assembled.dropped` is no longer an empty stub —
+7/7 context traces record real `budget` drops with concrete chunk IDs.
+
+### Recall: the 2C and 1B numbers are NOT comparable
+
+`expected_source_recall` is 79% here vs 86% in the 2C pilot. **Do not read this
+as an enrichment delta or a regression.** The enrichment is ranking-neutral
+(`_apply_budget` keeps the identical top-`limit` slice; unit-tested), so it
+cannot move recall for a fixed index. The two numbers are scored against
+**different index builds**:
+
+- The 2C pilot's traces were generated from an index that did not contain trace
+  mirrors (they were created as a side effect of that very run).
+- This 1B run rebuilds the index from the current corpus. A naive rebuild
+  *included* the `wiki/traces/*.md` mirrors and crashed recall to **57%** — the
+  mirrors *crowd out* real sources (they deflate recall, they do not inflate it).
+  Excluding them restored recall to 79%.
+
+So the mirror fix did not "clean up" the 86% number — the 2C index never had
+mirrors. It prevented *this* rebuild from introducing them. The residual 86%→79%
+gap is **corpus/index drift between two builds** (more competing docs now push
+two genuinely borderline queries — `real-retrieval-graph-03`,
+`real-hard-ambiguous-01` — below their pilot recall) and cannot be fully
+attributed without reconstructing the exact 2C index. Treat the two pilots as
+non-comparable. The frozen 2C pilot still scores 86% against its own committed
+traces; it is left untouched.
 
 ## Honest framing
 
-> Step 1B raises provenance from "built-scope complete" toward audit
-> completeness: fusion ranks and genuine drop reasons are now recorded and
-> scoreable on real traces. Completeness is measured over the full retrieval
-> pipeline, not a 3-event subset. Recall remains a pilot-grade signal and is
-> sensitive to corpus size.
+> Completeness is 100% over currently instrumented enriched retrieval
+> provenance. This is instrumentation coverage, not "complete provenance":
+> `graph.expand` is not a separate event (graph is scored via `graph_context`),
+> and MCP/tool-call tracing (R3) is not built yet.
 
 ## Residual
 
 - Still 12 queries — pilot, not benchmark.
-- All-hybrid frozen set cannot exercise the "fusion legitimately absent" path;
-  a future keyword-only query would test the conditional denominator honestly.
+- The all-hybrid frozen set cannot exercise the scorer's **negative branch** on
+  real data. Adding ≥1 keyword-only query (fusion must *not* be demanded) and ≥1
+  non-graph query (graph must *not* be demanded) would validate that the
+  conditional scoring is correct, not just that the positive path fires. This is
+  a scorer-robustness check, not a completeness falsification.
 - `context.assembled.dropped` reasons are currently limited to `budget`;
   `dedupe` and relevance-threshold reasons remain future work.
+- The ~21% missing source recall is unanalysed and must not back any paper claim
+  until the misses are categorised (genuine retrieval gap vs. annotation vs.
+  corpus drift).
+- No MCP tracing yet; no standalone `graph.expand` event.
