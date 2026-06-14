@@ -192,3 +192,49 @@ def test_cli_eval_provenance_prints_metrics_table(tmp_path):
     assert result.returncode == 0
     assert "Provenance Evaluation Results" in result.stdout
     assert "expected_source_recall: 100%" in result.stdout
+
+
+def test_checked_in_provenance_gold_has_realistic_positive_cases():
+    from scripts.eval_provenance import load_gold_dataset, run_provenance_evaluation, validate_gold_dataset
+
+    dataset = load_gold_dataset("eval/provenance_gold.jsonl")
+    case_ids = {item["id"] for item in dataset}
+
+    assert len(dataset) >= 6
+    assert "search-trace-happy-path" in case_ids
+    assert "context-trace-happy-path" in case_ids
+    assert "context-graph-trace-happy-path" in case_ids
+    assert "legacy-retrieval-trace-compatibility" in case_ids
+    assert "stale-superseded-note-labelled-later" in case_ids
+    assert validate_gold_dataset("eval/provenance_gold.jsonl") is True
+
+    metrics = run_provenance_evaluation(
+        "eval/provenance_gold.jsonl",
+        min_source_recall=1.0,
+        min_provenance_completeness=1.0,
+        min_graph_context_presence=1.0,
+    )
+
+    assert metrics["expected_source_recall"] == 1.0
+    assert metrics["provenance_completeness"] == 1.0
+    assert metrics["graph_context_presence"] == 1.0
+
+
+def test_checked_in_negative_gold_catches_raw_leak_and_incomplete_trace():
+    from scripts.eval_provenance import load_gold_dataset, run_provenance_evaluation
+
+    dataset = load_gold_dataset("eval/provenance_gold_negative.jsonl")
+    case_ids = {item["id"] for item in dataset}
+
+    assert {"raw-path-invariant-failure", "incomplete-trace-completeness-failure"} <= case_ids
+
+    with pytest.raises(SystemExit):
+        run_provenance_evaluation("eval/provenance_gold_negative.jsonl")
+
+    incomplete_path = "eval/provenance_gold_incomplete.jsonl"
+    with pytest.raises(SystemExit):
+        run_provenance_evaluation(incomplete_path, min_provenance_completeness=1.0)
+
+    low_recall_path = "eval/provenance_gold_low_recall.jsonl"
+    with pytest.raises(SystemExit):
+        run_provenance_evaluation(low_recall_path, min_source_recall=1.0)

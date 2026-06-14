@@ -23,9 +23,9 @@ A JSONL file containing known questions and the paths to the Markdown files that
 zurvan eval search --hybrid
 ```
 
-## provenance_gold.jsonl
+## provenance_gold*.jsonl
 
-A JSONL file containing saved trace files and the provenance facts expected to
+JSONL files containing saved trace files and the provenance facts expected to
 be recoverable from them.
 
 ### Format
@@ -48,3 +48,10 @@ be recoverable from them.
 ```bash
 zurvan eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
 ```
+
+### Included gold sets
+
+- `provenance_gold.jsonl`: passing baseline with six Step 2B cases.
+- `provenance_gold_negative.jsonl`: raw-path and incomplete-trace failure fixtures.
+- `provenance_gold_incomplete.jsonl`: isolated completeness-threshold failure.
+- `provenance_gold_low_recall.jsonl`: isolated source-recall-threshold failure.
