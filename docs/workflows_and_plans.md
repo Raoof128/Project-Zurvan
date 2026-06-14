@@ -207,6 +207,28 @@ PYTHONPATH=. python scripts/cli.py context --topic "MCP security" --save --forma
 - `scripts/wiki_merge.py` — canonical merge writer + shared log formatter
 - `scripts/llm.py` — provider registry (mock/openai/ollama/anthropic)
 
+## Phase R1: Trace Core ✅
+
+Zurvan stores replayable audit traces as local JSON plus Git-friendly Markdown mirrors.
+
+1. **Schema**: `scripts/trace_schema.py` defines `zurvan.trace.v1`, safe trace IDs, event types, and SHA-256 payload hashes.
+2. **Storage**: `scripts/trace_writer.py` writes canonical JSON to `data/traces/` and a reviewable Markdown mirror to `wiki/traces/`.
+3. **Validation**: `scripts/trace_validate.py` checks required fields, safe IDs, supported event types, duplicate events, and payload-hash integrity.
+4. **Replay**: `scripts/trace_replay.py` renders deterministic Markdown from saved trace JSON only. It does not execute tools, read raw sources, or call networks.
+5. **CLI**:
+   ```bash
+   python scripts/cli.py trace list
+   python scripts/cli.py trace inspect <trace-id>
+   python scripts/cli.py trace validate <trace-id>
+   python scripts/cli.py trace replay <trace-id>
+   ```
+
+**Safety model**:
+- Trace IDs must match the safe `trace-*` slug pattern before paths are built.
+- Trace files are constrained to `data/traces/` and `wiki/traces/`.
+- Trace replay is read-only and rendering-only.
+- Raw sources remain immutable and are not read by the trace core.
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.

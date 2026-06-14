@@ -79,6 +79,21 @@ python scripts/cli.py review audit
 python scripts/cli.py review index rebuild
 ```
 
+### Audit Traces
+```bash
+# List locally saved trace records
+python scripts/cli.py trace list
+
+# Inspect a trace JSON document
+python scripts/cli.py trace inspect <trace-id>
+
+# Validate trace schema, required fields, and payload hashes
+python scripts/cli.py trace validate <trace-id>
+
+# Render a deterministic Markdown replay without executing tools
+python scripts/cli.py trace replay <trace-id>
+```
+
 ## 2. MCP Server (`scripts/mcp_server.py`)
 
 Zurvan provides a native MCP server implementation to directly plug into agents like Claude Code or Cursor.
