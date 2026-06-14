@@ -31,6 +31,12 @@ def main():
         cmd = [sys.executable, "scripts/cli.py"] + args_list
         sys.exit(subprocess.run(cmd, cwd=str(root)).returncode)
 
+    if project_root_override is not None:
+        import scripts.context_export as _context_export
+        import scripts.wiki_merge as _wiki_merge
+        _context_export.PROJECT_ROOT = project_root_override
+        _wiki_merge.PROJECT_ROOT = project_root_override
+
     parser = argparse.ArgumentParser(description="Zurvan - Local-first CLI Memory Interface")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
@@ -296,6 +302,8 @@ def main():
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--hybrid", action="store_true", help="Use hybrid search")
     search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
+    search_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
+    search_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
 
     # zurvan context
     context_parser = subparsers.add_parser("context", help="Export context bundle")
@@ -305,6 +313,8 @@ def main():
     context_parser.add_argument("--graph", action="store_true", help="Expand graph neighbours")
     context_parser.add_argument("--depth", type=int, default=1, help="Graph expansion depth")
     context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
+    context_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
+    context_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
     context_parser.add_argument(
         "--format",
         choices=["markdown", "table", "marp"],
@@ -755,14 +765,30 @@ def main():
         if add_question(args.question, args.reason, args.tags) is False:
             sys.exit(1)
     elif args.command == "search":
-        search_memory(args.query, args.hybrid, save=getattr(args, "save", False))
+        try:
+            search_memory(
+                args.query,
+                args.hybrid,
+                save=getattr(args, "save", False),
+                trace=getattr(args, "trace", False),
+                trace_id=getattr(args, "trace_id", None),
+            )
+        except ValueError as exc:
+            print(str(exc))
+            sys.exit(1)
     elif args.command == "context":
         from scripts.context_export import export_context
-        bundle = export_context(
-            args.topic, args.limit, args.hybrid, args.graph, args.depth,
-            save=getattr(args, "save", False),
-            fmt=getattr(args, "output_format", "markdown"),
-        )
+        try:
+            bundle = export_context(
+                args.topic, args.limit, args.hybrid, args.graph, args.depth,
+                save=getattr(args, "save", False),
+                fmt=getattr(args, "output_format", "markdown"),
+                trace=getattr(args, "trace", False),
+                trace_id=getattr(args, "trace_id", None),
+            )
+        except ValueError as exc:
+            print(str(exc))
+            sys.exit(1)
         print(bundle)
     elif args.command == "audit":
         subprocess.run(["python", "scripts/audit_wiki.py"])
