@@ -92,5 +92,19 @@ Step 1A observed results:
 
 ## Residual Risks
 
-- R2 records retrieval metadata but does not yet instrument MCP tool calls directly. That belongs to Phase R3.
-- Trace payloads prove what retrieval returned to the trace writer; they do not prove semantic truth of retrieved content.
+- R2 records retrieval metadata but does not yet instrument MCP tool calls
+  directly. That belongs to Phase R3.
+- Trace payloads prove what retrieval returned to the trace writer; they do
+  not prove semantic truth of retrieved content.
+- `context.assembled.dropped` is currently always empty. The event records
+  kept chunks but not dropped chunks or reasons, because token-budget /
+  assembly-policy work is deferred. Drop-transparency is therefore a stub.
+- Richer pipeline events are not implemented yet: `retrieval.fusion`
+  (hybrid BM25+vector merge weights) and `graph.expand` (seed/expanded nodes,
+  edge types, hop depth) from the R2 event model are absent. RQ1 provenance
+  completeness is materially stronger than command-level but is not yet
+  full-pipeline.
+- The branch `phase-r1-trace-core` is pushed but NOT merged to `main`. The
+  `main` working copy has uncommitted user changes and a `wiki/index.md:669`
+  blank-EOF issue, so the merge is intentionally deferred to avoid overwriting
+  local work. Audit evidence reflects the branch, not `main`.
