@@ -1,0 +1,207 @@
+{
+  "created_at": "2026-06-14T09:21:55Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "graph assisted context expansion"
+      },
+      "payload_hash": "sha256:117d38b0662b8cff6033491ba50ba05eecba1b604d38429d0410cb08acc26715",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+            "heading": "Graph-Assisted Context Bundle",
+            "hybrid_score": 0.808223244470838,
+            "keyword_score": 1.0,
+            "semantic_score": 0.520558111177095,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "1ee0d502f95971d28d9d1c21f9d93068ebbefb13b39cf4fed99b7470b7eb6433",
+            "heading": "Opt-in context trace, including graph provenance when --graph is enabled",
+            "hybrid_score": 0.5769014265376866,
+            "keyword_score": 0.5699039190686507,
+            "semantic_score": 0.5873976877412405,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "92041234d35fa3dfb9d1b1b2880450f081b31e1c1522955c449a0c667291dd52",
+            "heading": "5. Knowledge Graph Lite (Phase 5)",
+            "hybrid_score": 0.5301452226002503,
+            "keyword_score": 0.5816282728145092,
+            "semantic_score": 0.452920647278862,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "5d6f7d6c294bc941b69762ceaccfaab71e8c7ab13e64d4dc63cb77f6d21a6969",
+            "heading": "Capabilities",
+            "hybrid_score": 0.5246314360040867,
+            "keyword_score": 0.5080146444405068,
+            "semantic_score": 0.5495566233494564,
+            "source_path": "docs/mcp/codex-style-agents.md"
+          },
+          {
+            "chunk_id": "cbb21a7668536626ad8eb2ff26ed7840de18bcfa96e8a77afb2cc93f934424e3",
+            "heading": "Gather context from all projects, expanding the knowledge graph up to depth 1",
+            "hybrid_score": 0.5172316051836487,
+            "keyword_score": 0.5122672097910625,
+            "semantic_score": 0.5246781982725282,
+            "source_path": "docs/federation/workflows.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:441d08577619d865c522a326d117720e80e7393fb0e1657b83a0abdeef44a01a",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "retrieval.fusion",
+      "payload": {
+        "fusion": "weighted_sum",
+        "mode": "hybrid",
+        "ranked": [
+          {
+            "chunk_id": "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+            "embedding_score": 0.520558111177095,
+            "fts_score": 1.0,
+            "fused_score": 0.808223244470838,
+            "rank": 1
+          },
+          {
+            "chunk_id": "1ee0d502f95971d28d9d1c21f9d93068ebbefb13b39cf4fed99b7470b7eb6433",
+            "embedding_score": 0.5873976877412405,
+            "fts_score": 0.5699039190686507,
+            "fused_score": 0.5769014265376866,
+            "rank": 2
+          },
+          {
+            "chunk_id": "92041234d35fa3dfb9d1b1b2880450f081b31e1c1522955c449a0c667291dd52",
+            "embedding_score": 0.452920647278862,
+            "fts_score": 0.5816282728145092,
+            "fused_score": 0.5301452226002503,
+            "rank": 3
+          },
+          {
+            "chunk_id": "5d6f7d6c294bc941b69762ceaccfaab71e8c7ab13e64d4dc63cb77f6d21a6969",
+            "embedding_score": 0.5495566233494564,
+            "fts_score": 0.5080146444405068,
+            "fused_score": 0.5246314360040867,
+            "rank": 4
+          },
+          {
+            "chunk_id": "cbb21a7668536626ad8eb2ff26ed7840de18bcfa96e8a77afb2cc93f934424e3",
+            "embedding_score": 0.5246781982725282,
+            "fts_score": 0.5122672097910625,
+            "fused_score": 0.5172316051836487,
+            "rank": 5
+          }
+        ],
+        "weights": {
+          "embedding": 0.4,
+          "fts": 0.6
+        }
+      },
+      "payload_hash": "sha256:5ae9ae827ba1de74da3179a4afc39b5016271f00d3169204bedc2b0c3d4f48fe",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [
+          {
+            "chunk_id": "7d8b794060a9567148b373d2258ed504fa67b34a6b6ee0a0cb81036a44f4b990",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "a260413ab8234deaf3d3282fed3c0aba72332d5735f982fc3b6606138dd13bbd",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "2c0ac44fb00d54c2279b730758c830735efc806674462d1e95bc1de40e10de6c",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "d180525b5b2d38370a22e29d943b1db891fb2c64e2ebaa33c3d191e4777954e9",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "30451dcb2117942370eaa23e7a838d69f23c84fe7ead24709824639bb9ae56fd",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "0d4971f7d7e9a62a311601f795e511e2e19bd5b4f06a3db2142d15ce242b7fc5",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "9a826dd8ddcf9388c6931b4937545f96cf378fa1a299a0f3a50e7ace81dcf17d",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "2c9cd64d2b8b19dd59f6aa21cbb3f56d7dab901bfc76792a4717a22199c81c18",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "aa0c3f347102025a7e386586386da8ddf231bd9e571335a039f522eebf06074a",
+            "reason": "budget"
+          }
+        ],
+        "included_chunk_ids": [
+          "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+          "1ee0d502f95971d28d9d1c21f9d93068ebbefb13b39cf4fed99b7470b7eb6433",
+          "92041234d35fa3dfb9d1b1b2880450f081b31e1c1522955c449a0c667291dd52",
+          "5d6f7d6c294bc941b69762ceaccfaab71e8c7ab13e64d4dc63cb77f6d21a6969",
+          "cbb21a7668536626ad8eb2ff26ed7840de18bcfa96e8a77afb2cc93f934424e3"
+        ]
+      },
+      "payload_hash": "sha256:37502d324b443e88a1793e0a5d866d0d6b40fe2e084c9e2260cd0976bf58f7ee",
+      "timestamp": "2026-06-14T09:21:55Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-005",
+      "event_type": "graph_context",
+      "payload": {
+        "depth": 1,
+        "enabled": true,
+        "node_count": 1,
+        "nodes": [
+          {
+            "depth": 1,
+            "node_type": "note",
+            "path": "README.md",
+            "relation": "incoming:mentions",
+            "source_id": "5e7341652738e3ced737c55efac12c94bb67b536e806265d760d2880d720cca0",
+            "title": "README"
+          }
+        ]
+      },
+      "payload_hash": "sha256:c863ba098cc1a240c7695c7fc012a9e6d895453184333d1b9b3d55ba6e0abec0",
+      "timestamp": "2026-06-14T09:21:55Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: graph assisted context expansion",
+  "trace_id": "trace-20260614T180000Z-r1b00005"
+}
