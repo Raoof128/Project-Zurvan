@@ -24,6 +24,7 @@ Zurvan turns raw documents (Markdown, PDF, plain text, images) into a **linked, 
 | **Search** | SQLite FTS5 + semantic embeddings (hybrid) |
 | **Graph** | Local knowledge graph; wikilink-aware; graph-neighbour expansion |
 | **Agent memory** | MCP stdio server — read-only by default, opt-in write mode |
+| **Audit traces** | Local JSON + Markdown traces for replayable agent provenance |
 | **Living wiki** | Concept/entity pages compound additively across sources |
 | **Multi-project** | Federate search and decisions across independent vaults |
 | **Evidence → Reports** | Pack → compose → review → publish, fully local, redacted |
@@ -66,6 +67,15 @@ zurvan context --topic "project roadmap" --hybrid --graph --limit 10
 # Render as Markdown table or Marp slides (stdout only)
 zurvan context --topic "project roadmap" --format table
 zurvan context --topic "project roadmap" --format marp
+```
+
+### 4. Inspect audit traces
+
+```bash
+zurvan trace list
+zurvan trace inspect trace-20260614T010203Z-abcdef12
+zurvan trace validate trace-20260614T010203Z-abcdef12
+zurvan trace replay trace-20260614T010203Z-abcdef12
 ```
 
 ---
@@ -235,11 +245,13 @@ wiki/         ← Generated Markdown vault (human-readable, Obsidian-compatible)
   entities/   ← Named entities (also compounded)
   decisions/  ← Project decisions and rationales
   syntheses/  ← Query-derived pages written via --save
+  traces/     ← Markdown trace mirrors
   log.md      ← Grep-parseable audit log
 data/         ← Ephemeral SQLite caches (rebuild any time from wiki/)
   registry.sqlite   ← Ingestion deduplication
   search.sqlite     ← FTS5 + embeddings
   graph.sqlite      ← Knowledge graph (wikilinks + frontmatter)
+  traces/           ← Local trace JSON records
 scripts/      ← Core pipeline logic
 ```
 
