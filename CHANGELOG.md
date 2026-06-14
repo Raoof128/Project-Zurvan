@@ -2,6 +2,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2B — stronger provenance gold set
+- **Summary:** Expanded provenance evaluation from one controlled fixture to a six-case passing baseline plus isolated negative/failure gold files. Positive cases now cover `search --trace`, `context --trace`, `context --graph --trace`, legacy coarse `retrieval`, the original controlled Step 2 fixture, and a stale/superseded note case labelled for later policy-aware scoring. Negative fixtures cover raw-path invariant failure, incomplete trace completeness failure, and missing expected source recall failure. No MCP tracing, retrieval ranking, graph behavior, or schema changes.
+- **Files Changed:** `eval/provenance_gold.jsonl`, `eval/provenance_gold_negative.jsonl`, `eval/provenance_gold_incomplete.jsonl`, `eval/provenance_gold_low_recall.jsonl`, `data/traces/trace-20260614T16170*.json`, `tests/test_eval_provenance.py`, `README.md`, `docs/TESTING.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
+- **Verification:** Step 2B red tests failed on the missing gold cases/files. `python -m compileall scripts/eval_provenance.py scripts/cli.py` passed. Focused provenance+trace tests → 27 passed. Full `pytest` → 218 passed, 2 dependency warnings. Positive provenance gold validates and scores 100% across built-scope metrics on 6 cases. Negative fixtures fail as expected for raw leak, completeness threshold, and source-recall threshold. All Step 2B traces validate. `public_repo_guard.py` passed. `git diff --check` passed.
+- **Follow-ups:** R3 remains frozen until merge/review. Larger real-world gold sets are still needed before claiming real-world provenance completeness.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 Step 2 — provenance evaluation harness
 - **Summary:** Added `scripts/eval_provenance.py` and `eval/provenance_gold.jsonl` to evaluate saved trace provenance with hard invariant gates before graded scoring. The harness checks `raw_leak_rate=0%` and `hash_integrity_rate=100%` before scoring `expected_source_recall`, `provenance_completeness`, and `graph_context_presence`. Gold schema includes optional `expected_chunk_ids` for later claim-to-chunk faithfulness without a file-shape rewrite. CLI wiring added as `zurvan eval provenance`.
 - **Files Changed:** `scripts/eval_provenance.py`, `scripts/cli.py`, `eval/provenance_gold.jsonl`, `data/traces/trace-20260614T151617Z-prov0001.json`, `tests/test_eval_provenance.py`, `docs/evaluation/provenance.md`, `eval/README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`

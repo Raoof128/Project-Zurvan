@@ -1,7 +1,7 @@
 # Provenance Evaluation
 
-`eval_provenance.py` evaluates saved Zurvan trace files against a JSONL gold
-set. It is intentionally local-first: it reads trace JSON and gold metadata
+`eval_provenance.py` evaluates saved Zurvan trace files against JSONL gold
+sets. It is intentionally local-first: it reads trace JSON and gold metadata
 from disk, validates payload hashes, and never reads from `raw/`.
 
 ## Gold Schema
@@ -25,6 +25,19 @@ Each line in `eval/provenance_gold.jsonl` is one evaluation case:
 claim-to-chunk faithfulness checks can be added without changing the file
 shape.
 
+## Gold Sets
+
+- `eval/provenance_gold.jsonl`: passing baseline with six cases covering
+  `search --trace`, `context --trace`, `context --graph --trace`, legacy
+  coarse `retrieval`, a controlled Step 2 fixture, and a stale/superseded note
+  case labelled for later policy-aware scoring.
+- `eval/provenance_gold_negative.jsonl`: invariant/failure fixtures, including
+  a raw-path leak and an incomplete context trace.
+- `eval/provenance_gold_incomplete.jsonl`: isolated completeness failure used
+  for threshold tests.
+- `eval/provenance_gold_low_recall.jsonl`: isolated missing-expected-source
+  case used for source-recall threshold tests.
+
 ## Metrics
 
 Hard invariants run before graded scoring:
@@ -44,8 +57,9 @@ Graded metrics:
 - `graph_context_presence`: fraction of cases that expected graph context and
   included a `graph_context` event.
 
-The current gold set reflects the implemented Step 1A scope. It does not
-penalize missing future events such as `retrieval.fusion` or `graph.expand`.
+The current passing gold set reflects the implemented Step 1A/Step 2B scope. It
+does not penalize missing future events such as `retrieval.fusion` or
+`graph.expand`.
 
 ## Commands
 
@@ -53,4 +67,9 @@ penalize missing future events such as `retrieval.fusion` or `graph.expand`.
 PYTHONPATH=. python scripts/eval_provenance.py --validate
 PYTHONPATH=. python scripts/eval_provenance.py --min-source-recall 1.0 --min-provenance-completeness 1.0
 PYTHONPATH=. python scripts/cli.py eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
+
+# Expected failure fixtures
+PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_negative.jsonl
+PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_incomplete.jsonl --min-provenance-completeness 1.0
+PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_low_recall.jsonl --min-source-recall 1.0
 ```

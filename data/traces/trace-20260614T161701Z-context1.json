@@ -1,0 +1,53 @@
+{
+  "created_at": "2026-06-14T16:17:00Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "keyword",
+        "query": "context trace provenance"
+      },
+      "payload_hash": "sha256:2d9fb8be8f7693af6876b0ae3d3009f2062db1ed900cb66f68028737762aa755",
+      "timestamp": "2026-06-14T16:17:00Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 1,
+        "results": [
+          {
+            "chunk_id": "chunk-context-001",
+            "hybrid_score": 2,
+            "source_path": "wiki/context-trace-case.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:fdf1ad9ad70aaed27265b61354da5a97ae944c75c1405ad6dcebf58f70e976e1",
+      "timestamp": "2026-06-14T16:17:00Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "chunk-context-001"
+        ]
+      },
+      "payload_hash": "sha256:ea9c66667965a6586d83821ac81559251bb6151828454350cde3026fc4e5aeb2",
+      "timestamp": "2026-06-14T16:17:00Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Step 2B provenance gold fixture.",
+  "title": "trace-20260614T161701Z-context1",
+  "trace_id": "trace-20260614T161701Z-context1"
+}

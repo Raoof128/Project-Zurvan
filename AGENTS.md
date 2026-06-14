@@ -4,6 +4,14 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2B — stronger provenance gold set
+- **Summary:** Expanded provenance evaluation beyond one controlled fixture. Passing baseline now has six cases: `search --trace`, `context --trace`, `context --graph --trace`, legacy coarse `retrieval`, the original Step 2 controlled fixture, and a stale/superseded note case labelled for later. Added isolated negative/failure gold files for raw-path invariant failure, incomplete trace completeness failure, and missing expected source recall failure. No MCP tracing, retrieval ranking, graph behavior, or schema changes.
+- **Files Changed:** `eval/provenance_gold*.jsonl`, `data/traces/trace-20260614T16170*.json`, `tests/test_eval_provenance.py`, `README.md`, `docs/TESTING.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
+- **Verification:** Step 2B red tests failed on missing gold cases/files; compileall passed; focused provenance+trace tests `27 passed`; full suite `218 passed` (2 dependency warnings); positive gold validates and scores 100% across built-scope metrics on 6 cases; negative fixtures fail as expected; all Step 2B trace fixtures validate; `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** Keep R3 frozen; expand to larger real-world gold before making real-world provenance completeness claims.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** Phase R2 Step 2 — provenance evaluation harness
 - **Summary:** Added local `eval_provenance.py` plus `eval/provenance_gold.jsonl` to evaluate saved trace provenance. Hard invariants (`raw_leak_rate=0%`, `hash_integrity_rate=100%`) run before graded metrics (`expected_source_recall`, `provenance_completeness`, `graph_context_presence`). Gold schema includes optional `expected_chunk_ids` for future claim-to-chunk faithfulness. Added CLI command `zurvan eval provenance`.
 - **Files Changed:** `scripts/eval_provenance.py`, `scripts/cli.py`, `eval/provenance_gold.jsonl`, `data/traces/trace-20260614T151617Z-prov0001.json`, `tests/test_eval_provenance.py`, `docs/evaluation/provenance.md`, `eval/README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
