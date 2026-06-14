@@ -49,13 +49,13 @@
 
   <h2>Verification Commands</h2>
   <pre><code>python -m compileall scripts/trace_schema.py scripts/trace_writer.py scripts/trace_validate.py scripts/trace_replay.py scripts/cli.py
-PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py
+PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py tests/test_trace_retrieval_integration.py
 PYTHONPATH=. pytest
 PYTHONPATH=. python scripts/public_repo_guard.py
 git diff --check</code></pre>
   <ul>
-    <li>Trace tests: 10 passed.</li>
-    <li>Full test suite: 201 passed, 2 dependency warnings.</li>
+    <li>Trace and retrieval-trace tests: 19 passed.</li>
+    <li>Full test suite: 210 passed, 2 dependency warnings.</li>
     <li>Public repo guard: passed.</li>
     <li>Diff whitespace check: passed.</li>
   </ul>

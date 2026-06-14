@@ -30,16 +30,34 @@ The change keeps tracing explicit via `--trace` and does not alter normal `searc
 - Retrieval ranking logic was not modified.
 - Raw sources are not read by the trace integration layer.
 
-## E2E Evidence To Verify
+## Observed E2E Evidence
 
-Required E2E coverage:
+The R2 E2E run used a temporary project root with isolated wiki files.
 
-- `context --trace` writes a replayable trace.
-- `search --trace` writes a replayable trace.
-- Generated trace ID/path is printed to CLI output.
-- `trace validate` accepts generated traces.
-- `trace replay` renders generated traces.
-- Unsafe trace IDs fail safely.
+- `context --trace --trace-id trace-20260614T131415Z-r2ctx001` wrote JSON under `data/traces/` and a Markdown mirror under `wiki/traces/`.
+- `search --trace --trace-id trace-20260614T131415Z-r2srch01` wrote JSON under `data/traces/` and a Markdown mirror under `wiki/traces/`.
+- Both commands printed `Trace written: ...` with the generated trace JSON path.
+- `trace validate trace-20260614T131415Z-r2ctx001` returned `Trace trace-20260614T131415Z-r2ctx001 is valid.`
+- `trace replay trace-20260614T131415Z-r2ctx001` rendered a replay table with `command: context`, query, mode, result count, and repo-relative source path.
+- `trace validate trace-20260614T131415Z-r2srch01` returned `Trace trace-20260614T131415Z-r2srch01 is valid.`
+- `trace replay trace-20260614T131415Z-r2srch01` rendered a replay table with `command: search`, query, mode, result count, and repo-relative source path.
+- Unsafe trace ID `../raw/secret` returned nonzero with `unsafe trace_id: ../raw/secret` and no traceback.
+
+## Verification Results
+
+```bash
+PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py tests/test_trace_retrieval_integration.py
+PYTHONPATH=. pytest
+PYTHONPATH=. python scripts/public_repo_guard.py
+git diff --check
+```
+
+Observed results:
+
+- Trace and retrieval-trace tests: 19 passed.
+- Full test suite: 210 passed, 2 dependency warnings.
+- Public repo guard: passed.
+- Diff whitespace check: passed.
 
 ## Residual Risks
 
