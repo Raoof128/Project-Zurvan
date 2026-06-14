@@ -37,6 +37,10 @@ shape.
   for threshold tests.
 - `eval/provenance_gold_low_recall.jsonl`: isolated missing-expected-source
   case used for source-recall threshold tests.
+- `eval/provenance_real_queries.jsonl`: frozen Step 2C real-corpus pilot query
+  set, committed before trace generation.
+- `eval/provenance_real_gold.jsonl`: Step 2C real-corpus pilot gold file that
+  links frozen queries to generated traces.
 
 ## Metrics
 
@@ -72,4 +76,10 @@ PYTHONPATH=. python scripts/cli.py eval provenance --min-source-recall 1.0 --min
 PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_negative.jsonl
 PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_incomplete.jsonl --min-provenance-completeness 1.0
 PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_gold_low_recall.jsonl --min-source-recall 1.0
+
+# Real-corpus pilot
+PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_real_gold.jsonl
 ```
+
+The Step 2C pilot report is in
+`docs/evaluation/provenance-real-run-2026-06-14.md`.

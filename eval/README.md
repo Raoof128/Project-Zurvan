@@ -55,3 +55,5 @@ zurvan eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
 - `provenance_gold_negative.jsonl`: raw-path and incomplete-trace failure fixtures.
 - `provenance_gold_incomplete.jsonl`: isolated completeness-threshold failure.
 - `provenance_gold_low_recall.jsonl`: isolated source-recall-threshold failure.
+- `provenance_real_queries.jsonl`: frozen Step 2C real-corpus pilot query set.
+- `provenance_real_gold.jsonl`: Step 2C real-corpus pilot gold linked to generated traces.
