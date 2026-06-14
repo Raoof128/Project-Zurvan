@@ -15,6 +15,9 @@ python scripts/cli.py search "architecture"
 # Hybrid Search (Keyword + Semantic)
 python scripts/cli.py search "architecture" --hybrid
 
+# Opt-in retrieval trace (writes data/traces/ + wiki/traces/)
+python scripts/cli.py search "architecture" --hybrid --trace
+
 # Save search results as a synthesis page (wiki/syntheses/)
 python scripts/cli.py search "architecture" --hybrid --save
 
@@ -23,6 +26,9 @@ python scripts/cli.py context --topic "vector search" --limit 10
 
 # Graph-Assisted Context Bundle
 python scripts/cli.py context --topic "vector search" --hybrid --graph
+
+# Opt-in context trace, including graph provenance when --graph is enabled
+python scripts/cli.py context --topic "vector search" --hybrid --graph --trace
 
 # Save context as a synthesis page
 python scripts/cli.py context --topic "vector search" --save
