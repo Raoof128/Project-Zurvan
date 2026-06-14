@@ -2,11 +2,14 @@ import os
 import glob
 import sys
 import datetime
+from pathlib import Path
 from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from scripts.graph_context import expand_graph_context
 from scripts.config import PROJECT_ROOT
+from scripts.trace_schema import TraceEvent, TraceRecord, create_trace_id, utc_now
+from scripts.trace_writer import TraceStore
 
 def _search_internal(query: str, hybrid: bool = False, limit: int = 10) -> List[Dict[str, Any]]:
     if hybrid:
@@ -91,7 +94,103 @@ def _format_marp(topic: str, results: list) -> str:
     return "\n".join(slides)
 
 
-def search_memory(query: str, hybrid: bool = False, save: bool = False):
+def _trace_source_path(path: str) -> str:
+    try:
+        resolved = Path(path).resolve()
+        root = PROJECT_ROOT.resolve()
+        if resolved == root or root in resolved.parents:
+            return str(resolved.relative_to(root))
+    except (OSError, ValueError):
+        pass
+    return path
+
+
+def _result_trace_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+    payload = {
+        "source_path": _trace_source_path(str(result.get("source_path", ""))),
+        "hybrid_score": result.get("hybrid_score", 0),
+    }
+    for key in ("chunk_id", "heading", "keyword_score", "semantic_score"):
+        if key in result:
+            payload[key] = result[key]
+    return payload
+
+
+def _graph_trace_payload(node: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "path": _trace_source_path(str(node.get("path", ""))),
+        "node_type": node.get("node_type", ""),
+        "title": node.get("title", ""),
+        "depth": node.get("depth", 0),
+        "relation": node.get("relation", ""),
+        "source_id": node.get("source_id", ""),
+    }
+
+
+def _write_retrieval_trace(
+    *,
+    command: str,
+    query: str,
+    mode: str,
+    limit: int,
+    results: List[Dict[str, Any]],
+    graph_enabled: bool = False,
+    graph_depth: int = 0,
+    graph_nodes: List[Dict[str, Any]] | None = None,
+    trace_id: str | None = None,
+) -> str:
+    final_trace_id = create_trace_id(trace_id)
+    events = [
+        TraceEvent(
+            event_id="evt-001",
+            event_type="retrieval",
+            timestamp=utc_now(),
+            actor="zurvan",
+            payload={
+                "command": command,
+                "query": query,
+                "mode": mode,
+                "limit": limit,
+                "result_count": len(results),
+                "results": [_result_trace_payload(result) for result in results],
+            },
+        )
+    ]
+
+    if graph_enabled:
+        nodes = graph_nodes or []
+        events.append(
+            TraceEvent(
+                event_id="evt-002",
+                event_type="graph_context",
+                timestamp=utc_now(),
+                actor="zurvan",
+                payload={
+                    "enabled": True,
+                    "depth": graph_depth,
+                    "node_count": len(nodes),
+                    "nodes": [_graph_trace_payload(node) for node in nodes],
+                },
+            )
+        )
+
+    record = TraceRecord(
+        trace_id=final_trace_id,
+        title=f"Retrieval context: {query}",
+        summary=f"Opt-in retrieval trace for zurvan {command}.",
+        events=events,
+    )
+    paths = TraceStore(project_root=PROJECT_ROOT).write(record)
+    return str(paths.json_path)
+
+
+def search_memory(
+    query: str,
+    hybrid: bool = False,
+    save: bool = False,
+    trace: bool = False,
+    trace_id: str | None = None,
+):
     """
     Search wiki and print list of matches.
     """
@@ -105,8 +204,28 @@ def search_memory(query: str, hybrid: bool = False, save: bool = False):
     if save:
         source_paths = [r["source_path"] for r in results]
         _save_synthesis(query, "\n".join(lines), source_paths)
+    if trace:
+        trace_path = _write_retrieval_trace(
+            command="search",
+            query=query,
+            mode="hybrid" if hybrid else "keyword",
+            limit=10,
+            results=results,
+            trace_id=trace_id,
+        )
+        print(f"Trace written: {trace_path}")
 
-def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: bool = False, depth: int = 1, save: bool = False, fmt: str = "markdown") -> str:
+def export_context(
+    topic: str,
+    limit: int = 10,
+    hybrid: bool = False,
+    graph: bool = False,
+    depth: int = 1,
+    save: bool = False,
+    fmt: str = "markdown",
+    trace: bool = False,
+    trace_id: str | None = None,
+) -> str:
     """Exports a Markdown context bundle based on search results."""
     
     results = _search_internal(topic, hybrid, limit)
@@ -131,6 +250,7 @@ def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: boo
             output.append("```\n")
             seed_paths.append(path)
             
+    graph_nodes = []
     if graph and seed_paths:
         graph_nodes = expand_graph_context(seed_paths, depth=depth)
         
@@ -168,11 +288,26 @@ def export_context(topic: str, limit: int = 10, hybrid: bool = False, graph: boo
     if save:
         _save_synthesis(topic, base_output, seed_paths)
 
+    trace_line = ""
+    if trace:
+        trace_path = _write_retrieval_trace(
+            command="context",
+            query=topic,
+            mode="hybrid" if hybrid else "keyword",
+            limit=limit,
+            results=results,
+            graph_enabled=graph,
+            graph_depth=depth if graph else 0,
+            graph_nodes=graph_nodes,
+            trace_id=trace_id,
+        )
+        trace_line = f"\n\nTrace written: {trace_path}"
+
     if fmt == "table":
-        return _format_table(results)
+        return _format_table(results) + trace_line
     elif fmt == "marp":
-        return _format_marp(topic, results)
-    return base_output
+        return _format_marp(topic, results) + trace_line
+    return base_output + trace_line
 
 if __name__ == "__main__":
     import argparse
