@@ -1,0 +1,92 @@
+{
+  "created_at": "2026-06-14T08:56:16Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "policy radar contradiction drift"
+      },
+      "payload_hash": "sha256:339b9b526649acb92a1eddf275b7256678c5227bf77ca22e8fe6234a79dc61a1",
+      "timestamp": "2026-06-14T08:56:16Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "5cf3eccb3f5c28e07a0fb3e36761440f6415e82f902f4b44fb866ad12516f267",
+            "heading": "Policy Drift",
+            "hybrid_score": 0.8126454548889495,
+            "keyword_score": 1.0,
+            "semantic_score": 0.5316136372223736,
+            "source_path": "docs/policy-radar/policy-drift.md"
+          },
+          {
+            "chunk_id": "eb9062985b1e2cc9592f1b22cbe87b3685a25602287a666a83d726fd6768168b",
+            "heading": "Commands",
+            "hybrid_score": 0.766508660082835,
+            "keyword_score": 0.9094986822648607,
+            "semantic_score": 0.5520236268097962,
+            "source_path": "docs/policy-radar/policy-drift.md"
+          },
+          {
+            "chunk_id": "1c93cb1ae299abe1967ce466fe8dbc8d6e973c2d893135a4b35cd8d56e516c83",
+            "heading": "Contradiction Radar",
+            "hybrid_score": 0.7637759214502567,
+            "keyword_score": 0.9451417498049766,
+            "semantic_score": 0.491727178918177,
+            "source_path": "docs/policy-radar/contradiction-radar.md"
+          },
+          {
+            "chunk_id": "ff3aaf4a820cafa97256928969541d349c528ae37304ed44082ef00d9a3d3711",
+            "heading": "Features",
+            "hybrid_score": 0.7354447365599691,
+            "keyword_score": 0.851361662488159,
+            "semantic_score": 0.5615693476676842,
+            "source_path": "docs/policy-radar/overview.md"
+          },
+          {
+            "chunk_id": "13886d57a188263c12d91ca4828302a29055753d2849c38be6e13113fd94ceae",
+            "heading": "Policy Radar Overview",
+            "hybrid_score": 0.7002222471726048,
+            "keyword_score": 0.8214957304604431,
+            "semantic_score": 0.5183120222408474,
+            "source_path": "docs/policy-radar/overview.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:8fb287ee079be2e4d63f9d738e20116eec344cf7127c4f11d0a2d7e42049760f",
+      "timestamp": "2026-06-14T08:56:16Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "5cf3eccb3f5c28e07a0fb3e36761440f6415e82f902f4b44fb866ad12516f267",
+          "eb9062985b1e2cc9592f1b22cbe87b3685a25602287a666a83d726fd6768168b",
+          "1c93cb1ae299abe1967ce466fe8dbc8d6e973c2d893135a4b35cd8d56e516c83",
+          "ff3aaf4a820cafa97256928969541d349c528ae37304ed44082ef00d9a3d3711",
+          "13886d57a188263c12d91ca4828302a29055753d2849c38be6e13113fd94ceae"
+        ]
+      },
+      "payload_hash": "sha256:f0b83c32728ef350095da5c6da6c3106c933bb084ce29757056004c9cf091ca8",
+      "timestamp": "2026-06-14T08:56:16Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: policy radar contradiction drift",
+  "trace_id": "trace-20260614T171000Z-real0010"
+}

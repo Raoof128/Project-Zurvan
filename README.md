@@ -3,7 +3,7 @@
 > **Local-first LLM knowledge engine** — ingest any document, extract structured knowledge, and query it via hybrid search, graph expansion, or MCP agent memory.
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen)](docs/TESTING.md)
+[![Tests](https://img.shields.io/badge/tests-218%20passing-brightgreen)](docs/TESTING.md)
 [![Phase](https://img.shields.io/badge/phase-18%20%E2%9C%85-blueviolet)](CHANGELOG.md)
 [![Obsidian](https://img.shields.io/badge/Obsidian-compatible-7c3aed?logo=obsidian&logoColor=white)](docs/obsidian/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -24,6 +24,7 @@ Zurvan turns raw documents (Markdown, PDF, plain text, images) into a **linked, 
 | **Search** | SQLite FTS5 + semantic embeddings (hybrid) |
 | **Graph** | Local knowledge graph; wikilink-aware; graph-neighbour expansion |
 | **Agent memory** | MCP stdio server — read-only by default, opt-in write mode |
+| **Audit traces** | Local JSON + Markdown traces for replayable agent provenance |
 | **Living wiki** | Concept/entity pages compound additively across sources |
 | **Multi-project** | Federate search and decisions across independent vaults |
 | **Evidence → Reports** | Pack → compose → review → publish, fully local, redacted |
@@ -60,12 +61,27 @@ zurvan search "local-first architecture" --hybrid
 # Save results as a wiki synthesis page
 zurvan search "local-first architecture" --hybrid --save
 
+# Opt-in retrieval trace
+zurvan search "local-first architecture" --hybrid --trace
+
 # Graph-assisted context bundle for an agent
 zurvan context --topic "project roadmap" --hybrid --graph --limit 10
+
+# Opt-in context trace with graph provenance
+zurvan context --topic "project roadmap" --hybrid --graph --trace
 
 # Render as Markdown table or Marp slides (stdout only)
 zurvan context --topic "project roadmap" --format table
 zurvan context --topic "project roadmap" --format marp
+```
+
+### 4. Inspect audit traces
+
+```bash
+zurvan trace list
+zurvan trace inspect trace-20260614T010203Z-abcdef12
+zurvan trace validate trace-20260614T010203Z-abcdef12
+zurvan trace replay trace-20260614T010203Z-abcdef12
 ```
 
 ---
@@ -235,11 +251,13 @@ wiki/         ← Generated Markdown vault (human-readable, Obsidian-compatible)
   entities/   ← Named entities (also compounded)
   decisions/  ← Project decisions and rationales
   syntheses/  ← Query-derived pages written via --save
+  traces/     ← Markdown trace mirrors
   log.md      ← Grep-parseable audit log
 data/         ← Ephemeral SQLite caches (rebuild any time from wiki/)
   registry.sqlite   ← Ingestion deduplication
   search.sqlite     ← FTS5 + embeddings
   graph.sqlite      ← Knowledge graph (wikilinks + frontmatter)
+  traces/           ← Local trace JSON records
 scripts/      ← Core pipeline logic
 ```
 
@@ -255,7 +273,7 @@ bash scripts/check.sh
 
 Runs 22 stages: unit tests · extraction gauntlet · wiki audit · retrieval eval · graph tests · MCP smoke · evidence/report/publication pipeline · review workbench.
 
-**Current:** 183 tests passing, 0 failing. See [Testing Guide](docs/TESTING.md).
+**Current:** 218 tests passing, 0 failing. See [Testing Guide](docs/TESTING.md).
 
 ---
 

@@ -4,6 +4,38 @@
 
 ### 2026-06-14 (Australia/Sydney)
 **Raouf:**
+- **Scope:** Phase R2 Step 2C — real-corpus provenance pilot
+- **Summary:** Added an auditable real-corpus pilot before R3. Committed `eval/provenance_real_queries.jsonl` first as a frozen 12-query set (`48a8c27`) with manual expected-source annotations from wiki/docs. Then generated traces using existing `search --trace`, `context --trace`, and selected `context --graph --trace`; linked them in `eval/provenance_real_gold.jsonl`; and documented the run in `docs/evaluation/provenance-real-run-2026-06-14.md`. Pilot metrics: 0% raw leak rate, 100% hash integrity, 12/12 trace validate/replay, 86% expected source recall, 100% built-scope provenance completeness, 100% graph context presence. No R3, MCP tracing, ranking, graph behavior, schema, or evaluator scoring changes.
+- **Files Changed:** `eval/provenance_real_queries.jsonl`, `eval/provenance_real_gold.jsonl`, `data/traces/trace-20260614T171000Z-real*.json`, `wiki/traces/trace-20260614T171000Z-real*.md`, `docs/evaluation/provenance-real-run-2026-06-14.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
+- **Verification:** Search/graph indexes rebuilt; all 12 queries traced successfully; real gold validation passed; real evaluation reported 12 cases, 0% raw leaks, 100% hash integrity, 86% expected source recall, 100% provenance completeness, 100% graph context presence; trace validate/replay rate 12/12; compileall passed; provenance tests `7 passed`; full suite `218 passed` (2 dependency warnings); `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** Treat as pilot evidence, not benchmark evidence; expand real-world gold and annotation review later; keep R3 frozen until merge/review.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase R2 Step 2B — stronger provenance gold set
+- **Summary:** Expanded provenance evaluation beyond one controlled fixture. Passing baseline now has six cases: `search --trace`, `context --trace`, `context --graph --trace`, legacy coarse `retrieval`, the original Step 2 controlled fixture, and a stale/superseded note case labelled for later. Added isolated negative/failure gold files for raw-path invariant failure, incomplete trace completeness failure, and missing expected source recall failure. No MCP tracing, retrieval ranking, graph behavior, or schema changes.
+- **Files Changed:** `eval/provenance_gold*.jsonl`, `data/traces/trace-20260614T16170*.json`, `tests/test_eval_provenance.py`, `README.md`, `docs/TESTING.md`, `docs/evaluation/provenance.md`, `docs/workflows_and_plans.md`, `eval/README.md`
+- **Verification:** Step 2B red tests failed on missing gold cases/files; compileall passed; focused provenance+trace tests `27 passed`; full suite `218 passed` (2 dependency warnings); positive gold validates and scores 100% across built-scope metrics on 6 cases; negative fixtures fail as expected; all Step 2B trace fixtures validate; `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** Keep R3 frozen; expand to larger real-world gold before making real-world provenance completeness claims.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase R2 Step 2 — provenance evaluation harness
+- **Summary:** Added local `eval_provenance.py` plus `eval/provenance_gold.jsonl` to evaluate saved trace provenance. Hard invariants (`raw_leak_rate=0%`, `hash_integrity_rate=100%`) run before graded metrics (`expected_source_recall`, `provenance_completeness`, `graph_context_presence`). Gold schema includes optional `expected_chunk_ids` for future claim-to-chunk faithfulness. Added CLI command `zurvan eval provenance`.
+- **Files Changed:** `scripts/eval_provenance.py`, `scripts/cli.py`, `eval/provenance_gold.jsonl`, `data/traces/trace-20260614T151617Z-prov0001.json`, `tests/test_eval_provenance.py`, `docs/evaluation/provenance.md`, `eval/README.md`, `docs/API.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `README.md`
+- **Verification:** TDD red run failed on missing module; CLI red run failed on missing action; compileall passed; focused provenance+trace tests `25 passed`; full suite `216 passed` (2 dependency warnings); `eval_provenance.py --validate` passed; CLI `eval provenance` returned 100% built-scope metrics; `public_repo_guard.py` passed; `git diff --check` passed.
+- **Follow-ups:** R3 remains frozen; `retrieval.fusion` and `graph.expand` are not scored until implemented.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
+- **Scope:** Phase R2 retrieval trace — Step 0 reconcile + Step 1A granularity
+- **Summary:** Step 0 reconciled stale test counts (`201/10` → reproduced `210/19`) across README/docs/CHANGELOG and R1/R2 audits (commit `44a76f2`). Step 1A added granular, opt-in retrieval provenance events — `retrieval.query`, `retrieval.result`, `context.assembled` — while keeping legacy `retrieval` valid, `schema_version=zurvan.trace.v1`, and the payload-hash rule unchanged (commit `cc87e5d`). No ranking/scoring/fusion/stdout change; tracing opt-in via `--trace`.
+- **Files Changed:** `scripts/trace_schema.py`, `scripts/context_export.py`, `tests/test_trace_replay.py`, `tests/test_trace_retrieval_integration.py`, `CHANGELOG.md`, `README.md`, `docs/TESTING.md`, `docs/workflows_and_plans.md`, `docs/audits/phase-r2-retrieval-trace-integration-audit-2026-06-14.md`
+- **Verification:** focused trace suite `20 passed`; full suite `211 passed` (2 dependency warnings); legacy single-`retrieval` replay regression passed; `public_repo_guard.py` passed; `git diff --check` passed on branch.
+- **Follow-ups:** `context.assembled.dropped` always empty (awaits token-budget policy); `retrieval.fusion`/`graph.expand` not yet implemented; branch pushed, NOT merged to `main` (dirty `main` + `wiki/index.md:669`); next is Step 2 `eval_provenance.py`.
+
+### 2026-06-14 (Australia/Sydney)
+**Raouf:**
 - **Scope:** MCP install — verify Claude Code + add Codex client
 - **Summary:** Claude Code already `✔ Connected` (live `mcp_server.py`, no reinstall needed). Added Codex via `codex mcp add zurvan` (absolute Anaconda python + absolute server path; verified `codex mcp get` + launch smoke-test, 11 tools). Made it reproducible: added a `codex` target to `install_mcp_config.py` (emits `codex mcp add` command + `[mcp_servers.zurvan]` TOML via `sys.executable`) and `docs/mcp/codex.md`.
 - **Files Changed:** `scripts/install_mcp_config.py`, `tests/test_install_mcp_config.py`, `docs/mcp/codex.md` (+ machine `~/.codex/config.toml`)
