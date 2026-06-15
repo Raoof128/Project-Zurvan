@@ -48,13 +48,18 @@ def extract_chunks_from_markdown(filepath: str):
     return chunks
 
 def scan_markdown_files():
-    """Scans wiki/ and docs/, explicitly ignoring raw/"""
+    """Scans wiki/ and docs/, ignoring raw/ and derived trace mirrors.
+
+    ``wiki/traces/`` holds replay mirrors of retrieval traces — derived,
+    self-referential audit artifacts that would pollute retrieval with the
+    query's own terms, so they are never indexed.
+    """
+    excluded_dirs = {"raw", "traces"}
     files = []
     for directory in ["wiki", "docs"]:
         if os.path.exists(directory):
             for filepath in glob.glob(f"{directory}/**/*.md", recursive=True):
-                # Ensure no raw/ leaks
-                if "raw" not in filepath.split(os.sep):
+                if not excluded_dirs.intersection(filepath.split(os.sep)):
                     files.append(filepath)
     return files
 
