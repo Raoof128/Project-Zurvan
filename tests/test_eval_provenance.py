@@ -194,6 +194,97 @@ def test_cli_eval_provenance_prints_metrics_table(tmp_path):
     assert "expected_source_recall: 100%" in result.stdout
 
 
+def test_scorer_does_not_demand_fusion_for_keyword_only_query(tmp_path):
+    """Negative branch: retrieval.fusion must NOT be demanded for a keyword-only
+    query. The same fusion-less trace scores 100% completeness against a gold that
+    does not list fusion, and is incomplete against a gold that does — proving the
+    scorer's per-item conditional discriminates rather than always requiring it."""
+    from scripts.eval_provenance import run_provenance_evaluation
+
+    trace_path = tmp_path / "trace.json"
+    _write_trace(
+        trace_path,
+        [
+            _event("evt-001", "retrieval.query", {"query": "keyword only"}),
+            _event(
+                "evt-002",
+                "retrieval.result",
+                {"results": [{"source_path": "wiki/source.md", "chunk_id": "chunk-001"}]},
+            ),
+        ],
+    )
+
+    keyword_gold = tmp_path / "keyword_only.jsonl"
+    _write_gold(
+        keyword_gold,
+        trace_path,
+        expected_event_types=["retrieval.query", "retrieval.result"],
+        expected_chunk_ids=[],
+        expect_graph_context=False,
+    )
+    metrics = run_provenance_evaluation(str(keyword_gold), min_provenance_completeness=1.0)
+    assert metrics["provenance_completeness"] == 1.0
+
+    hybrid_gold = tmp_path / "hybrid.jsonl"
+    _write_gold(
+        hybrid_gold,
+        trace_path,
+        expected_event_types=["retrieval.query", "retrieval.result", "retrieval.fusion"],
+        expected_chunk_ids=[],
+        expect_graph_context=False,
+    )
+    with pytest.raises(SystemExit):
+        run_provenance_evaluation(str(hybrid_gold), min_provenance_completeness=1.0)
+
+
+def test_scorer_does_not_score_graph_for_non_graph_query(tmp_path):
+    """Negative branch: graph_context_presence must NOT be dragged down by a
+    non-graph query (expect_graph_context False is skipped, so presence stays
+    1.0), while a graph query against the same graphless trace fails the graph
+    gate — proving graph scoring is conditional, not universal."""
+    from scripts.eval_provenance import run_provenance_evaluation
+
+    trace_path = tmp_path / "trace.json"
+    _write_trace(
+        trace_path,
+        [
+            _event("evt-001", "retrieval.query", {"query": "non graph"}),
+            _event(
+                "evt-002",
+                "retrieval.result",
+                {"results": [{"source_path": "wiki/source.md", "chunk_id": "chunk-001"}]},
+            ),
+            _event("evt-003", "context.assembled", {"included_chunk_ids": ["chunk-001"], "dropped": []}),
+        ],
+    )
+
+    non_graph_gold = tmp_path / "non_graph.jsonl"
+    _write_gold(
+        non_graph_gold,
+        trace_path,
+        expected_event_types=["retrieval.query", "retrieval.result", "context.assembled"],
+        expected_chunk_ids=["chunk-001"],
+        expect_graph_context=False,
+    )
+    metrics = run_provenance_evaluation(
+        str(non_graph_gold),
+        min_provenance_completeness=1.0,
+        min_graph_context_presence=1.0,
+    )
+    assert metrics["graph_context_presence"] == 1.0
+
+    graph_gold = tmp_path / "graph.jsonl"
+    _write_gold(
+        graph_gold,
+        trace_path,
+        expected_event_types=["retrieval.query", "retrieval.result", "context.assembled"],
+        expected_chunk_ids=["chunk-001"],
+        expect_graph_context=True,
+    )
+    with pytest.raises(SystemExit):
+        run_provenance_evaluation(str(graph_gold), min_graph_context_presence=1.0)
+
+
 def test_checked_in_provenance_gold_has_realistic_positive_cases():
     from scripts.eval_provenance import load_gold_dataset, run_provenance_evaluation, validate_gold_dataset
 
