@@ -207,6 +207,117 @@ PYTHONPATH=. python scripts/cli.py context --topic "MCP security" --save --forma
 - `scripts/wiki_merge.py` — canonical merge writer + shared log formatter
 - `scripts/llm.py` — provider registry (mock/openai/ollama/anthropic)
 
+## Phase R1: Trace Core ✅
+
+Zurvan stores replayable audit traces as local JSON plus Git-friendly Markdown mirrors.
+
+1. **Schema**: `scripts/trace_schema.py` defines `zurvan.trace.v1`, safe trace IDs, event types, and SHA-256 payload hashes.
+2. **Storage**: `scripts/trace_writer.py` writes canonical JSON to `data/traces/` and a reviewable Markdown mirror to `wiki/traces/`.
+3. **Validation**: `scripts/trace_validate.py` checks required fields, safe IDs, supported event types, duplicate events, and payload-hash integrity.
+4. **Replay**: `scripts/trace_replay.py` renders deterministic Markdown from saved trace JSON only. It does not execute tools, read raw sources, or call networks.
+5. **CLI**:
+   ```bash
+   python scripts/cli.py trace list
+   python scripts/cli.py trace inspect <trace-id>
+   python scripts/cli.py trace validate <trace-id>
+   python scripts/cli.py trace replay <trace-id>
+   ```
+
+**Safety model**:
+- Trace IDs must match the safe `trace-*` slug pattern before paths are built.
+- Trace files are constrained to `data/traces/` and `wiki/traces/`.
+- Trace replay is read-only and rendering-only.
+- Raw sources remain immutable and are not read by the trace core.
+
+## Phase R2: Retrieval Trace Integration ✅
+
+Zurvan can now write opt-in trace records for retrieval commands without changing normal retrieval behavior.
+
+1. **Trigger**: Users pass `--trace` to `search` or `context`.
+2. **Search trace**: `search --trace` records `retrieval.query` and `retrieval.result` events containing query settings, ordered results, source paths, headings, chunk IDs, and available keyword/semantic/hybrid scores.
+3. **Context trace**: `context --trace` records the same retrieval events plus `context.assembled`, which stores ordered included chunk IDs and dropped chunk IDs with reasons. When `--graph` is enabled, it also records a graph-context event containing depth, node count, relation, node type, title, and source node ID.
+4. **Storage**: Trace JSON is written under `data/traces/`; the Markdown mirror is written under `wiki/traces/`.
+5. **Replay**: Generated trace IDs can be inspected with:
+   ```bash
+   python scripts/cli.py trace validate <trace-id>
+   python scripts/cli.py trace replay <trace-id>
+   ```
+
+**R2 guardrails**:
+- Tracing is explicit only. No trace is written unless `--trace` is passed.
+- Normal `search` and `context` output stays unchanged when tracing is disabled.
+- Retrieval ranking logic is unchanged.
+- Legacy R2 traces with a single coarse `retrieval` event remain valid under `zurvan.trace.v1`.
+- Trace payload paths are normalized to repo-relative paths when they are under the project root.
+- Raw sources are not read by trace writing or replay.
+
+## Phase R2 Step 1A: Minimal Trace Granularity Enrichment ✅
+
+The retrieval trace schema was enriched additively before the provenance evaluation harness.
+
+1. **Event types added**:
+   - `retrieval.query`: command, query, mode, and limit.
+   - `retrieval.result`: ordered result list, result count, source paths, chunk IDs, headings, and available scores.
+   - `context.assembled`: ordered included chunk IDs and dropped chunk IDs with reasons.
+2. **Compatibility**: The original coarse `retrieval` event type remains valid for old R1/R2 traces.
+3. **Schema version**: `schema_version` remains `zurvan.trace.v1`; payload hashes still use deterministic SHA-256 over the event payload only.
+4. **Deferred fields**: Token-budget counts and timing metadata are intentionally excluded from the hashed payload until a later scoped design.
+5. **Research path**: Step 1A precedes `eval_provenance.py`; MCP trace integration remains frozen until the provenance harness ships.
+
+## Phase R2 Step 2: Provenance Evaluation Harness ✅
+
+Zurvan can now evaluate trace provenance against a local JSONL gold set.
+
+1. **Gold Dataset**: `eval/provenance_gold.jsonl` maps saved trace files to expected source paths, required event types, optional expected chunk IDs, and graph-context expectations.
+2. **Hard Invariants**:
+   - `raw_leak_rate` must be `0%`.
+   - `hash_integrity_rate` must be `100%`.
+   These run before graded metrics and fail fast.
+3. **Graded Metrics**:
+   - `expected_source_recall`
+   - `provenance_completeness`
+   - `graph_context_presence`
+4. **Built-scope scoring**: The current gold set reflects Step 1A events and does not penalize future-only events such as `retrieval.fusion` or `graph.expand`.
+5. **CLI**:
+   ```bash
+   python scripts/cli.py eval provenance --min-source-recall 1.0 --min-provenance-completeness 1.0
+   ```
+
+## Phase R2 Step 2B: Stronger Provenance Gold Set ✅
+
+The provenance evaluation harness now has a broader fixture set.
+
+1. **Positive baseline**: `eval/provenance_gold.jsonl` has six cases covering
+   normal `search --trace`, normal `context --trace`, `context --graph
+   --trace`, legacy coarse `retrieval`, a controlled Step 2 fixture, and a
+   stale/superseded note case labelled for later policy-aware scoring.
+2. **Negative/failure fixtures**:
+   - `eval/provenance_gold_negative.jsonl` checks raw-path invariant failure and
+     an incomplete trace.
+   - `eval/provenance_gold_incomplete.jsonl` isolates provenance-completeness
+     threshold failure.
+   - `eval/provenance_gold_low_recall.jsonl` isolates expected-source-recall
+     threshold failure.
+3. **Scope**: Step 2B changes only evaluation fixtures, tests, and docs. It does
+   not change MCP tracing, retrieval ranking, graph behavior, or trace schema.
+
+## Phase R2 Step 2C: Real-Corpus Provenance Pilot ✅
+
+Zurvan now has an initial real-corpus provenance evaluation result.
+
+1. **Freeze**: `eval/provenance_real_queries.jsonl` was committed before trace
+   generation.
+2. **Dataset**: 12 fixed queries across MCP safety/trace system, retrieval/graph
+   context, evidence/report, decision memory/policy radar, and hard ambiguous
+   categories.
+3. **Execution**: Existing `search --trace`, `context --trace`, and selected
+   `context --graph --trace` commands generated replayable traces.
+4. **Result**: `eval/provenance_real_gold.jsonl` scored 0% raw leak rate, 100%
+   hash integrity, 12/12 trace validate/replay, 86% expected source recall,
+   100% built-scope provenance completeness, and 100% graph context presence.
+5. **Report**:
+   `docs/evaluation/provenance-real-run-2026-06-14.md`.
+
 ## Phase 8 Release Packaging + Versioned Snapshots
 1. **Trigger**: User runs `zurvan snapshot create`.
 2. **Execution**: A snapshot `tar.gz` is securely generated in `dist/snapshots/`, automatically filtering out the `raw/` directory to prevent data leakage, unless `--include-raw` is passed.

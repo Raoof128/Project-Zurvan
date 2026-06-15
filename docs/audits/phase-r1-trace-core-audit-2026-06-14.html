@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Phase R1 Trace Core Audit</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; max-width: 920px; margin: 40px auto; padding: 0 24px; color: #17202a; }
+    h1, h2 { color: #111827; }
+    code { background: #f3f4f6; padding: 0.1rem 0.25rem; border-radius: 4px; }
+    pre { background: #f3f4f6; padding: 1rem; overflow: auto; border-radius: 6px; }
+    .verdict { border-left: 4px solid #166534; padding-left: 1rem; background: #f0fdf4; }
+  </style>
+</head>
+<body>
+  <h1>Phase R1 Trace Core Audit</h1>
+  <p><strong>Date:</strong> 2026-06-14</p>
+  <p><strong>Scope:</strong> Phase R1 trace core local patch</p>
+
+  <section class="verdict">
+    <h2>Verdict</h2>
+    <p>Phase R1 is ready for branch review. The audit found no reportable security finding in the Phase R1 diff.</p>
+  </section>
+
+  <h2>Files Reviewed</h2>
+  <ul>
+    <li><code>scripts/trace_schema.py</code></li>
+    <li><code>scripts/trace_writer.py</code></li>
+    <li><code>scripts/trace_validate.py</code></li>
+    <li><code>scripts/trace_replay.py</code></li>
+    <li><code>scripts/cli.py</code></li>
+    <li><code>tests/test_trace_*.py</code></li>
+    <li><code>README.md</code>, <code>docs/API.md</code>, <code>docs/workflows_and_plans.md</code></li>
+    <li><code>data/traces/.gitkeep</code>, <code>wiki/traces/.gitkeep</code></li>
+  </ul>
+
+  <h2>Threat Model</h2>
+  <p>Phase R1 accepts local CLI input and local trace JSON. Trace contents may be attacker-influenced if an agent or user writes malformed trace files. Important assets are raw sources, existing wiki content, trace integrity, local filesystem boundaries, and reviewer trust in replay output.</p>
+  <ul>
+    <li>Trace IDs must not allow path traversal.</li>
+    <li>Trace files must stay under <code>data/traces/</code>.</li>
+    <li>Markdown mirrors must stay under <code>wiki/traces/</code>.</li>
+    <li>Replay must not execute tools, read raw sources, or call networks.</li>
+    <li>Replay must refuse traces with invalid schema or payload hashes.</li>
+  </ul>
+
+  <h2>E2E Evidence</h2>
+  <p>Happy-path E2E created a temporary trace project root, wrote JSON and Markdown through <code>TraceStore</code>, then ran <code>trace list</code>, <code>trace inspect</code>, <code>trace validate</code>, and <code>trace replay</code>.</p>
+  <p>Negative-path E2E confirmed invalid payload hashes block validation and replay, traversal-style trace IDs are rejected, missing traces return nonzero, and writer path safety rejects unsafe IDs.</p>
+
+  <h2>Verification Commands</h2>
+  <pre><code>python -m compileall scripts/trace_schema.py scripts/trace_writer.py scripts/trace_validate.py scripts/trace_replay.py scripts/cli.py
+PYTHONPATH=. pytest tests/test_trace_schema.py tests/test_trace_writer.py tests/test_trace_validate.py tests/test_trace_replay.py tests/test_trace_cli.py tests/test_trace_retrieval_integration.py
+PYTHONPATH=. pytest
+PYTHONPATH=. python scripts/public_repo_guard.py
+git diff --check</code></pre>
+  <ul>
+    <li>Trace and retrieval-trace tests: 19 passed.</li>
+    <li>Full test suite: 210 passed, 2 dependency warnings.</li>
+    <li>Public repo guard: passed.</li>
+    <li>Diff whitespace check: passed.</li>
+  </ul>
+
+  <h2>Security Review</h2>
+  <p>No reportable finding.</p>
+  <ul>
+    <li><code>TRACE_ID_RE</code> and <code>EVENT_ID_RE</code> reject path-like and malformed IDs.</li>
+    <li><code>TraceStore._paths_for()</code> validates trace IDs before building paths.</li>
+    <li><code>TraceStore._ensure_under()</code> confirms resolved paths remain under trace directories.</li>
+    <li><code>validate_trace_file()</code> checks required fields, IDs, event types, duplicate events, payload types, and payload hashes.</li>
+    <li><code>replay_trace_file()</code> validates the trace before rendering Markdown.</li>
+  </ul>
+
+  <h2>Residual Risks</h2>
+  <ul>
+    <li>Phase R1 does not yet integrate trace capture into retrieval, graph, or MCP tools. That belongs to later R2/R3 phases.</li>
+    <li>The trace schema validates structure and payload integrity, not semantic truth.</li>
+    <li><code>--project-root</code> is an internal CLI test/audit override. Normal user routing should prefer <code>--project</code>.</li>
+  </ul>
+</body>
+</html>

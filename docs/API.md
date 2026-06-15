@@ -15,6 +15,9 @@ python scripts/cli.py search "architecture"
 # Hybrid Search (Keyword + Semantic)
 python scripts/cli.py search "architecture" --hybrid
 
+# Opt-in retrieval trace (writes data/traces/ + wiki/traces/)
+python scripts/cli.py search "architecture" --hybrid --trace
+
 # Save search results as a synthesis page (wiki/syntheses/)
 python scripts/cli.py search "architecture" --hybrid --save
 
@@ -23,6 +26,9 @@ python scripts/cli.py context --topic "vector search" --limit 10
 
 # Graph-Assisted Context Bundle
 python scripts/cli.py context --topic "vector search" --hybrid --graph
+
+# Opt-in context trace, including graph provenance when --graph is enabled
+python scripts/cli.py context --topic "vector search" --hybrid --graph --trace
 
 # Save context as a synthesis page
 python scripts/cli.py context --topic "vector search" --save
@@ -77,6 +83,36 @@ python scripts/cli.py review audit
 
 # Rebuild review index
 python scripts/cli.py review index rebuild
+```
+
+### Audit Traces
+```bash
+# List locally saved trace records
+python scripts/cli.py trace list
+
+# Inspect a trace JSON document
+python scripts/cli.py trace inspect <trace-id>
+
+# Validate trace schema, required fields, and payload hashes
+python scripts/cli.py trace validate <trace-id>
+
+# Render a deterministic Markdown replay without executing tools
+python scripts/cli.py trace replay <trace-id>
+```
+
+### Evaluation
+```bash
+# Validate retrieval gold paths
+python scripts/cli.py eval validate-gold --gold eval/search_gold.jsonl
+
+# Evaluate retrieval quality
+python scripts/cli.py eval search --hybrid --min-top3 0.6
+
+# Evaluate trace provenance invariants and graded metrics
+python scripts/cli.py eval provenance \
+  --gold eval/provenance_gold.jsonl \
+  --min-source-recall 1.0 \
+  --min-provenance-completeness 1.0
 ```
 
 ## 2. MCP Server (`scripts/mcp_server.py`)
