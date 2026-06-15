@@ -20,8 +20,11 @@ def _search_internal(query: str, hybrid: bool = False, limit: int = 10) -> List[
     wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True)
     matches = []
     keywords = query.lower().split()
-    
+
     for filepath in wiki_files:
+        # Skip derived trace mirrors: self-referential, pollute retrieval.
+        if "traces" in filepath.split(os.sep):
+            continue
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -143,15 +146,66 @@ def _result_chunk_id(result: Dict[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _assembled_context_payload(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+# Observed fusion weights from scripts.hybrid_search.search_hybrid
+# (hybrid_score = 0.6 * keyword_score + 0.4 * semantic_score). Recorded, never applied.
+_FUSION_WEIGHTS = {"fts": 0.6, "embedding": 0.4}
+
+
+def _apply_budget(
+    matches: List[Dict[str, Any]], limit: int
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Split ranked matches into included (top `limit`) and budget-dropped.
+
+    Observe-only: the included slice is identical to `matches[:limit]`, so
+    ranking/selection is unchanged. The over-budget remainder is recorded as
+    genuinely dropped with reason ``budget``.
+    """
+    included = matches[:limit]
+    dropped = [
+        {"chunk_id": _result_chunk_id(match), "reason": "budget"}
+        for match in matches[limit:]
+    ]
+    return included, dropped
+
+
+def _fusion_payload(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Record the existing hybrid fusion (weights + per-chunk ranks). Observe-only."""
+    ranked = []
+    for rank, result in enumerate(results, start=1):
+        ranked.append(
+            {
+                "chunk_id": _result_chunk_id(result),
+                "fts_score": result.get("keyword_score", 0),
+                "embedding_score": result.get("semantic_score", 0),
+                "fused_score": result.get("hybrid_score", 0),
+                "rank": rank,
+            }
+        )
     return {
+        "mode": "hybrid",
+        "fusion": "weighted_sum",
+        "weights": dict(_FUSION_WEIGHTS),
+        "ranked": ranked,
+    }
+
+
+def _assembled_context_payload(
+    results: List[Dict[str, Any]], dropped: List[Dict[str, Any]] | None = None
+) -> Dict[str, Any]:
+    dropped = dropped or []
+    payload: Dict[str, Any] = {
         "included_chunk_ids": [
             chunk_id
             for chunk_id in (_result_chunk_id(result) for result in results)
             if chunk_id is not None
         ],
-        "dropped": [],
+        "dropped": list(dropped),
     }
+    if not dropped:
+        # Empty must be asserted, not incidental: distinguishes "nothing dropped"
+        # from "drop tracking absent".
+        payload["dropped_reason"] = "no_dropped_context"
+    return payload
 
 
 def _write_retrieval_trace(
@@ -161,6 +215,7 @@ def _write_retrieval_trace(
     mode: str,
     limit: int,
     results: List[Dict[str, Any]],
+    dropped: List[Dict[str, Any]] | None = None,
     graph_enabled: bool = False,
     graph_depth: int = 0,
     graph_nodes: List[Dict[str, Any]] | None = None,
@@ -194,6 +249,18 @@ def _write_retrieval_trace(
     ]
 
     next_event_number = 3
+    if mode == "hybrid":
+        events.append(
+            TraceEvent(
+                event_id=f"evt-{next_event_number:03d}",
+                event_type="retrieval.fusion",
+                timestamp=utc_now(),
+                actor="zurvan",
+                payload=_fusion_payload(results),
+            )
+        )
+        next_event_number += 1
+
     if command == "context":
         events.append(
             TraceEvent(
@@ -201,7 +268,7 @@ def _write_retrieval_trace(
                 event_type="context.assembled",
                 timestamp=utc_now(),
                 actor="zurvan",
-                payload=_assembled_context_payload(results),
+                payload=_assembled_context_payload(results, dropped=dropped),
             )
         )
         next_event_number += 1
@@ -276,8 +343,12 @@ def export_context(
     trace_id: str | None = None,
 ) -> str:
     """Exports a Markdown context bundle based on search results."""
-    
-    results = _search_internal(topic, hybrid, limit)
+
+    # Fetch a wider candidate pool, then budget down to `limit`. The included
+    # slice is identical to a direct limit fetch (same ranking), but the
+    # over-budget remainder is now observable as genuine drops.
+    candidates = _search_internal(topic, hybrid, limit * 3)
+    results, dropped = _apply_budget(candidates, limit)
 
     output = []
     output.append(f"# Zurvan Context Bundle: {topic}\n")
@@ -345,6 +416,7 @@ def export_context(
             mode="hybrid" if hybrid else "keyword",
             limit=limit,
             results=results,
+            dropped=dropped,
             graph_enabled=graph,
             graph_depth=depth if graph else 0,
             graph_nodes=graph_nodes,
