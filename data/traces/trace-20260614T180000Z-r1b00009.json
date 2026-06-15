@@ -1,0 +1,202 @@
+{
+  "created_at": "2026-06-14T09:21:57Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "search",
+        "limit": 10,
+        "mode": "hybrid",
+        "query": "cross project decision memory stale decisions"
+      },
+      "payload_hash": "sha256:caf602b90409c1d2474f50c393415457db1f0acb992a8e2efcd70673f6ef7a69",
+      "timestamp": "2026-06-14T09:21:57Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "search",
+        "result_count": 10,
+        "results": [
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "heading": "Phase 11: Cross-Project Decision Memory \u2705",
+            "hybrid_score": 0.807049887263058,
+            "keyword_score": 1.0,
+            "semantic_score": 0.517624718157645,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "281bc7404f9084bdcdad3ca4bacc0faba6f22abf5f2db70ce4dc9ad57d7d5429",
+            "heading": "Cross-Project Decision Memory",
+            "hybrid_score": 0.6125091846768402,
+            "keyword_score": 0.6424889091131115,
+            "semantic_score": 0.5675395980224331,
+            "source_path": "docs/decisions/cross-project-decision-memory.md"
+          },
+          {
+            "chunk_id": "c7b35522f9c5a7fc85166613c3c19f05127cc0675685eeaca227ef69cde40e8d",
+            "heading": "Stale Decisions",
+            "hybrid_score": 0.5699782297862822,
+            "keyword_score": 0.5510326577738405,
+            "semantic_score": 0.5983965878049448,
+            "source_path": "docs/decisions/stale-decisions.md"
+          },
+          {
+            "chunk_id": "31ec79ac44b86629df4cf090241a33305132c34f7edb7feb365b27d1396b1ba6",
+            "heading": "Zurvan Multi-Project Workspace and Federation",
+            "hybrid_score": 0.5459873588183559,
+            "keyword_score": 0.5589764076376198,
+            "semantic_score": 0.5265037855894602,
+            "source_path": "wiki/note-zurvan-multi-project-workspace-and-federation.md"
+          },
+          {
+            "chunk_id": "7530d50f3d7df5cff611cdc062aaf898d65e301fde2403c2756d21b03bc74a34",
+            "heading": "Commands",
+            "hybrid_score": 0.5029367821116092,
+            "keyword_score": 0.5877665683829254,
+            "semantic_score": 0.3756921027046348,
+            "source_path": "docs/decisions/cross-project-decision-memory.md"
+          },
+          {
+            "chunk_id": "dbea152520f0fa083bb646d50a11ae182b67e23e344cbc63cfc0d33b2b754173",
+            "heading": "root",
+            "hybrid_score": 0.47762977050147204,
+            "keyword_score": 0.401764194725585,
+            "semantic_score": 0.5914281341653027,
+            "source_path": "wiki/note-zurvan-multi-project-workspace-and-federation.md"
+          },
+          {
+            "chunk_id": "9adddd768132d9ccfc2f8f884c89f0ee91dc2ec9f5fddbfab0a97492135fdf63",
+            "heading": "Zurvan CLI Commands Reference",
+            "hybrid_score": 0.4229235136306574,
+            "keyword_score": 0.3407489404974878,
+            "semantic_score": 0.5461853733304117,
+            "source_path": "wiki/note-zurvan-cli-commands-reference.md"
+          },
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "heading": "Phase 10: Cross-Project Search + Federation \u2705",
+            "hybrid_score": 0.41677254649560613,
+            "keyword_score": 0.2960448486755759,
+            "semantic_score": 0.5978640932256514,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "ed4cc892788ec96e5b27ce34284962b54efeff379a47211c34a4e65a1d8ac518",
+            "heading": "Architecture Decisions",
+            "hybrid_score": 0.4082766997538366,
+            "keyword_score": 0.32752506797588515,
+            "semantic_score": 0.5294041474207638,
+            "source_path": "wiki/sources/2026-05-13-redacted-project-doc-design.md.md"
+          },
+          {
+            "chunk_id": "8bf1450aa4090a643af72f2d5c33514cf8907ed4fa8dd9456cbf63aee321a601",
+            "heading": "Zurvan Key Scripts Reference",
+            "hybrid_score": 0.40695371822085114,
+            "keyword_score": 0.30518787067629727,
+            "semantic_score": 0.5596024895376819,
+            "source_path": "wiki/note-zurvan-key-scripts-reference.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:29b743945d5c0cec22c7a86bc2b1891b9e7425cfcc7d1eacffff023e64c06626",
+      "timestamp": "2026-06-14T09:21:57Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "retrieval.fusion",
+      "payload": {
+        "fusion": "weighted_sum",
+        "mode": "hybrid",
+        "ranked": [
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "embedding_score": 0.517624718157645,
+            "fts_score": 1.0,
+            "fused_score": 0.807049887263058,
+            "rank": 1
+          },
+          {
+            "chunk_id": "281bc7404f9084bdcdad3ca4bacc0faba6f22abf5f2db70ce4dc9ad57d7d5429",
+            "embedding_score": 0.5675395980224331,
+            "fts_score": 0.6424889091131115,
+            "fused_score": 0.6125091846768402,
+            "rank": 2
+          },
+          {
+            "chunk_id": "c7b35522f9c5a7fc85166613c3c19f05127cc0675685eeaca227ef69cde40e8d",
+            "embedding_score": 0.5983965878049448,
+            "fts_score": 0.5510326577738405,
+            "fused_score": 0.5699782297862822,
+            "rank": 3
+          },
+          {
+            "chunk_id": "31ec79ac44b86629df4cf090241a33305132c34f7edb7feb365b27d1396b1ba6",
+            "embedding_score": 0.5265037855894602,
+            "fts_score": 0.5589764076376198,
+            "fused_score": 0.5459873588183559,
+            "rank": 4
+          },
+          {
+            "chunk_id": "7530d50f3d7df5cff611cdc062aaf898d65e301fde2403c2756d21b03bc74a34",
+            "embedding_score": 0.3756921027046348,
+            "fts_score": 0.5877665683829254,
+            "fused_score": 0.5029367821116092,
+            "rank": 5
+          },
+          {
+            "chunk_id": "dbea152520f0fa083bb646d50a11ae182b67e23e344cbc63cfc0d33b2b754173",
+            "embedding_score": 0.5914281341653027,
+            "fts_score": 0.401764194725585,
+            "fused_score": 0.47762977050147204,
+            "rank": 6
+          },
+          {
+            "chunk_id": "9adddd768132d9ccfc2f8f884c89f0ee91dc2ec9f5fddbfab0a97492135fdf63",
+            "embedding_score": 0.5461853733304117,
+            "fts_score": 0.3407489404974878,
+            "fused_score": 0.4229235136306574,
+            "rank": 7
+          },
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "embedding_score": 0.5978640932256514,
+            "fts_score": 0.2960448486755759,
+            "fused_score": 0.41677254649560613,
+            "rank": 8
+          },
+          {
+            "chunk_id": "ed4cc892788ec96e5b27ce34284962b54efeff379a47211c34a4e65a1d8ac518",
+            "embedding_score": 0.5294041474207638,
+            "fts_score": 0.32752506797588515,
+            "fused_score": 0.4082766997538366,
+            "rank": 9
+          },
+          {
+            "chunk_id": "8bf1450aa4090a643af72f2d5c33514cf8907ed4fa8dd9456cbf63aee321a601",
+            "embedding_score": 0.5596024895376819,
+            "fts_score": 0.30518787067629727,
+            "fused_score": 0.40695371822085114,
+            "rank": 10
+          }
+        ],
+        "weights": {
+          "embedding": 0.4,
+          "fts": 0.6
+        }
+      },
+      "payload_hash": "sha256:f73cc0774aaada7d19ed4f09ae3af842aac9933ac32d0f6bc342c993d21132f1",
+      "timestamp": "2026-06-14T09:21:57Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan search.",
+  "title": "Retrieval context: cross project decision memory stale decisions",
+  "trace_id": "trace-20260614T180000Z-r1b00009"
+}

@@ -1,0 +1,185 @@
+{
+  "created_at": "2026-06-14T09:21:56Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "compose structured reports from evidence packs"
+      },
+      "payload_hash": "sha256:85c52f979debd6be1e00f859abbf8dff7ecde78e8db97337f018f8af5f1bccc1",
+      "timestamp": "2026-06-14T09:21:56Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "b965232b6062d53c531cade320965b11b44e62313931deefeeb6402db565c667",
+            "heading": "Evidence Pack Workflows",
+            "hybrid_score": 0.8569065247685841,
+            "keyword_score": 1.0,
+            "semantic_score": 0.6422663119214604,
+            "source_path": "docs/evidence/workflows.md"
+          },
+          {
+            "chunk_id": "1b105d0f1b0c4becda64ff67cd7bdbeeb706e1e1c85c75e326c3e2186eca2a73",
+            "heading": "Reports Overview",
+            "hybrid_score": 0.7307311678170003,
+            "keyword_score": 0.8220545482783043,
+            "semantic_score": 0.5937460971250444,
+            "source_path": "docs/reports/overview.md"
+          },
+          {
+            "chunk_id": "cbab4cb1ea04b340ac0270ad67e7244c354cc911e6863b3655c9fcdd7bad31c8",
+            "heading": "Compose a report from an evidence pack",
+            "hybrid_score": 0.6246824279563077,
+            "keyword_score": 0.6714678109824141,
+            "semantic_score": 0.554504353417148,
+            "source_path": "docs/reports/cli.md"
+          },
+          {
+            "chunk_id": "182632c5f76390400c5d591d743068603f84c186a989ecc907a6889d13be368e",
+            "heading": "Compose a report from a pack",
+            "hybrid_score": 0.5788453008253036,
+            "keyword_score": 0.6331917753511076,
+            "semantic_score": 0.4973255890365976,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "975e0d7542e4e0abfa69393ed91cd7d1979a58b4dca718267f46a34d6f9a6eaa",
+            "heading": "Evidence Packs Overview",
+            "hybrid_score": 0.5552758617609421,
+            "keyword_score": 0.5516577253628314,
+            "semantic_score": 0.5607030663581081,
+            "source_path": "docs/evidence/overview.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:36ad858254b420da650b2b6838842ae6ef37aacdb5d42fb78cad30c547fc5c97",
+      "timestamp": "2026-06-14T09:21:56Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "retrieval.fusion",
+      "payload": {
+        "fusion": "weighted_sum",
+        "mode": "hybrid",
+        "ranked": [
+          {
+            "chunk_id": "b965232b6062d53c531cade320965b11b44e62313931deefeeb6402db565c667",
+            "embedding_score": 0.6422663119214604,
+            "fts_score": 1.0,
+            "fused_score": 0.8569065247685841,
+            "rank": 1
+          },
+          {
+            "chunk_id": "1b105d0f1b0c4becda64ff67cd7bdbeeb706e1e1c85c75e326c3e2186eca2a73",
+            "embedding_score": 0.5937460971250444,
+            "fts_score": 0.8220545482783043,
+            "fused_score": 0.7307311678170003,
+            "rank": 2
+          },
+          {
+            "chunk_id": "cbab4cb1ea04b340ac0270ad67e7244c354cc911e6863b3655c9fcdd7bad31c8",
+            "embedding_score": 0.554504353417148,
+            "fts_score": 0.6714678109824141,
+            "fused_score": 0.6246824279563077,
+            "rank": 3
+          },
+          {
+            "chunk_id": "182632c5f76390400c5d591d743068603f84c186a989ecc907a6889d13be368e",
+            "embedding_score": 0.4973255890365976,
+            "fts_score": 0.6331917753511076,
+            "fused_score": 0.5788453008253036,
+            "rank": 4
+          },
+          {
+            "chunk_id": "975e0d7542e4e0abfa69393ed91cd7d1979a58b4dca718267f46a34d6f9a6eaa",
+            "embedding_score": 0.5607030663581081,
+            "fts_score": 0.5516577253628314,
+            "fused_score": 0.5552758617609421,
+            "rank": 5
+          }
+        ],
+        "weights": {
+          "embedding": 0.4,
+          "fts": 0.6
+        }
+      },
+      "payload_hash": "sha256:c1c1537572574bfb1f1ad52d025528162943ee0b60acec4cbcc583d2bf2b5c5f",
+      "timestamp": "2026-06-14T09:21:56Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [
+          {
+            "chunk_id": "54cba19c1a1d1a4b058c28f95e3688a488fb71d66d9df3f9a98aaa885b1015d2",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "06cc3a9533d08e73d1dddded07ba3a5842e762aea12e68c2cce419f9db62c56c",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "cfcee5c55ae6f82f20012201f3667dce4734df5bb1fda4990c871b5190001a87",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "14c633922604491a182d16be2af89c82d0346c3c95e091e593034e3bbc30fa31",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "884fd481395e50f9a00da395f635eb8457c6d203e3ec2f7a5bc2447e2ed712ef",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "9455d24642c4e5cf248c252cde366d44de2c90ca5e3933ccf172c471a1344399",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "e1c7cced1f94493e5a96872d7d67acc32040e016f48161d62acd5784e9789b55",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "fcc72dd18abde6e773cc5decec9f3eaad1c3bb2ffbb88edc50868cafd5273c96",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "b25e51dbd9d3e7d2b0731227e433e5b503a3330a0abd859dc8e811aa63762e55",
+            "reason": "budget"
+          },
+          {
+            "chunk_id": "75f78406911a8f9f93e442a00094d45e1f481925a03f882b30949169b173838c",
+            "reason": "budget"
+          }
+        ],
+        "included_chunk_ids": [
+          "b965232b6062d53c531cade320965b11b44e62313931deefeeb6402db565c667",
+          "1b105d0f1b0c4becda64ff67cd7bdbeeb706e1e1c85c75e326c3e2186eca2a73",
+          "cbab4cb1ea04b340ac0270ad67e7244c354cc911e6863b3655c9fcdd7bad31c8",
+          "182632c5f76390400c5d591d743068603f84c186a989ecc907a6889d13be368e",
+          "975e0d7542e4e0abfa69393ed91cd7d1979a58b4dca718267f46a34d6f9a6eaa"
+        ]
+      },
+      "payload_hash": "sha256:097fbf1be5a0805c6b8139eb6824bd57718c27e97bec2cc1eecdd0e13224e576",
+      "timestamp": "2026-06-14T09:21:56Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: compose structured reports from evidence packs",
+  "trace_id": "trace-20260614T180000Z-r1b00008"
+}
