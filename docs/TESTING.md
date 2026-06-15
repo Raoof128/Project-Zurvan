@@ -14,11 +14,12 @@ bash scripts/check.sh
 
 ### What `check.sh` Does (22 stages)
 1. **Public Repo Guard**: Ensures no absolute paths, tokens, or private files are tracked.
-2. **Pytest Suite** (183 tests): Runs all unit and integration tests in the `tests/` directory.
+2. **Pytest Suite** (218 tests): Runs all unit and integration tests in the `tests/` directory.
 3. **Reliability Gauntlet**: Processes sample raw files (PDF, MD, TXT) to verify the ingest/extract pipeline doesn't crash on messy data.
 4. **Wiki Audit**: Runs `scripts/audit_wiki.py` to ensure all generated Markdown files have correct YAML frontmatter, valid links, and citations.
 5. **Index Rebuild**: Rebuilds the search and graph databases.
 6. **Retrieval Evaluation**: Runs `zurvan eval search` against `eval/search_gold.jsonl`. Must achieve at least a `0.6` Top-3 score to pass.
+7. **Provenance Evaluation**: Runs `zurvan eval provenance` against `eval/provenance_gold.jsonl` to gate trace hash integrity, raw-leak absence, source recall, provenance completeness, and graph-context presence.
 7. **Graph Context Expansion**: Tests `zurvan context --graph` logic.
 8. **MCP Doctor**: Validates system health before MCP connections.
 9. **MCP Server Tests**: Runs the full MCP test suite (security, tools, resources, smoke).
