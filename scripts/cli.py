@@ -10,10 +10,17 @@ from scripts.context_export import search_memory, export_context
 def main():
     args_list = sys.argv[1:]
     project_name = None
+    project_root_override = None
     if "--project" in args_list:
         idx = args_list.index("--project")
         if idx + 1 < len(args_list):
             project_name = args_list[idx + 1]
+            args_list.pop(idx)
+            args_list.pop(idx)
+    if "--project-root" in args_list:
+        idx = args_list.index("--project-root")
+        if idx + 1 < len(args_list):
+            project_root_override = Path(args_list[idx + 1]).resolve()
             args_list.pop(idx)
             args_list.pop(idx)
     
@@ -23,6 +30,12 @@ def main():
         print(f"Running against project: {project_name}")
         cmd = [sys.executable, "scripts/cli.py"] + args_list
         sys.exit(subprocess.run(cmd, cwd=str(root)).returncode)
+
+    if project_root_override is not None:
+        import scripts.context_export as _context_export
+        import scripts.wiki_merge as _wiki_merge
+        _context_export.PROJECT_ROOT = project_root_override
+        _wiki_merge.PROJECT_ROOT = project_root_override
 
     parser = argparse.ArgumentParser(description="Zurvan - Local-first CLI Memory Interface")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -234,6 +247,21 @@ def main():
     
     pub_val = publish_sub.add_parser("validate")
     pub_val.add_argument("report_id")
+
+    # zurvan trace
+    trace_parser = subparsers.add_parser("trace", help="Inspect and replay audit traces")
+    trace_sub = trace_parser.add_subparsers(dest="trace_action")
+
+    trace_sub.add_parser("list", help="List saved traces")
+
+    trace_inspect = trace_sub.add_parser("inspect", help="Print a trace JSON document")
+    trace_inspect.add_argument("trace_id")
+
+    trace_validate = trace_sub.add_parser("validate", help="Validate a trace JSON document")
+    trace_validate.add_argument("trace_id")
+
+    trace_replay = trace_sub.add_parser("replay", help="Render a deterministic trace replay")
+    trace_replay.add_argument("trace_id")
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -274,6 +302,8 @@ def main():
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--hybrid", action="store_true", help="Use hybrid search")
     search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
+    search_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
+    search_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
 
     # zurvan context
     context_parser = subparsers.add_parser("context", help="Export context bundle")
@@ -283,6 +313,8 @@ def main():
     context_parser.add_argument("--graph", action="store_true", help="Expand graph neighbours")
     context_parser.add_argument("--depth", type=int, default=1, help="Graph expansion depth")
     context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
+    context_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
+    context_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
     context_parser.add_argument(
         "--format",
         choices=["markdown", "table", "marp"],
@@ -308,6 +340,13 @@ def main():
     eval_search_parser.add_argument("--gold", default="eval/search_gold.jsonl")
     eval_search_parser.add_argument("--hybrid", action="store_true")
     eval_search_parser.add_argument("--min-top3", type=float, default=0.0)
+
+    eval_provenance_parser = eval_sub.add_parser("provenance", help="Evaluate retrieval trace provenance")
+    eval_provenance_parser.add_argument("--gold", default="eval/provenance_gold.jsonl")
+    eval_provenance_parser.add_argument("--validate", action="store_true")
+    eval_provenance_parser.add_argument("--min-source-recall", type=float, default=0.0)
+    eval_provenance_parser.add_argument("--min-provenance-completeness", type=float, default=0.0)
+    eval_provenance_parser.add_argument("--min-graph-context-presence", type=float, default=0.0)
     
     eval_validate_parser = eval_sub.add_parser("validate-gold", help="Validate gold dataset")
     eval_validate_parser.add_argument("--gold", default="eval/search_gold.jsonl")
@@ -634,7 +673,6 @@ def main():
     elif args.command == "publish":
         if args.publish_action == "export":
             from scripts.publication_export import export_publication
-            from pathlib import Path
             out_dir = Path(args.output_dir) if args.output_dir else None
             try:
                 out = export_publication(args.report_id, args.format, args.force, out_dir)
@@ -644,7 +682,6 @@ def main():
                 sys.exit(1)
         elif args.publish_action == "bundle":
             from scripts.publication_bundle import create_bundle
-            from pathlib import Path
             out_dir = Path(args.output_dir) if args.output_dir else None
             try:
                 out = create_bundle(args.report_id, args.format, args.force, out_dir)
@@ -674,6 +711,53 @@ def main():
             for f in audit["failures"]: print(f"FAIL: {f}")
             if audit["status"] == "fail": sys.exit(1)
 
+    elif args.command == "trace":
+        from scripts.trace_replay import replay_trace_file
+        from scripts.trace_validate import validate_trace_file
+        from scripts.trace_writer import TraceStore
+        import json
+
+        store = TraceStore(project_root=project_root_override or Path(__file__).parent.parent)
+        if args.trace_action == "list":
+            traces = store.list()
+            if not traces:
+                print("No traces found.")
+            for trace in traces:
+                print(
+                    f"- {trace['trace_id']} | {trace['title']} | "
+                    f"events: {trace['event_count']} | created: {trace['created_at']}"
+                )
+        elif args.trace_action == "inspect":
+            try:
+                print(json.dumps(store.read(args.trace_id), indent=2, sort_keys=True))
+            except FileNotFoundError as exc:
+                print(str(exc))
+                sys.exit(1)
+            except ValueError as exc:
+                print(str(exc))
+                sys.exit(1)
+        elif args.trace_action == "validate":
+            try:
+                result = validate_trace_file(store.trace_path(args.trace_id))
+            except ValueError as exc:
+                print(str(exc))
+                sys.exit(1)
+            if result.valid:
+                print(f"Trace {args.trace_id} is valid.")
+            else:
+                print(f"Trace {args.trace_id} has issues:")
+                for issue in result.issues:
+                    print(f" - {issue}")
+                sys.exit(1)
+        elif args.trace_action == "replay":
+            try:
+                print(replay_trace_file(store.trace_path(args.trace_id)), end="")
+            except (FileNotFoundError, ValueError) as exc:
+                print(str(exc))
+                sys.exit(1)
+        else:
+            trace_parser.print_help()
+
                 
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
@@ -688,14 +772,30 @@ def main():
         if add_question(args.question, args.reason, args.tags) is False:
             sys.exit(1)
     elif args.command == "search":
-        search_memory(args.query, args.hybrid, save=getattr(args, "save", False))
+        try:
+            search_memory(
+                args.query,
+                args.hybrid,
+                save=getattr(args, "save", False),
+                trace=getattr(args, "trace", False),
+                trace_id=getattr(args, "trace_id", None),
+            )
+        except ValueError as exc:
+            print(str(exc))
+            sys.exit(1)
     elif args.command == "context":
         from scripts.context_export import export_context
-        bundle = export_context(
-            args.topic, args.limit, args.hybrid, args.graph, args.depth,
-            save=getattr(args, "save", False),
-            fmt=getattr(args, "output_format", "markdown"),
-        )
+        try:
+            bundle = export_context(
+                args.topic, args.limit, args.hybrid, args.graph, args.depth,
+                save=getattr(args, "save", False),
+                fmt=getattr(args, "output_format", "markdown"),
+                trace=getattr(args, "trace", False),
+                trace_id=getattr(args, "trace_id", None),
+            )
+        except ValueError as exc:
+            print(str(exc))
+            sys.exit(1)
         print(bundle)
     elif args.command == "audit":
         subprocess.run(["python", "scripts/audit_wiki.py"])
@@ -715,6 +815,17 @@ def main():
             "--gold", args.gold,
             "--validate"
         ])
+    elif args.command == "eval" and args.action == "provenance":
+        from scripts.eval_provenance import run_provenance_evaluation, validate_gold_dataset
+        if args.validate:
+            validate_gold_dataset(args.gold)
+        else:
+            run_provenance_evaluation(
+                args.gold,
+                min_source_recall=args.min_source_recall,
+                min_provenance_completeness=args.min_provenance_completeness,
+                min_graph_context_presence=args.min_graph_context_presence,
+            )
     elif args.command == "graph":
         if args.action == "rebuild":
             subprocess.run(["python", "scripts/graph_build.py"])

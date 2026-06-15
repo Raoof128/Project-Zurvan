@@ -1,0 +1,74 @@
+{
+  "created_at": "2026-06-14T15:16:17Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 10,
+        "mode": "keyword",
+        "query": "step 2 provenance evaluation"
+      },
+      "payload_hash": "sha256:5c05e359de41db06cbbbcec78aadc047cc868a7ff92ef950fdbe60b340b181dc",
+      "timestamp": "2026-06-14T15:16:17Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 1,
+        "results": [
+          {
+            "chunk_id": "chunk-step2-001",
+            "hybrid_score": 1,
+            "source_path": "wiki/provenance-step2.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:46ca13be40437927f6d46e8df542a75d69364afcd919aca1eb1f7342aba22539",
+      "timestamp": "2026-06-14T15:16:17Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "chunk-step2-001"
+        ]
+      },
+      "payload_hash": "sha256:ac2406b0b83686f1bb46cff128bd7a144e166dda2bcce1afe44cc9ce2693af7a",
+      "timestamp": "2026-06-14T15:16:17Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "graph_context",
+      "payload": {
+        "depth": 1,
+        "node_count": 1,
+        "nodes": [
+          {
+            "depth": 1,
+            "node_type": "decision",
+            "path": "wiki/decisions/trace-provenance.md",
+            "relation": "outgoing:mentions",
+            "source_id": "node-step2",
+            "title": "Trace provenance"
+          }
+        ]
+      },
+      "payload_hash": "sha256:3ca6f533943d6801857e55d62825f8b57a742b54f61311d120bc5fe938bbad1d",
+      "timestamp": "2026-06-14T15:16:17Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Synthetic Step 2 provenance evaluation fixture.",
+  "title": "Step 2 provenance evaluation fixture",
+  "trace_id": "trace-20260614T151617Z-prov0001"
+}

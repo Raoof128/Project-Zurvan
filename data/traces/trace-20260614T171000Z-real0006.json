@@ -1,0 +1,114 @@
+{
+  "created_at": "2026-06-14T08:56:15Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "cross project search federation privacy"
+      },
+      "payload_hash": "sha256:e8355ce493b460ecff220b9c933577d79b69970fd031752751579bec883326b3",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "heading": "Phase 10: Cross-Project Search + Federation \u2705",
+            "hybrid_score": 0.8628347096335347,
+            "keyword_score": 1.0,
+            "semantic_score": 0.6570867740838366,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+            "heading": "Phase 12: Cross-Project Contradiction + Policy Radar \u2705",
+            "hybrid_score": 0.7353362380462828,
+            "keyword_score": 0.8620512406262878,
+            "semantic_score": 0.5452637341762754,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "heading": "Phase 11: Cross-Project Decision Memory \u2705",
+            "hybrid_score": 0.7252517634310839,
+            "keyword_score": 0.7294542140498328,
+            "semantic_score": 0.7189480875029605,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "8d706b50661d8cf2c3cc1457a4276146a0d78c280c874b32afe32b90c53ae5ef",
+            "heading": "4. No Cloud",
+            "hybrid_score": 0.6260675395139332,
+            "keyword_score": 0.6008186428912293,
+            "semantic_score": 0.6639408844479889,
+            "source_path": "docs/federation/privacy-model.md"
+          },
+          {
+            "chunk_id": "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8",
+            "heading": "Cross-Project Search",
+            "hybrid_score": 0.6213189791336327,
+            "keyword_score": 0.7165190157377136,
+            "semantic_score": 0.4785189242275113,
+            "source_path": "docs/federation/cross-project-search.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:c6a3441c79ea1b01c76dd92cbbcc7ad50b02735a43de9343ef6578f56f1b28b3",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+          "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+          "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+          "8d706b50661d8cf2c3cc1457a4276146a0d78c280c874b32afe32b90c53ae5ef",
+          "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8"
+        ]
+      },
+      "payload_hash": "sha256:72c8c3dee974ec60fc9cd8da7c8162e29cd762b8990e631c524a7c14275cc258",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "graph_context",
+      "payload": {
+        "depth": 1,
+        "enabled": true,
+        "node_count": 1,
+        "nodes": [
+          {
+            "depth": 1,
+            "node_type": "note",
+            "path": "README.md",
+            "relation": "incoming:mentions",
+            "source_id": "47bb6fd4ebef2d7466a316b64a8678dcaaaa84ffcd3de9e1a7d55136dc02f799",
+            "title": "README"
+          }
+        ]
+      },
+      "payload_hash": "sha256:2df83e1c62f0b5201901304e28dfc4180ae0f0d8e0580acfaec254884ac8d4eb",
+      "timestamp": "2026-06-14T08:56:15Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: cross project search federation privacy",
+  "trace_id": "trace-20260614T171000Z-real0006"
+}

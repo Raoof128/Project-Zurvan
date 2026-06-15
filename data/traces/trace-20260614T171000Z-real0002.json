@@ -1,0 +1,92 @@
+{
+  "created_at": "2026-06-14T08:56:15Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "Codex MCP client setup"
+      },
+      "payload_hash": "sha256:0289b50679d89f142f10baaa42fd21b534eee57e0f1c500be6f171af4df2e9b1",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "22e82c969794b727821be69e6e2683aadc0b2a6bc426894cb137f4f2a73cb4bc",
+            "heading": "3. Manual Setup",
+            "hybrid_score": 0.8422912954199813,
+            "keyword_score": 0.8849535109386474,
+            "semantic_score": 0.778297972141982,
+            "source_path": "docs/mcp/codex.md"
+          },
+          {
+            "chunk_id": "045a1a490d4b35863cbcadfd59f042f977b2cf2487821fa75733d5a9ec2b44e8",
+            "heading": "1. Quick Setup",
+            "hybrid_score": 0.838095323441949,
+            "keyword_score": 1.0,
+            "semantic_score": 0.5952383086048725,
+            "source_path": "docs/mcp/claude-code.md"
+          },
+          {
+            "chunk_id": "7d4673b2c5feaebaa04ba5734d8843041afc679e53fc7ccc7ab4a7ea9264da6a",
+            "heading": "1. Using the Config Generator",
+            "hybrid_score": 0.7587533592130976,
+            "keyword_score": 0.8970170820300198,
+            "semantic_score": 0.5513577749877143,
+            "source_path": "docs/mcp/codex.md"
+          },
+          {
+            "chunk_id": "523359d81b2224226f3a76db657d04754f1e6c706edf7eafe830aa3254cc1be7",
+            "heading": "Codex MCP Integration",
+            "hybrid_score": 0.6930323524190841,
+            "keyword_score": 0.810240284318281,
+            "semantic_score": 0.5172204545702888,
+            "source_path": "docs/mcp/codex.md"
+          },
+          {
+            "chunk_id": "cd82611a77b0e6bf1d809af7d11bebca03fe73b4edeff557c24da9487dcb9836",
+            "heading": "2. CLI Setup (recommended)",
+            "hybrid_score": 0.6076509933804444,
+            "keyword_score": 0.7845924975898617,
+            "semantic_score": 0.34223873706631835,
+            "source_path": "docs/mcp/codex.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:b2f4994da2afb1b8d9b2c6565320f34370e2466671bc5071cf1b2c2b25e8f3fa",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "22e82c969794b727821be69e6e2683aadc0b2a6bc426894cb137f4f2a73cb4bc",
+          "045a1a490d4b35863cbcadfd59f042f977b2cf2487821fa75733d5a9ec2b44e8",
+          "7d4673b2c5feaebaa04ba5734d8843041afc679e53fc7ccc7ab4a7ea9264da6a",
+          "523359d81b2224226f3a76db657d04754f1e6c706edf7eafe830aa3254cc1be7",
+          "cd82611a77b0e6bf1d809af7d11bebca03fe73b4edeff557c24da9487dcb9836"
+        ]
+      },
+      "payload_hash": "sha256:311f282ed6c10adde54222f03079bb112e448b9eead5c1d7d2a20b1ae65dc452",
+      "timestamp": "2026-06-14T08:56:15Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: Codex MCP client setup",
+  "trace_id": "trace-20260614T171000Z-real0002"
+}

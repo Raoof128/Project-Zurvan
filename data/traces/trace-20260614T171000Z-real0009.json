@@ -1,0 +1,115 @@
+{
+  "created_at": "2026-06-14T08:56:16Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "search",
+        "limit": 10,
+        "mode": "hybrid",
+        "query": "cross project decision memory stale decisions"
+      },
+      "payload_hash": "sha256:caf602b90409c1d2474f50c393415457db1f0acb992a8e2efcd70673f6ef7a69",
+      "timestamp": "2026-06-14T08:56:16Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "search",
+        "result_count": 10,
+        "results": [
+          {
+            "chunk_id": "a5c31e240342ef803007dab1349dd7e56b3d6f744b19bd52a060c322aff993dd",
+            "heading": "Phase 11: Cross-Project Decision Memory \u2705",
+            "hybrid_score": 0.807049887263058,
+            "keyword_score": 1.0,
+            "semantic_score": 0.517624718157645,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "281bc7404f9084bdcdad3ca4bacc0faba6f22abf5f2db70ce4dc9ad57d7d5429",
+            "heading": "Cross-Project Decision Memory",
+            "hybrid_score": 0.6143532939436651,
+            "keyword_score": 0.6455624245578199,
+            "semantic_score": 0.5675395980224331,
+            "source_path": "docs/decisions/cross-project-decision-memory.md"
+          },
+          {
+            "chunk_id": "c7b35522f9c5a7fc85166613c3c19f05127cc0675685eeaca227ef69cde40e8d",
+            "heading": "Stale Decisions",
+            "hybrid_score": 0.5505645886764412,
+            "keyword_score": 0.5186765892574388,
+            "semantic_score": 0.5983965878049448,
+            "source_path": "docs/decisions/stale-decisions.md"
+          },
+          {
+            "chunk_id": "7530d50f3d7df5cff611cdc062aaf898d65e301fde2403c2756d21b03bc74a34",
+            "heading": "Commands",
+            "hybrid_score": 0.5032309479209038,
+            "keyword_score": 0.5882568447317499,
+            "semantic_score": 0.3756921027046348,
+            "source_path": "docs/decisions/cross-project-decision-memory.md"
+          },
+          {
+            "chunk_id": "4a38e0fc7a1698a0709bba0129145f7799d0b2f43a8f58d1baf8cad07df72e79",
+            "heading": "Phase 10: Cross-Project Search + Federation \u2705",
+            "hybrid_score": 0.4264196052355662,
+            "keyword_score": 0.3121232799088428,
+            "semantic_score": 0.5978640932256514,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "73b6681f63533417cb22324a71747c35dbdc291db7e99ddab5be0bab0d0b28aa",
+            "heading": "Phase 12: Cross-Project Contradiction + Policy Radar \u2705",
+            "hybrid_score": 0.4219631442651832,
+            "keyword_score": 0.3738900148508415,
+            "semantic_score": 0.49407283838669586,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "06c19da294b15d6f72377edb4d998c145a3a37739e1bec16b07d66bb728ef3d2",
+            "heading": "What `check.sh` Does (22 stages)",
+            "hybrid_score": 0.38139439116377494,
+            "keyword_score": 0.21598055542015193,
+            "semantic_score": 0.6295151447792093,
+            "source_path": "docs/TESTING.md"
+          },
+          {
+            "chunk_id": "d530fb4a02ce6c5793d8d0d9a373acd2ef2dbd1c5726f755eb2fa7c9cbe0550e",
+            "heading": "Rules",
+            "hybrid_score": 0.3684643124847202,
+            "keyword_score": 0.2178133358981527,
+            "semantic_score": 0.5944407773645715,
+            "source_path": "docs/decisions/stale-decisions.md"
+          },
+          {
+            "chunk_id": "451e0aba0a0a6c839984a3e91f24baee352017317e418325d3cad86b70fc54b8",
+            "heading": "Cross-Project Search",
+            "hybrid_score": 0.3637687244988341,
+            "keyword_score": 0.32777553866180653,
+            "semantic_score": 0.41775850325437536,
+            "source_path": "docs/federation/cross-project-search.md"
+          },
+          {
+            "chunk_id": "cbb21a7668536626ad8eb2ff26ed7840de18bcfa96e8a77afb2cc93f934424e3",
+            "heading": "Gather context from all projects, expanding the knowledge graph up to depth 1",
+            "hybrid_score": 0.3631016185132331,
+            "keyword_score": 0.2832255554227718,
+            "semantic_score": 0.482915713148925,
+            "source_path": "docs/federation/workflows.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:07a24354a3110daf08dd5bca65e80e9674f513c313c6c0b75cd790bb054595b2",
+      "timestamp": "2026-06-14T08:56:16Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan search.",
+  "title": "Retrieval context: cross project decision memory stale decisions",
+  "trace_id": "trace-20260614T171000Z-real0009"
+}

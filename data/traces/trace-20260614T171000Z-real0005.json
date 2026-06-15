@@ -1,0 +1,114 @@
+{
+  "created_at": "2026-06-14T08:56:15Z",
+  "events": [
+    {
+      "actor": "zurvan",
+      "event_id": "evt-001",
+      "event_type": "retrieval.query",
+      "payload": {
+        "command": "context",
+        "limit": 5,
+        "mode": "hybrid",
+        "query": "graph assisted context expansion"
+      },
+      "payload_hash": "sha256:117d38b0662b8cff6033491ba50ba05eecba1b604d38429d0410cb08acc26715",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-002",
+      "event_type": "retrieval.result",
+      "payload": {
+        "command": "context",
+        "result_count": 5,
+        "results": [
+          {
+            "chunk_id": "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+            "heading": "Graph-Assisted Context Bundle",
+            "hybrid_score": 0.808223244470838,
+            "keyword_score": 1.0,
+            "semantic_score": 0.520558111177095,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "92041234d35fa3dfb9d1b1b2880450f081b31e1c1522955c449a0c667291dd52",
+            "heading": "5. Knowledge Graph Lite (Phase 5)",
+            "hybrid_score": 0.5200001267047791,
+            "keyword_score": 0.5647197796553904,
+            "semantic_score": 0.452920647278862,
+            "source_path": "docs/workflows_and_plans.md"
+          },
+          {
+            "chunk_id": "1ee0d502f95971d28d9d1c21f9d93068ebbefb13b39cf4fed99b7470b7eb6433",
+            "heading": "Opt-in context trace, including graph provenance when --graph is enabled",
+            "hybrid_score": 0.5008372911950718,
+            "keyword_score": 0.4431303601642928,
+            "semantic_score": 0.5873976877412405,
+            "source_path": "docs/API.md"
+          },
+          {
+            "chunk_id": "5d6f7d6c294bc941b69762ceaccfaab71e8c7ab13e64d4dc63cb77f6d21a6969",
+            "heading": "Capabilities",
+            "hybrid_score": 0.4924442465899433,
+            "keyword_score": 0.4543693287502679,
+            "semantic_score": 0.5495566233494564,
+            "source_path": "docs/mcp/codex-style-agents.md"
+          },
+          {
+            "chunk_id": "7d8b794060a9567148b373d2258ed504fa67b34a6b6ee0a0cb81036a44f4b990",
+            "heading": "Sub-phase 18c \u2014 Housekeeping / Expansion Stubs",
+            "hybrid_score": 0.47428012814692655,
+            "keyword_score": 0.36214343778151875,
+            "semantic_score": 0.6424851636950384,
+            "source_path": "docs/superpowers/specs/2026-06-02-phase18-living-wiki-design.md"
+          }
+        ]
+      },
+      "payload_hash": "sha256:7bee49557310c182cd471140b4d68c80cba2b7128bfa169ee8ddec86d9983c79",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-003",
+      "event_type": "context.assembled",
+      "payload": {
+        "dropped": [],
+        "included_chunk_ids": [
+          "b2e7fe2032a4a07f7c8c382dc72ec8b15a22b4fff9bad6af2a84153f171a4c6a",
+          "92041234d35fa3dfb9d1b1b2880450f081b31e1c1522955c449a0c667291dd52",
+          "1ee0d502f95971d28d9d1c21f9d93068ebbefb13b39cf4fed99b7470b7eb6433",
+          "5d6f7d6c294bc941b69762ceaccfaab71e8c7ab13e64d4dc63cb77f6d21a6969",
+          "7d8b794060a9567148b373d2258ed504fa67b34a6b6ee0a0cb81036a44f4b990"
+        ]
+      },
+      "payload_hash": "sha256:e091183eaa6687fa4512e2503553046661ca1757710005a70f24a543e35fdefc",
+      "timestamp": "2026-06-14T08:56:15Z"
+    },
+    {
+      "actor": "zurvan",
+      "event_id": "evt-004",
+      "event_type": "graph_context",
+      "payload": {
+        "depth": 1,
+        "enabled": true,
+        "node_count": 1,
+        "nodes": [
+          {
+            "depth": 1,
+            "node_type": "note",
+            "path": "README.md",
+            "relation": "incoming:mentions",
+            "source_id": "b57590968a12cee85a37c1b91d8cc7092cd8b68e50b242c39a178121db82a797",
+            "title": "README"
+          }
+        ]
+      },
+      "payload_hash": "sha256:a83cc814f17a9a8cd1291f467e0d831e08d955dc75bfb13aea9c767bf49ebe16",
+      "timestamp": "2026-06-14T08:56:15Z"
+    }
+  ],
+  "schema_version": "zurvan.trace.v1",
+  "summary": "Opt-in retrieval trace for zurvan context.",
+  "title": "Retrieval context: graph assisted context expansion",
+  "trace_id": "trace-20260614T171000Z-real0005"
+}
