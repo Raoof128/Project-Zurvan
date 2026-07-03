@@ -49,6 +49,16 @@ def tool_zurvan_context(topic: str, hybrid: bool = True, graph: bool = True, lim
     except Exception as e:
         return f"Error: {str(e)}"
 
+def tool_zurvan_read_page(path: str) -> str:
+    """Reads one safe, repo-relative file via the resource_file safety gate
+    (no absolute paths, no traversal, raw/ blocked by default, 256 KB cap).
+    Exposed as a tool because many MCP clients never fetch resources, which
+    forces search/context to dump full text up front; with this, search can
+    stay compact and the agent pulls only the pages it needs."""
+    from scripts.mcp_resources import resource_file
+    return resource_file(path)
+
+
 def tool_zurvan_graph_stats() -> str:
     """Returns graph stats as a human-readable string."""
     try:
