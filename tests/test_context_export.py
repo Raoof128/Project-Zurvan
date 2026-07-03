@@ -226,3 +226,54 @@ def test_search_memory_json_output(capsys):
 
     assert payload["query"] == "vector search"
     assert isinstance(payload["results"], list)
+
+# ── R4b: source dedupe before budgeting ──────────────────────────────────────
+
+def _fake_match(src, chunk_id, score):
+    return {"source_path": src, "chunk_id": chunk_id, "text": f"text {chunk_id}", "hybrid_score": score}
+
+
+def test_dedupe_sources_caps_per_source_and_records_reason():
+    from scripts.context_export import _dedupe_sources
+
+    matches = [
+        _fake_match("wiki/a.md", "a1", 0.9),
+        _fake_match("wiki/a.md", "a2", 0.8),
+        _fake_match("wiki/a.md", "a3", 0.7),
+        _fake_match("wiki/b.md", "b1", 0.6),
+    ]
+    kept, dropped = _dedupe_sources(matches, max_per_source=2)
+
+    assert [m["chunk_id"] for m in kept] == ["a1", "a2", "b1"]
+    assert dropped == [{"chunk_id": "a3", "reason": "source_dedupe"}]
+
+
+def test_dedupe_sources_zero_disables():
+    from scripts.context_export import _dedupe_sources
+
+    matches = [_fake_match("wiki/a.md", f"a{i}", 1.0 - i / 10) for i in range(5)]
+    kept, dropped = _dedupe_sources(matches, max_per_source=0)
+    assert len(kept) == 5 and dropped == []
+
+
+def test_export_context_dedupe_frees_slots_for_other_sources(monkeypatch):
+    # The R1B near-miss: one source's chunks took 3/5 slots, pushing another
+    # expected source below the cutoff. With the cap, it makes the bundle.
+    import scripts.context_export as ce
+
+    matches = [
+        _fake_match("wiki/dominant.md", "d1", 0.9),
+        _fake_match("wiki/dominant.md", "d2", 0.8),
+        _fake_match("wiki/dominant.md", "d3", 0.7),
+        _fake_match("wiki/other1.md", "o1", 0.6),
+        _fake_match("wiki/other2.md", "o2", 0.5),
+        _fake_match("wiki/nearmiss.md", "n1", 0.4),  # rank 6 — cut off before R4b
+    ]
+    monkeypatch.setattr(ce, "_search_internal", lambda *a, **k: matches)
+
+    out = ce.export_context("q", limit=5, hybrid=True, max_per_source=2)
+    assert "wiki/nearmiss.md" in out          # recovered
+    assert out.count("Source: wiki/dominant.md") == 2
+
+    out_off = ce.export_context("q", limit=5, hybrid=True, max_per_source=0)
+    assert "wiki/nearmiss.md" not in out_off  # old behaviour preserved via 0
