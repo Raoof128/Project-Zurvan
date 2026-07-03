@@ -52,10 +52,14 @@ def rebuild_search_index():
         )
     """)
     
-    # Create FTS5 table
+    # Create FTS5 table. Porter stemming closes the documented lexical gap
+    # (R1B miss analysis: query "citations" scored kw=0.000 against heading
+    # "Citation") — plural/inflected query terms now match their stems.
+    # R4a ranking change, documented with before/after evals in CHANGELOG.md.
     cursor.execute("""
         CREATE VIRTUAL TABLE chunks_fts USING fts5(
-            chunk_id, heading, text, content='chunks', content_rowid='rowid'
+            chunk_id, heading, text, content='chunks', content_rowid='rowid',
+            tokenize='porter unicode61'
         )
     """)
     

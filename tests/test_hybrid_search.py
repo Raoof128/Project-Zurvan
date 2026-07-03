@@ -75,3 +75,37 @@ def test_rebuild_reuses_embeddings_for_unchanged_chunks(monkeypatch):
     rebuild_search_index()
 
     assert calls["n"] == 1  # the provider probe only — zero chunk re-embeds
+
+
+def test_fts_porter_stemming_matches_inflected_terms():
+    # R4a: the porter tokenizer stems query and index terms, so a plural
+    # query matches singular content (the one genuine lexical miss in the
+    # R1B analysis: "citations" vs heading "Citation").
+    rebuild_search_index()
+
+    conn = sqlite3.connect("data/search.sqlite")
+    cursor = conn.cursor()
+    chunk_id = "stem_test_chunk_777"
+    text = "## Citation Rules ZQSTEM777\nEvery citation needs a source."
+    cursor.execute(
+        "INSERT OR REPLACE INTO chunks (chunk_id, source_path, heading, text, content_hash, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (chunk_id, "wiki/stem-test.md", "Citation Rules ZQSTEM777", text, "hash", "now"),
+    )
+    cursor.execute(
+        "INSERT INTO chunks_fts (rowid, chunk_id, heading, text) VALUES (last_insert_rowid(), ?, ?, ?)",
+        (chunk_id, "Citation Rules ZQSTEM777", text),
+    )
+    from scripts.embed import get_embedding
+    vec = get_embedding(text)["vector"]
+    cursor.execute(
+        "INSERT INTO embeddings (chunk_id, provider, model, dimension, vector) VALUES (?, ?, ?, ?, ?)",
+        (chunk_id, "mock", "deterministic_hash", len(vec), json.dumps(vec)),
+    )
+    conn.commit()
+    conn.close()
+
+    # Plural query against singular indexed text: keyword score must be > 0.
+    results = search_hybrid("citations ZQSTEM777", limit=5)
+    hit = next((r for r in results if r["chunk_id"] == chunk_id), None)
+    assert hit is not None
+    assert hit["keyword_score"] > 0.0
