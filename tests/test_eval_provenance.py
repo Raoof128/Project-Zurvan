@@ -329,3 +329,16 @@ def test_checked_in_negative_gold_catches_raw_leak_and_incomplete_trace():
     low_recall_path = "eval/provenance_gold_low_recall.jsonl"
     with pytest.raises(SystemExit):
         run_provenance_evaluation(low_recall_path, min_source_recall=1.0)
+
+
+def test_run_provenance_evaluation_json_output(capsys):
+    import json as _json
+    from scripts.eval_provenance import run_provenance_evaluation
+
+    metrics = run_provenance_evaluation(as_json=True)
+    payload = _json.loads(capsys.readouterr().out)
+
+    # Output format only — scores must equal the returned (unchanged) metrics.
+    assert payload == metrics
+    assert payload["raw_leak_rate"] == 0.0
+    assert payload["hash_integrity_rate"] == 1.0

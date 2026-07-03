@@ -41,3 +41,14 @@ def test_validate_gold_dataset_passes_on_valid(tmp_path):
     gold_file = tmp_path / "gold.jsonl"
     gold_file.write_text(f'{{"query": "q1", "expected_paths": ["{real_file}"]}}')
     assert validate_gold_dataset(str(gold_file)) is True
+
+def test_run_search_evaluation_json_output(capsys):
+    import json as _json
+    from scripts.eval_search import run_search_evaluation
+
+    metrics = run_search_evaluation(hybrid=True, min_top3=0.0, as_json=True)
+    payload = _json.loads(capsys.readouterr().out)
+
+    assert payload["queries"] == metrics["queries"]
+    assert payload["passed"] is True
+    assert 0.0 <= payload["top3_accuracy"] <= 1.0

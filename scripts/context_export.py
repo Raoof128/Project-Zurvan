@@ -1,6 +1,7 @@
 import os
 import glob
 import sys
+import json
 import datetime
 import hashlib
 from pathlib import Path
@@ -303,26 +304,41 @@ def _write_retrieval_trace(
     return str(paths.json_path)
 
 
+def _compact_result(res: Dict[str, Any], snippet_len: int = 200) -> Dict[str, Any]:
+    """Small, machine-parseable view of one search result (repo-relative path,
+    scores, single-line snippet) — built for agent/LLM consumers."""
+    compact = {
+        "source_path": _trace_source_path(str(res.get("source_path", ""))),
+        "hybrid_score": res.get("hybrid_score", 0),
+        "snippet": " ".join((res.get("text") or "").split())[:snippet_len],
+    }
+    for key in ("heading", "keyword_score", "semantic_score"):
+        if key in res:
+            compact[key] = res[key]
+    return compact
+
+
 def search_memory(
     query: str,
     hybrid: bool = False,
     save: bool = False,
     trace: bool = False,
     trace_id: str | None = None,
+    as_json: bool = False,
 ):
     """
-    Search wiki and print list of matches.
+    Search wiki and print list of matches (human text, or JSON with as_json).
     """
     results = _search_internal(query, hybrid, limit=10)
-    print(f"Found {len(results)} matches for '{query}':\n")
     lines = []
     for i, res in enumerate(results, 1):
-        line = f"{i}. {res['source_path']} | Score: {res.get('hybrid_score', 'N/A')} | Snippet: {res['text'][:100]}..."
-        print(line)
-        lines.append(line)
+        lines.append(
+            f"{i}. {res['source_path']} | Score: {res.get('hybrid_score', 'N/A')} | Snippet: {res['text'][:100]}..."
+        )
     if save:
         source_paths = [r["source_path"] for r in results]
         _save_synthesis(query, "\n".join(lines), source_paths)
+    trace_path = None
     if trace:
         trace_path = _write_retrieval_trace(
             command="search",
@@ -332,7 +348,20 @@ def search_memory(
             results=results,
             trace_id=trace_id,
         )
-        print(f"Trace written: {trace_path}")
+    if as_json:
+        payload: Dict[str, Any] = {
+            "query": query,
+            "results": [_compact_result(r) for r in results],
+        }
+        if trace_path:
+            payload["trace_path"] = trace_path
+        print(json.dumps(payload, indent=2))
+    else:
+        print(f"Found {len(results)} matches for '{query}':\n")
+        for line in lines:
+            print(line)
+        if trace_path:
+            print(f"Trace written: {trace_path}")
 
 def export_context(
     topic: str,
@@ -412,6 +441,7 @@ def export_context(
         _save_synthesis(topic, base_output, seed_paths)
 
     trace_line = ""
+    trace_path = None
     if trace:
         trace_path = _write_retrieval_trace(
             command="context",
@@ -427,6 +457,16 @@ def export_context(
         )
         trace_line = f"\n\nTrace written: {trace_path}"
 
+    if fmt == "json":
+        payload: Dict[str, Any] = {
+            "topic": topic,
+            "results": [_compact_result(r, snippet_len=300) for r in results],
+            "graph": [_graph_trace_payload(n) for n in graph_nodes],
+            "dropped_count": len(dropped),
+        }
+        if trace_path:
+            payload["trace_path"] = trace_path
+        return json.dumps(payload, indent=2)
     if fmt == "table":
         return _format_table(results) + trace_line
     elif fmt == "marp":

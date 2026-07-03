@@ -198,3 +198,31 @@ def test_save_with_marp_format_writes_canonical_markdown(tmp_path, monkeypatch):
     content = syntheses[0].read_text()
     assert "type: synthesis" in content
     assert not content.startswith("---\nmarp: true")
+
+# ── JSON output (agent-facing) ────────────────────────────────────────────────
+
+def test_export_context_json_format_is_parseable():
+    import json as _json
+    from scripts.context_export import export_context
+
+    out = export_context("vector search", limit=3, hybrid=True, graph=False, fmt="json")
+    payload = _json.loads(out)
+
+    assert payload["topic"] == "vector search"
+    assert isinstance(payload["results"], list)
+    assert "dropped_count" in payload
+    for r in payload["results"]:
+        assert set(r) >= {"source_path", "hybrid_score", "snippet"}
+        assert len(r["snippet"]) <= 300
+        assert not r["source_path"].startswith("/")  # repo-relative, no abs paths
+
+
+def test_search_memory_json_output(capsys):
+    import json as _json
+    from scripts.context_export import search_memory
+
+    search_memory("vector search", hybrid=True, as_json=True)
+    payload = _json.loads(capsys.readouterr().out)
+
+    assert payload["query"] == "vector search"
+    assert isinstance(payload["results"], list)

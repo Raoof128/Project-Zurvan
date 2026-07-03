@@ -316,6 +316,8 @@ def main():
     search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
     search_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
     search_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
+    search_parser.add_argument("--json", action="store_true", dest="as_json",
+                               help="Emit machine-parseable JSON (compact snippets) instead of text")
 
     # zurvan context
     context_parser = subparsers.add_parser("context", help="Export context bundle")
@@ -329,7 +331,7 @@ def main():
     context_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
     context_parser.add_argument(
         "--format",
-        choices=["markdown", "table", "marp"],
+        choices=["markdown", "table", "marp", "json"],
         default="markdown",
         dest="output_format",
         help="Output format for stdout. --save always writes canonical Markdown.",
@@ -352,6 +354,7 @@ def main():
     eval_search_parser.add_argument("--gold", default="eval/search_gold.jsonl")
     eval_search_parser.add_argument("--hybrid", action="store_true")
     eval_search_parser.add_argument("--min-top3", type=float, default=0.0)
+    eval_search_parser.add_argument("--json", action="store_true", dest="as_json")
 
     eval_provenance_parser = eval_sub.add_parser("provenance", help="Evaluate retrieval trace provenance")
     eval_provenance_parser.add_argument("--gold", default="eval/provenance_gold.jsonl")
@@ -359,6 +362,7 @@ def main():
     eval_provenance_parser.add_argument("--min-source-recall", type=float, default=0.0)
     eval_provenance_parser.add_argument("--min-provenance-completeness", type=float, default=0.0)
     eval_provenance_parser.add_argument("--min-graph-context-presence", type=float, default=0.0)
+    eval_provenance_parser.add_argument("--json", action="store_true", dest="as_json")
     
     eval_validate_parser = eval_sub.add_parser("validate-gold", help="Validate gold dataset")
     eval_validate_parser.add_argument("--gold", default="eval/search_gold.jsonl")
@@ -791,6 +795,7 @@ def main():
                 save=getattr(args, "save", False),
                 trace=getattr(args, "trace", False),
                 trace_id=getattr(args, "trace_id", None),
+                as_json=getattr(args, "as_json", False),
             )
         except ValueError as exc:
             print(str(exc))
@@ -819,7 +824,8 @@ def main():
         _run_script("eval_search.py", [
             "--gold", args.gold,
             "--min-top3", str(args.min_top3),
-        ] + (["--hybrid"] if args.hybrid else []))
+        ] + (["--hybrid"] if args.hybrid else [])
+          + (["--json"] if getattr(args, "as_json", False) else []))
     elif args.command == "eval" and args.action == "validate-gold":
         _run_script("eval_search.py", ["--gold", args.gold, "--validate"])
     elif args.command == "eval" and args.action == "provenance":
@@ -832,6 +838,7 @@ def main():
                 min_source_recall=args.min_source_recall,
                 min_provenance_completeness=args.min_provenance_completeness,
                 min_graph_context_presence=args.min_graph_context_presence,
+                as_json=getattr(args, "as_json", False),
             )
     elif args.command == "graph":
         if args.action == "rebuild":
