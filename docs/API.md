@@ -38,6 +38,13 @@ python scripts/cli.py context --topic "vector search" --format table
 
 # Render context as a Marp slide deck (stdout only)
 python scripts/cli.py context --topic "vector search" --format marp
+
+# Machine-parseable JSON output (agent-friendly: compact snippets, repo-relative paths)
+python scripts/cli.py search "architecture" --hybrid --json
+python scripts/cli.py context --topic "vector search" --hybrid --format json
+
+# Cap chunks per source before context budgeting (default 2; 0 disables)
+python scripts/cli.py context --topic "vector search" --hybrid --max-per-source 3
 ```
 
 ### Writing Memory
@@ -113,6 +120,20 @@ python scripts/cli.py eval provenance \
   --gold eval/provenance_gold.jsonl \
   --min-source-recall 1.0 \
   --min-provenance-completeness 1.0
+
+# Both evals accept --json for a single machine-parseable metrics object
+python scripts/cli.py eval search --hybrid --min-top3 0.6 --json
+python scripts/cli.py eval provenance --json
+```
+
+### Agent Session Helpers
+```bash
+# Compact (~300 token) orientation card — wired as a Claude Code SessionStart
+# hook in .claude/settings.json (rules digest, index/graph health, recent log)
+python scripts/cli.py agent prime
+
+# Deep, per-topic context bundle for starting focused work
+python scripts/cli.py agent preflight --topic "retrieval tracing" --hybrid --graph
 ```
 
 ## 2. MCP Server (`scripts/mcp_server.py`)
@@ -124,7 +145,7 @@ Zurvan provides a native MCP server implementation to directly plug into agents 
 - **Security**: Starts in strictly **read-only** mode by default (`ZURVAN_MCP_READONLY=1`). To enable write tools, you must explicitly set `ZURVAN_MCP_READONLY=0` in your environment. Absolute paths, `../` traversal, and raw folder access are strictly blocked.
 
 ### Exposed MCP Tools
-- **Read**: `zurvan_search`, `zurvan_context`, `zurvan_graph_stats`, `zurvan_graph_neighbours`, `zurvan_graph_expand`, `zurvan_eval_search`, `zurvan_validate_gold`.
+- **Read**: `zurvan_search`, `zurvan_context`, `zurvan_read_page`, `zurvan_graph_stats`, `zurvan_graph_neighbours`, `zurvan_graph_expand`, `zurvan_eval_search`, `zurvan_validate_gold`.
 - **Write** (if enabled): `zurvan_remember`, `zurvan_decision_add`, `zurvan_claim_add`, `zurvan_question_add`.
 
 ### Exposed MCP Resources
