@@ -35,6 +35,21 @@ After edits: append a dated `Raouf:` entry (scope / summary / files /
 verification / follow-ups) to **both** files. Verify with `pytest`,
 `public_repo_guard.py`, and `git diff --check` before claiming done.
 
+## Memory write-back (do this before finishing a session)
+
+Zurvan only helps future sessions if this one writes back. The CLI write
+commands work regardless of MCP read-only mode:
+
+```bash
+PYTHONPATH=. python scripts/cli.py decision add --title "..." --reason "..." --status accepted --tags ...
+PYTHONPATH=. python scripts/cli.py claim add --text "..." --source "docs/x.md" --evidence "<verbatim quote>" --confidence high
+PYTHONPATH=. python scripts/cli.py question add --question "..." --reason "..."
+PYTHONPATH=. python scripts/cli.py agent postedit --summary "..." --files a.py b.py --checks "pytest"
+```
+
+Record: non-trivial decisions (and why), facts you verified with evidence,
+open questions you hit. Skip: things the git history already says.
+
 ## Layout
 
 - `scripts/` — all code (CLI in `cli.py`, MCP server in `mcp_server.py`)
