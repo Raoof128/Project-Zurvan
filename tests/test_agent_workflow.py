@@ -41,3 +41,17 @@ def test_agent_postedit(tmp_path, monkeypatch):
     assert "- `file1.txt`" in content
     assert "- `file2.txt`" in content
     assert "Checks: make test" in content
+
+
+def test_agent_prime_is_compact_and_complete():
+    from scripts.agent_workflow import agent_prime
+
+    out = agent_prime()
+
+    assert "Zurvan prime" in out
+    assert "Rules:" in out
+    assert "Graph:" in out
+    assert "Search index:" in out
+    assert "Open questions:" in out
+    # Built for SessionStart hooks — must stay cheap to inject every session.
+    assert len(out) < 4000
