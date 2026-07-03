@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Zurvan CLI wrapper — callable from any directory once symlinked onto PATH:
+#   ln -s "<repo>/scripts/zurvan" /opt/homebrew/bin/zurvan
+# Resolves the repo root through symlinks, sets PYTHONPATH, and execs cli.py
+# (which is CWD-independent) with the caller's arguments.
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ZURVAN_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
+
+PYTHONPATH="$ZURVAN_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$ZURVAN_ROOT/scripts/cli.py" "$@"
