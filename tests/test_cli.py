@@ -37,3 +37,11 @@ def test_cli_subcommands_work_from_foreign_cwd(tmp_path):
     )
     assert res.returncode == 0
     assert "validated successfully" in res.stdout
+
+def test_zurvan_wrapper_works_from_any_cwd(tmp_path):
+    # scripts/zurvan is the PATH wrapper: resolves the repo through symlinks,
+    # sets PYTHONPATH, and execs cli.py from any working directory.
+    wrapper = os.path.abspath(os.path.join("scripts", "zurvan"))
+    res = subprocess.run([wrapper, "version"], capture_output=True, text=True, cwd=str(tmp_path))
+    assert res.returncode == 0
+    assert "Zurvan Version" in res.stdout
