@@ -54,3 +54,24 @@ def test_search_hybrid_survives_fts5_keywords():
 def test_search_hybrid_handles_symbol_only_query():
     # No word characters at all — must not crash on an empty term list.
     assert isinstance(search_hybrid("!!! ???", limit=3), list)
+
+
+def test_rebuild_reuses_embeddings_for_unchanged_chunks(monkeypatch):
+    # Incremental rebuild: embeddings for unchanged chunk_ids come from the
+    # previous index; only new/changed chunks (plus one provider probe) are
+    # embedded. With a real provider this is the difference between seconds
+    # and a full re-embed of the corpus.
+    import scripts.rebuild_search_index as rsi
+    from scripts.embed import get_embedding as real_get_embedding
+
+    rebuild_search_index()  # warm index
+
+    calls = {"n": 0}
+    def counting_get_embedding(text):
+        calls["n"] += 1
+        return real_get_embedding(text)
+
+    monkeypatch.setattr(rsi, "get_embedding", counting_get_embedding)
+    rebuild_search_index()
+
+    assert calls["n"] == 1  # the provider probe only — zero chunk re-embeds
