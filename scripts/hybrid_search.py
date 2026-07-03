@@ -13,13 +13,28 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
         return 0.0
     return dot / (norm_v1 * norm_v2)
 
-def search_hybrid(query: str, limit: int = 10) -> List[Dict]:
+def _index_embedding_config(cursor) -> tuple:
+    """Return the (provider, model) the index was built with, or (None, None).
+
+    The index is the source of truth for query-time embedding: mixing an index
+    built with one provider and queries embedded with another produces
+    meaningless similarity scores, so the query always follows the index.
+    """
+    try:
+        row = cursor.execute("SELECT provider, model FROM embeddings LIMIT 1").fetchone()
+        return (row[0], row[1]) if row else (None, None)
+    except sqlite3.Error:
+        return (None, None)
+
+
+def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> List[Dict]:
     from scripts.config import PROJECT_ROOT
-    db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
+    if db_path is None:
+        db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
     if not os.path.exists(db_path):
         print("Error: Search index not found. Run 'zurvan index rebuild' first.")
         return []
-        
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -56,8 +71,10 @@ def search_hybrid(query: str, limit: int = 10) -> List[Dict]:
                 norm_score = (max_score - score) / (max_score - min_score)
                 fts_scores[chunk_id] = norm_score
 
-    # Semantic search
-    query_emb = get_embedding(query)['vector']
+    # Semantic search — embed the query with the SAME provider/model the
+    # index was built with (never the env), so scores stay meaningful.
+    index_provider, index_model = _index_embedding_config(cursor)
+    query_emb = get_embedding(query, provider=index_provider, model=index_model)['vector']
     
     cursor.execute("SELECT c.chunk_id, c.source_path, c.heading, c.text, e.vector FROM chunks c JOIN embeddings e ON c.chunk_id = e.chunk_id")
     all_chunks = cursor.fetchall()

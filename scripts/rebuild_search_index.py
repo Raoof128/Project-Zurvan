@@ -23,9 +23,12 @@ def _harvest_reusable_embeddings(db_path: str) -> dict:
         return {}
 
 
-def rebuild_search_index():
-    os.makedirs(str(PROJECT_ROOT / "data"), exist_ok=True)
-    db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
+def rebuild_search_index(db_path: str | None = None):
+    if db_path is None:
+        os.makedirs(str(PROJECT_ROOT / "data"), exist_ok=True)
+        db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
     # One probe identifies the active provider/model so stored embeddings are
     # only reused when they match the current configuration.
