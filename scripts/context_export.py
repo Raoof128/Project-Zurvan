@@ -13,12 +13,18 @@ from scripts.config import PROJECT_ROOT
 from scripts.trace_schema import TraceEvent, TraceRecord, create_trace_id, utc_now
 from scripts.trace_writer import TraceStore
 
-def _search_internal(query: str, hybrid: bool = False, limit: int = 10) -> List[Dict[str, Any]]:
+def _search_internal(
+    query: str, hybrid: bool = False, limit: int = 10, root: str | Path | None = None
+) -> List[Dict[str, Any]]:
+    """Search one project's knowledge base. `root` defaults to this repo;
+    federation passes another registered project's root, so knowledge-only
+    projects (wiki/ + docs/, no embedded Zurvan engine) are searchable too."""
+    base = Path(root) if root is not None else PROJECT_ROOT
     if hybrid:
         from scripts.hybrid_search import search_hybrid
-        return search_hybrid(query, limit)
+        return search_hybrid(query, limit, db_path=str(base / "data" / "search.sqlite"))
 
-    wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True)
+    wiki_files = glob.glob(str(base / "wiki" / "**" / "*.md"), recursive=True)
     matches = []
     keywords = query.lower().split()
 

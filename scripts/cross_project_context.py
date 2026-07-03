@@ -1,6 +1,5 @@
 import json
-import subprocess
-import sys
+from pathlib import Path
 from scripts.cross_project_search import cross_project_search
 from scripts.federation import get_federated_projects
 
@@ -50,37 +49,22 @@ def build_federated_context(query: str, hybrid: bool = False, graph: bool = Fals
                 continue
                 
             source_paths = list(set([m["source_path"] for m in matches_by_project[p_name]]))
-            
-            py_code = f"""
-import sys
-import json
-from scripts.graph_context import expand_graph_context
-try:
-    items = expand_graph_context({json.dumps(source_paths)}, 1)
-    print(json.dumps(items))
-except Exception as e:
-    print(json.dumps({{"error": str(e)}}))
-"""
+
+            # In-process against the target project's own graph DB — no
+            # subprocess, no Zurvan engine required inside the target repo.
+            from scripts.graph_context import expand_graph_context
             try:
-                result = subprocess.run(
-                    [sys.executable, "-c", py_code],
-                    cwd=p["path"],
-                    capture_output=True,
-                    text=True,
-                    check=True
+                data = expand_graph_context(
+                    source_paths, 1,
+                    db_path=str(Path(p["path"]) / "data" / "graph.sqlite"),
                 )
-                data = json.loads(result.stdout.strip())
-                if isinstance(data, dict) and "error" in data:
-                    search_data["warnings"].append(f"Project {p_name} graph error: {data['error']}")
-                elif data:
+                if data:
                     bundle.append(f"### Project: {p_name}\n")
                     for item in data:
                         bundle.append(f"- [{item['depth']}] {item['title']} ({item['node_type']}) - {item['relation']}")
                     bundle.append("")
-            except subprocess.CalledProcessError as e:
-                search_data["warnings"].append(f"Failed to expand graph for project {p_name}: {e.stderr}")
-            except json.JSONDecodeError:
-                search_data["warnings"].append(f"Failed to parse graph results from project {p_name}")
+            except Exception as e:
+                search_data["warnings"].append(f"Project {p_name} graph error: {e}")
                 
     if search_data["warnings"]:
         bundle.append("## Warnings\n")
