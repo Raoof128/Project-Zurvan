@@ -38,27 +38,28 @@ def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
                 print(f"Warning: Skipping malformed JSON line: {line}")
     return dataset
 
-def validate_gold_dataset(filepath: str) -> bool:
+def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
     dataset = load_gold_dataset(filepath)
     if not dataset:
         print("Error: No valid queries found in gold dataset to validate.")
         sys.exit(1)
-        
+
     all_valid = True
     for item in dataset:
         for path in item['expected_paths']:
             if not os.path.exists(_resolve(path)):
                 print(f"Error: Gold dataset references missing path: {path}")
                 all_valid = False
-                
+
     if not all_valid:
         sys.exit(1)
-        
-    print(f"Gold dataset '{filepath}' validated successfully.")
+
+    if not quiet:
+        print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
-def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0):
-    validate_gold_dataset(gold_file)
+def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0, as_json: bool = False):
+    validate_gold_dataset(gold_file, quiet=as_json)
     dataset = load_gold_dataset(gold_file)
     if not dataset:
         print("Error: No valid queries found in gold dataset.")
@@ -69,8 +70,9 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
     top3_hits = 0
     reciprocal_ranks = []
     failures = 0
-    
-    print(f"Running Evaluation on {total_queries} queries (Hybrid: {hybrid})...")
+
+    if not as_json:
+        print(f"Running Evaluation on {total_queries} queries (Hybrid: {hybrid})...")
     
     for item in dataset:
         query = item['query']
@@ -124,27 +126,35 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
     top1_accuracy = calculate_accuracy(top1_hits, total_queries)
     top3_accuracy = calculate_accuracy(top3_hits, total_queries)
     mrr = calculate_mean_reciprocal_rank(reciprocal_ranks)
-    
-    print("\nSearch Evaluation Results")
-    print("=========================")
-    print(f"Queries: {total_queries}")
-    print(f"Top-1 accuracy: {top1_accuracy * 100:.0f}%")
-    print(f"Top-3 accuracy: {top3_accuracy * 100:.0f}%")
-    print(f"Mean reciprocal rank: {mrr:.2f}")
-    print(f"Failures: {failures}")
-    print("=========================")
-    
-    if top3_accuracy < min_top3:
-        print(f"Error: Top-3 accuracy ({top3_accuracy}) is below required minimum ({min_top3})")
-        sys.exit(1)
-        
-    return {
+
+    metrics = {
         "queries": total_queries,
         "top1_accuracy": top1_accuracy,
         "top3_accuracy": top3_accuracy,
         "mrr": mrr,
-        "failures": failures
+        "failures": failures,
+        "min_top3": min_top3,
+        "passed": top3_accuracy >= min_top3,
     }
+
+    if as_json:
+        print(json.dumps(metrics, indent=2))
+    else:
+        print("\nSearch Evaluation Results")
+        print("=========================")
+        print(f"Queries: {total_queries}")
+        print(f"Top-1 accuracy: {top1_accuracy * 100:.0f}%")
+        print(f"Top-3 accuracy: {top3_accuracy * 100:.0f}%")
+        print(f"Mean reciprocal rank: {mrr:.2f}")
+        print(f"Failures: {failures}")
+        print("=========================")
+
+    if top3_accuracy < min_top3:
+        if not as_json:
+            print(f"Error: Top-3 accuracy ({top3_accuracy}) is below required minimum ({min_top3})")
+        sys.exit(1)
+
+    return metrics
 
 if __name__ == "__main__":
     import argparse
@@ -153,9 +163,11 @@ if __name__ == "__main__":
     parser.add_argument("--hybrid", action="store_true")
     parser.add_argument("--min-top3", type=float, default=0.0)
     parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--json", action="store_true", dest="as_json",
+                        help="Emit a single machine-parseable JSON object instead of the text report")
     args = parser.parse_args()
-    
+
     if args.validate:
         validate_gold_dataset(args.gold)
     else:
-        run_search_evaluation(args.gold, args.hybrid, args.min_top3)
+        run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json)

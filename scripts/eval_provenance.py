@@ -48,7 +48,7 @@ def load_gold_dataset(filepath: str = DEFAULT_GOLD) -> List[Dict[str, Any]]:
     return dataset
 
 
-def validate_gold_dataset(filepath: str = DEFAULT_GOLD) -> bool:
+def validate_gold_dataset(filepath: str = DEFAULT_GOLD, quiet: bool = False) -> bool:
     dataset = load_gold_dataset(filepath)
     if not dataset:
         print("Error: No valid provenance cases found in gold dataset to validate.")
@@ -69,7 +69,8 @@ def validate_gold_dataset(filepath: str = DEFAULT_GOLD) -> bool:
     if not all_valid:
         sys.exit(1)
 
-    print(f"Gold dataset '{filepath}' validated successfully.")
+    if not quiet:
+        print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
 
@@ -193,8 +194,10 @@ def run_provenance_evaluation(
     min_source_recall: float = 0.0,
     min_provenance_completeness: float = 0.0,
     min_graph_context_presence: float = 0.0,
+    as_json: bool = False,
 ) -> Dict[str, float]:
-    validate_gold_dataset(gold_file)
+    # as_json changes the OUTPUT FORMAT only — scoring is unchanged.
+    validate_gold_dataset(gold_file, quiet=as_json)
     dataset = load_gold_dataset(gold_file)
     traces = [(_resolve(item["trace_path"]), _load_trace(_resolve(item["trace_path"]))) for item in dataset]
 
@@ -235,15 +238,27 @@ def run_provenance_evaluation(
     provenance_completeness = sum(completeness_scores) / len(completeness_scores) if completeness_scores else 0.0
     graph_context_presence = sum(graph_scores) / len(graph_scores) if graph_scores else 1.0
 
-    print("\nProvenance Evaluation Results")
-    print("=============================")
-    print(f"Cases: {len(dataset)}")
-    print(f"raw_leak_rate: {_format_percent(raw_leak_rate)}")
-    print(f"hash_integrity_rate: {_format_percent(hash_integrity_rate)}")
-    print(f"expected_source_recall: {_format_percent(expected_source_recall)}")
-    print(f"provenance_completeness: {_format_percent(provenance_completeness)}")
-    print(f"graph_context_presence: {_format_percent(graph_context_presence)}")
-    print("=============================")
+    metrics = {
+        "cases": float(len(dataset)),
+        "raw_leak_rate": raw_leak_rate,
+        "hash_integrity_rate": hash_integrity_rate,
+        "expected_source_recall": expected_source_recall,
+        "provenance_completeness": provenance_completeness,
+        "graph_context_presence": graph_context_presence,
+    }
+
+    if as_json:
+        print(json.dumps(metrics, indent=2))
+    else:
+        print("\nProvenance Evaluation Results")
+        print("=============================")
+        print(f"Cases: {len(dataset)}")
+        print(f"raw_leak_rate: {_format_percent(raw_leak_rate)}")
+        print(f"hash_integrity_rate: {_format_percent(hash_integrity_rate)}")
+        print(f"expected_source_recall: {_format_percent(expected_source_recall)}")
+        print(f"provenance_completeness: {_format_percent(provenance_completeness)}")
+        print(f"graph_context_presence: {_format_percent(graph_context_presence)}")
+        print("=============================")
 
     failures = []
     if expected_source_recall < min_source_recall:
@@ -265,14 +280,7 @@ def run_provenance_evaluation(
             print(f"Error: {failure}")
         sys.exit(1)
 
-    return {
-        "cases": float(len(dataset)),
-        "raw_leak_rate": raw_leak_rate,
-        "hash_integrity_rate": hash_integrity_rate,
-        "expected_source_recall": expected_source_recall,
-        "provenance_completeness": provenance_completeness,
-        "graph_context_presence": graph_context_presence,
-    }
+    return metrics
 
 
 if __name__ == "__main__":
@@ -282,6 +290,8 @@ if __name__ == "__main__":
     parser.add_argument("--min-source-recall", type=float, default=0.0)
     parser.add_argument("--min-provenance-completeness", type=float, default=0.0)
     parser.add_argument("--min-graph-context-presence", type=float, default=0.0)
+    parser.add_argument("--json", action="store_true", dest="as_json",
+                        help="Emit a single machine-parseable JSON object instead of the text report")
     args = parser.parse_args()
 
     if args.validate:
@@ -292,4 +302,5 @@ if __name__ == "__main__":
             min_source_recall=args.min_source_recall,
             min_provenance_completeness=args.min_provenance_completeness,
             min_graph_context_presence=args.min_graph_context_presence,
+            as_json=args.as_json,
         )
