@@ -84,6 +84,10 @@ def agent_prime() -> str:
     lines += ["", "## Recent activity", get_recent_logs(8)]
     lines += ["", "Orient with `zurvan search <topic> --hybrid --json`, then "
               "`zurvan_read_page`/`zurvan context` for depth."]
+    lines += ["Before finishing: write back what you learned — "
+              "`zurvan decision add` (choices), `zurvan claim add` (evidenced facts), "
+              "`zurvan question add` (unknowns), `zurvan agent postedit` (session log). "
+              "A memory that is never written to never grows."]
     return "\n".join(lines)
 
 
