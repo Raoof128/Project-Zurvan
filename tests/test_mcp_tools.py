@@ -33,3 +33,25 @@ def test_tool_zurvan_remember(monkeypatch):
     assert "successfully" in result
     
     os.remove("wiki/note-mcp-test.md")
+
+# ── zurvan_read_page ──────────────────────────────────────────────────────────
+
+def test_read_page_returns_file_content():
+    from scripts.mcp_tools import tool_zurvan_read_page
+    out = tool_zurvan_read_page("wiki/index.md")
+    assert "Wiki Index" in out
+
+
+def test_read_page_blocks_unsafe_paths():
+    from scripts.mcp_tools import tool_zurvan_read_page
+    for bad in ("../secrets.txt", "/etc/passwd", "raw/private.pdf"):
+        out = tool_zurvan_read_page(bad)
+        assert out.startswith("Error:"), bad
+
+
+def test_read_page_registered_on_server():
+    import scripts.mcp_server as server
+    import anyio
+    tools = anyio.run(server.mcp.list_tools)
+    names = {t.name for t in tools}
+    assert "zurvan_read_page" in names

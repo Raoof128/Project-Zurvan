@@ -49,6 +49,19 @@ def zurvan_context(
     """
     return tools.tool_zurvan_context(topic, hybrid, graph, limit)
 
+@mcp.tool()
+def zurvan_read_page(
+    path: Annotated[str, Field(description='Repo-relative file path (e.g. "wiki/decisions/foo.md" or "docs/API.md"). No absolute paths, no "../"; raw/ is blocked unless ZURVAN_MCP_ALLOW_RAW_READ=1. Max 256 KB.')],
+) -> str:
+    """Read the full text of one knowledge-base file.
+
+    Use after zurvan_search to open only the page(s) you actually need instead
+    of pulling a large context bundle. Returns the raw Markdown (including
+    frontmatter); on unsafe or missing paths it returns an error string rather
+    than raising. Read-only and safe.
+    """
+    return tools.tool_zurvan_read_page(path)
+
 class GraphStats(TypedDict):
     """Structured node/edge counts for the knowledge graph."""
     nodes: int
