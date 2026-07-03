@@ -1,5 +1,4 @@
 import os
-import sys
 import hashlib
 from datetime import datetime, timezone
 from scripts.cross_project_search import cross_project_search
@@ -63,25 +62,20 @@ def collect_evidence(topic: str, projects: list[str] = None, hybrid: bool = Fals
                 continue
             
             source_paths = list(set([m.get("source_path", m.get("relative_path", "")) for m in matches_by_proj[p_name]]))
-            
-            import subprocess, json
-            py_code = f"""
-import sys, json
-from scripts.graph_context import expand_graph_context
-try:
-    print(json.dumps(expand_graph_context({json.dumps(source_paths)}, 1)))
-except Exception:
-    print("[]")
-"""
+
+            # In-process against the target project's graph DB (read-only).
+            from pathlib import Path
+            from scripts.graph_context import expand_graph_context
             try:
-                res = subprocess.run([sys.executable, "-c", py_code], cwd=p["path"], capture_output=True, text=True)
-                data = json.loads(res.stdout.strip())
-                if isinstance(data, list):
-                    for gn in data:
-                        evidence.append(_create_evidence_item(
-                            p_name, gn.get("path", ""), "graph_neighbor", gn.get("title", gn.get("name", "")), 
-                            gn.get("snippet", gn.get("excerpt", "")), {"source_kind": gn.get("node_type", "node")}
-                        ))
+                data = expand_graph_context(
+                    source_paths, 1,
+                    db_path=str(Path(p["path"]) / "data" / "graph.sqlite"),
+                )
+                for gn in data:
+                    evidence.append(_create_evidence_item(
+                        p_name, gn.get("path", ""), "graph_neighbor", gn.get("title", gn.get("name", "")),
+                        gn.get("snippet", gn.get("excerpt", "")), {"source_kind": gn.get("node_type", "node")}
+                    ))
             except Exception:
                 pass
                 

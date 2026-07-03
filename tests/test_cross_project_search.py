@@ -1,70 +1,72 @@
 import json
+import os
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from scripts.cross_project_search import cross_project_search
 
-@pytest.fixture
-def mock_federated_projects():
-    return [
-        {"name": "p1", "path": "/tmp/p1", "has_search": True, "has_graph": True},
-        {"name": "p2", "path": "/tmp/p2", "has_search": False, "has_graph": False}
-    ]
+
+def _knowledge_project(tmp_path, name, note_text):
+    """A knowledge-only project: wiki/ pages, no embedded Zurvan engine."""
+    root = tmp_path / name
+    (root / "wiki").mkdir(parents=True)
+    (root / "wiki" / "note.md").write_text(f"# Note\n{note_text}\n")
+    return {"name": name, "path": str(root), "has_search": False, "has_graph": False}
+
 
 @patch("scripts.cross_project_search.get_federated_projects")
-@patch("scripts.cross_project_search.subprocess.run")
-def test_cross_project_search(mock_run, mock_get_proj, mock_federated_projects):
-    mock_get_proj.return_value = mock_federated_projects
-    
-    mock_run.return_value = MagicMock(
-        stdout=json.dumps([
-            {"source_path": "wiki/test.md", "heading": "Test", "snippet": "content", 
-             "keyword_score": 1.0, "semantic_score": 0.0, "hybrid_score": 1.0}
-        ])
-    )
-    
-    res = cross_project_search("test query", limit=10)
-    
+def test_keyword_search_spans_knowledge_only_projects(mock_get_proj, tmp_path):
+    # Federation runs Zurvan's own retriever against each project root
+    # in-process; registered projects no longer need the Zurvan engine
+    # (previously a subprocess imported scripts.* inside the target repo).
+    p1 = _knowledge_project(tmp_path, "p1", "zebra retrieval facts QQ111")
+    p2 = _knowledge_project(tmp_path, "p2", "zebra memory safety QQ222")
+    mock_get_proj.return_value = [p1, p2]
+
+    res = cross_project_search("zebra", hybrid=False, limit=10)
+
+    projects_found = {r["project"] for r in res["results"]}
+    assert projects_found == {"p1", "p2"}
+    assert res["warnings"] == []
+    # Paths are project-relative — no absolute machine paths leak.
+    for r in res["results"]:
+        assert not os.path.isabs(r["source_path"])
+        assert r["snippet"]
+
+
+@patch("scripts.cross_project_search.get_federated_projects")
+def test_hybrid_requires_search_index_and_warns(mock_get_proj, tmp_path):
+    p1 = _knowledge_project(tmp_path, "p1", "anything")
+    mock_get_proj.return_value = [p1]
+
+    res = cross_project_search("anything", hybrid=True, limit=10)
+
+    assert res["results"] == []
+    assert len(res["warnings"]) == 1
+    assert "Search index missing for project p1" in res["warnings"][0]
+
+
+@patch("scripts.cross_project_search.get_federated_projects")
+def test_query_with_quotes_and_fts_keywords_is_safe(mock_get_proj, tmp_path):
+    # Regression (was a code-injection surface): the query used to be
+    # f-string-interpolated into generated Python run in a subprocess.
+    # In-process federation has no code-generation step at all.
+    p1 = _knowledge_project(tmp_path, "p1", 'say "hello" AND goodbye QQ333')
+    mock_get_proj.return_value = [p1]
+
+    res = cross_project_search('say "hello" AND', hybrid=False, limit=5)
+
     assert len(res["results"]) == 1
     assert res["results"][0]["project"] == "p1"
-    assert res["results"][0]["source_path"] == "wiki/test.md"
-    
-    assert len(res["warnings"]) == 1
-    assert "Search index missing for project p2" in res["warnings"][0]
-    
-    assert "p1" in res["projects_searched"]
-    assert "p2" in res["projects_searched"]
-    
-@patch("scripts.cross_project_search.get_federated_projects")
-@patch("scripts.cross_project_search.subprocess.run")
-def test_cross_project_search_error(mock_run, mock_get_proj, mock_federated_projects):
-    mock_get_proj.return_value = [{"name": "p1", "path": "/tmp/p1", "has_search": True, "has_graph": True}]
-    
-    mock_run.return_value = MagicMock(
-        stdout=json.dumps({"error": "Failed to search"})
-    )
-    
-    res = cross_project_search("test query")
-    assert len(res["results"]) == 0
-    assert len(res["warnings"]) == 1
-    assert "p1 search error: Failed to search" in res["warnings"][0]
 
 
 @patch("scripts.cross_project_search.get_federated_projects")
-@patch("scripts.cross_project_search.subprocess.run")
-def test_query_passed_as_argv_not_interpolated(mock_run, mock_get_proj):
-    # Regression: the query used to be f-string-interpolated into the generated
-    # python snippet, so quotes in the query broke the code (and allowed
-    # arbitrary code injection into the subprocess).
-    import sys
+def test_search_error_becomes_warning(mock_get_proj):
     mock_get_proj.return_value = [
-        {"name": "p1", "path": "/tmp/p1", "has_search": True, "has_graph": True}
+        {"name": "p1", "path": "/tmp/definitely-missing-p1", "has_search": False, "has_graph": False}
     ]
-    mock_run.return_value = MagicMock(stdout="[]")
 
-    tricky = 'say "hello" AND break); import os  # not code'
-    cross_project_search(tricky, hybrid=True, limit=5)
+    with patch("scripts.context_export._search_internal", side_effect=RuntimeError("boom")):
+        res = cross_project_search("query", hybrid=False)
 
-    cmd = mock_run.call_args[0][0]
-    assert cmd[0] == sys.executable          # not a bare "python"
-    assert tricky in cmd                     # query travels as its own argv element
-    assert tricky not in cmd[2]              # and is never embedded in the code
+    assert res["results"] == []
+    assert any("p1 search error: boom" in w for w in res["warnings"])

@@ -1,78 +1,64 @@
 import os
-import subprocess
-import sys
-import json
 from pathlib import Path
 from scripts.federation import get_federated_projects
 
-def cross_project_search(query: str, hybrid: bool = False, limit: int = 10, 
-                        projects: list[str] = None, strict: bool = False, 
+
+def _relative_source_path(source_path: str, project_root: str) -> str:
+    """Keyword search returns absolute paths under the project root; federated
+    output stays project-relative so no machine-specific paths leak."""
+    if source_path and os.path.isabs(source_path):
+        try:
+            return os.path.relpath(source_path, project_root)
+        except ValueError:
+            return source_path
+    return source_path
+
+
+def cross_project_search(query: str, hybrid: bool = False, limit: int = 10,
+                        projects: list[str] = None, strict: bool = False,
                         verbose: bool = False) -> dict:
-    
+
     federated = get_federated_projects(projects, strict, verbose)
     all_results = []
     warnings = []
-    
+
+    # Read-only federation, run in-process: Zurvan's own retriever is pointed
+    # at each project's root. Previously this spawned `python -c "from
+    # scripts...."` inside the target repo, which required every registered
+    # project to embed the entire Zurvan engine; knowledge-only projects
+    # (wiki/ + docs/) are now first-class citizens.
+    from scripts.context_export import _search_internal
+
     for p in federated:
-        if not p["has_search"]:
-            msg = f"Search index missing for project {p['name']}. Run: zurvan --project {p['name']} index search"
+        if hybrid and not p["has_search"]:
+            msg = (f"Search index missing for project {p['name']} (hybrid needs it). "
+                   f"Run: zurvan --project {p['name']} index search")
             warnings.append(msg)
             if verbose:
                 print(msg)
             continue
-            
-        # Read-only federation: run the search in-process *of the target
-        # project* via a subprocess so no cross-project state bleeds. The query
-        # is passed as argv — never interpolated into the code — so quotes or
-        # code in the query cannot break or inject into the snippet.
-        py_code = """
-import sys
-import json
-from scripts.context_export import _search_internal
-query = sys.argv[1]
-hybrid = sys.argv[2] == "1"
-limit = int(sys.argv[3])
-try:
-    results = _search_internal(query, hybrid, limit)
-    output = []
-    for r in results:
-        output.append({
-            "source_path": r.get("source_path"),
-            "heading": r.get("heading"),
-            "snippet": (r.get("text") or "")[:300],
-            "keyword_score": r.get("keyword_score"),
-            "semantic_score": r.get("semantic_score"),
-            "hybrid_score": r.get("hybrid_score")
-        })
-    print(json.dumps(output))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-"""
 
         try:
-            result = subprocess.run(
-                [sys.executable, "-c", py_code, query, "1" if hybrid else "0", str(limit)],
-                cwd=p["path"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            data = json.loads(result.stdout.strip())
-            if isinstance(data, dict) and "error" in data:
-                warnings.append(f"Project {p['name']} search error: {data['error']}")
-            else:
-                for r in data:
-                    r["project"] = p["name"]
-                    all_results.append(r)
-        except subprocess.CalledProcessError as e:
-            warnings.append(f"Failed to search project {p['name']}: {e.stderr}")
-        except json.JSONDecodeError:
-            warnings.append(f"Failed to parse search results from project {p['name']}")
-            
+            results = _search_internal(query, hybrid, limit, root=p["path"])
+        except Exception as e:
+            warnings.append(f"Project {p['name']} search error: {e}")
+            continue
+
+        for r in results:
+            all_results.append({
+                "source_path": _relative_source_path(str(r.get("source_path", "")), p["path"]),
+                "heading": r.get("heading"),
+                "snippet": (r.get("text") or "")[:300],
+                "keyword_score": r.get("keyword_score"),
+                "semantic_score": r.get("semantic_score"),
+                "hybrid_score": r.get("hybrid_score"),
+                "project": p["name"],
+            })
+
     # Sort all results by hybrid_score if available, else keyword_score
     all_results.sort(key=lambda x: x.get("hybrid_score") or x.get("keyword_score") or 0.0, reverse=True)
     all_results = all_results[:limit]
-    
+
     return {
         "results": all_results,
         "warnings": warnings,
