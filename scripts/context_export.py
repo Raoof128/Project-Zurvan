@@ -155,6 +155,31 @@ def _result_chunk_id(result: Dict[str, Any]) -> str | None:
 _FUSION_WEIGHTS = {"fts": 0.6, "embedding": 0.4}
 
 
+def _dedupe_sources(
+    matches: List[Dict[str, Any]], max_per_source: int
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Cap ranked matches per source file BEFORE the limit budget is applied.
+
+    R4b: the R1B miss analysis showed a single source's chunks taking 3 of 5
+    context slots and pushing other expected sources below the cutoff. Order
+    within the ranking is preserved; excess chunks are recorded as dropped
+    with reason ``source_dedupe``. ``max_per_source <= 0`` disables capping.
+    """
+    if max_per_source <= 0:
+        return list(matches), []
+    kept: List[Dict[str, Any]] = []
+    dropped: List[Dict[str, Any]] = []
+    counts: Dict[str, int] = {}
+    for match in matches:
+        source = str(match.get("source_path", ""))
+        counts[source] = counts.get(source, 0) + 1
+        if counts[source] > max_per_source:
+            dropped.append({"chunk_id": _result_chunk_id(match), "reason": "source_dedupe"})
+        else:
+            kept.append(match)
+    return kept, dropped
+
+
 def _apply_budget(
     matches: List[Dict[str, Any]], limit: int
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -373,14 +398,17 @@ def export_context(
     fmt: str = "markdown",
     trace: bool = False,
     trace_id: str | None = None,
+    max_per_source: int = 2,
 ) -> str:
     """Exports a Markdown context bundle based on search results."""
 
-    # Fetch a wider candidate pool, then budget down to `limit`. The included
-    # slice is identical to a direct limit fetch (same ranking), but the
-    # over-budget remainder is now observable as genuine drops.
+    # Fetch a wider candidate pool, cap chunks per source (R4b), then budget
+    # down to `limit`. Both drop classes are observable in the trace with
+    # their own reasons (source_dedupe / budget).
     candidates = _search_internal(topic, hybrid, limit * 3)
-    results, dropped = _apply_budget(candidates, limit)
+    deduped, dedupe_dropped = _dedupe_sources(candidates, max_per_source)
+    results, budget_dropped = _apply_budget(deduped, limit)
+    dropped = dedupe_dropped + budget_dropped
 
     output = []
     output.append(f"# Zurvan Context Bundle: {topic}\n")

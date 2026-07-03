@@ -329,6 +329,8 @@ def main():
     context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
     context_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
     context_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
+    context_parser.add_argument("--max-per-source", type=int, default=2,
+                                help="Cap chunks per source file before budgeting (0 disables; default 2)")
     context_parser.add_argument(
         "--format",
         choices=["markdown", "table", "marp", "json"],
@@ -809,6 +811,7 @@ def main():
                 fmt=getattr(args, "output_format", "markdown"),
                 trace=getattr(args, "trace", False),
                 trace_id=getattr(args, "trace_id", None),
+                max_per_source=getattr(args, "max_per_source", 2),
             )
         except ValueError as exc:
             print(str(exc))
