@@ -1,4 +1,8 @@
 {
+  "env": {
+    "ZURVAN_EMBED_PROVIDER": "sentence_transformers",
+    "ZURVAN_EMBED_MODEL": "all-MiniLM-L6-v2"
+  },
   "hooks": {
     "SessionStart": [
       {
