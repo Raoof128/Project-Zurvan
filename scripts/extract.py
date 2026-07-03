@@ -78,6 +78,7 @@ def extract_source(filepath):
     data["source_id"] = source_id
 
     # 7. Save raw JSON
+    os.makedirs(os.path.join("data", "extractions"), exist_ok=True)
     extraction_path = os.path.join("data", "extractions", f"{source_id}.json")
     with open(extraction_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -87,6 +88,7 @@ def extract_source(filepath):
     
     # Summaries
     if data.get("summary"):
+        os.makedirs(os.path.join("wiki", "summaries"), exist_ok=True)
         summary_file = os.path.join("wiki", "summaries", f"{source_id}_summary.md")
         if is_safe_filename(summary_file):
             with open(summary_file, "w", encoding="utf-8") as f:
@@ -99,7 +101,7 @@ def extract_source(filepath):
         cid = sanitize_filename(claim["claim_id"])
         claim_file = os.path.join(claims_dir, f"{cid}.md")
         if is_safe_filename(claim_file):
-            tags_yaml = "\\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
+            tags_yaml = "\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
             with open(claim_file, "w", encoding="utf-8") as f:
                 f.write(f"---\ntype: claim\nclaim_id: {cid}\nsource_id: {source_id}\nclaim_type: {claim['claim_type']}\nconfidence: {claim['confidence']}\ntags:{tags_yaml}\n---\n\n# {cid}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n")
                 for ev in claim["evidence"]:

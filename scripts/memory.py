@@ -71,12 +71,14 @@ tags:
         return False
 
 def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List[str]):
-    # Validate evidence quote exists in source file
-    if not os.path.exists(source):
+    # Validate evidence quote exists in source file. Relative sources resolve
+    # against the repo root so this works from any CWD (e.g. the MCP server).
+    source_read_path = source if os.path.isabs(source) else str(PROJECT_ROOT / source)
+    if not os.path.exists(source_read_path):
         print(f"Error: Source file {source} does not exist.")
         return False
-        
-    with open(source, 'r', encoding='utf-8') as f:
+
+    with open(source_read_path, 'r', encoding='utf-8') as f:
         source_text = f.read()
         
     if evidence not in source_text:

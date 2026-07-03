@@ -47,3 +47,24 @@ def test_cross_project_search_error(mock_run, mock_get_proj, mock_federated_proj
     assert len(res["results"]) == 0
     assert len(res["warnings"]) == 1
     assert "p1 search error: Failed to search" in res["warnings"][0]
+
+
+@patch("scripts.cross_project_search.get_federated_projects")
+@patch("scripts.cross_project_search.subprocess.run")
+def test_query_passed_as_argv_not_interpolated(mock_run, mock_get_proj):
+    # Regression: the query used to be f-string-interpolated into the generated
+    # python snippet, so quotes in the query broke the code (and allowed
+    # arbitrary code injection into the subprocess).
+    import sys
+    mock_get_proj.return_value = [
+        {"name": "p1", "path": "/tmp/p1", "has_search": True, "has_graph": True}
+    ]
+    mock_run.return_value = MagicMock(stdout="[]")
+
+    tricky = 'say "hello" AND break); import os  # not code'
+    cross_project_search(tricky, hybrid=True, limit=5)
+
+    cmd = mock_run.call_args[0][0]
+    assert cmd[0] == sys.executable          # not a bare "python"
+    assert tricky in cmd                     # query travels as its own argv element
+    assert tricky not in cmd[2]              # and is never embedded in the code

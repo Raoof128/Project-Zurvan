@@ -26,13 +26,19 @@ def search_hybrid(query: str, limit: int = 10) -> List[Dict]:
     # Keyword search using FTS5 (BM25 rank)
     import re
     terms = [t for t in re.split(r'\W+', query) if t]
-    fts_query = " OR ".join(terms) if terms else query
-    cursor.execute("""
-        SELECT chunk_id, bm25(chunks_fts) as bm25_score
-        FROM chunks_fts
-        WHERE chunks_fts MATCH ?
-    """, (fts_query,))
-    fts_results = cursor.fetchall()
+    if terms:
+        # Each term is quoted as an FTS5 string: identical matching for plain
+        # tokens, but bareword keywords (AND/OR/NOT/NEAR) no longer raise
+        # "fts5: syntax error".
+        fts_query = " OR ".join(f'"{t}"' for t in terms)
+        cursor.execute("""
+            SELECT chunk_id, bm25(chunks_fts) as bm25_score
+            FROM chunks_fts
+            WHERE chunks_fts MATCH ?
+        """, (fts_query,))
+        fts_results = cursor.fetchall()
+    else:
+        fts_results = []
     
     # Normalize BM25 scores (lower bm25 value is better in SQLite FTS5)
     # Actually SQLite bm25 returns negative values. Let's invert and normalize.

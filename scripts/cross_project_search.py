@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import json
 from pathlib import Path
 from scripts.federation import get_federated_projects
@@ -20,37 +21,37 @@ def cross_project_search(query: str, hybrid: bool = False, limit: int = 10,
                 print(msg)
             continue
             
-        # We can't import search_memory directly because it uses a hardcoded ROOT.
-        # Instead, we will run the search CLI command in the project directory,
-        # but wait, search_memory doesn't return JSON by default unless we modify it or capture output.
-        # Wait, the prompt says "Implement scripts/cross_project_search.py ... run local search against each selected registered project".
-        # If we need structured results, maybe we can run a custom python snippet inside the project directory using subprocess?
-        # Yes, we can run python -c "..." in the cwd of the project.
-        
-        py_code = f"""
+        # Read-only federation: run the search in-process *of the target
+        # project* via a subprocess so no cross-project state bleeds. The query
+        # is passed as argv — never interpolated into the code — so quotes or
+        # code in the query cannot break or inject into the snippet.
+        py_code = """
 import sys
 import json
 from scripts.context_export import _search_internal
+query = sys.argv[1]
+hybrid = sys.argv[2] == "1"
+limit = int(sys.argv[3])
 try:
-    results = _search_internal("{query}", {hybrid}, {limit})
+    results = _search_internal(query, hybrid, limit)
     output = []
     for r in results:
-        output.append({{
+        output.append({
             "source_path": r.get("source_path"),
             "heading": r.get("heading"),
-            "snippet": r.get("snippet"),
+            "snippet": (r.get("text") or "")[:300],
             "keyword_score": r.get("keyword_score"),
             "semantic_score": r.get("semantic_score"),
             "hybrid_score": r.get("hybrid_score")
-        }})
+        })
     print(json.dumps(output))
 except Exception as e:
-    print(json.dumps({{"error": str(e)}}))
+    print(json.dumps({"error": str(e)}))
 """
-        
+
         try:
             result = subprocess.run(
-                ["python", "-c", py_code],
+                [sys.executable, "-c", py_code, query, "1" if hybrid else "0", str(limit)],
                 cwd=p["path"],
                 capture_output=True,
                 text=True,

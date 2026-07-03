@@ -60,11 +60,14 @@ def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> No
 
     # YAML-safe: quote query value to handle colons, hashes, pipes
     safe_topic = topic.replace('"', '\\"')
+    # Keyword search returns absolute paths; store them repo-relative so the
+    # tracked wiki page never leaks machine-specific absolute paths.
+    rel_sources = [_trace_source_path(str(p)) for p in source_paths]
     fm = (
         f'---\n'
         f'type: synthesis\n'
         f'query: "{safe_topic}"\n'
-        f'sources: {", ".join(source_paths)}\n'
+        f'sources: {", ".join(rel_sources)}\n'
         f'created_at: {datetime.datetime.now().isoformat()}\n'
         f'tags: synthesis, query-derived\n'
         f'---\n\n'
