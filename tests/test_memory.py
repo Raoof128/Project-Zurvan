@@ -27,3 +27,25 @@ def test_write_file_safely_prevents_raw_writes():
     target = str(root / "raw" / "hacked.txt")
     assert write_file_safely(target, "malicious") == False
     assert not os.path.exists(target)
+
+def test_add_claim_resolves_source_against_project_root(tmp_path, monkeypatch):
+    # Regression: add_claim checked the source path relative to the CWD, so
+    # zurvan_claim_add via MCP (launched from any other directory) rejected
+    # valid repo-relative sources like "wiki/foo.md".
+    import scripts.memory as memory
+    import scripts.safe_write as safe_write
+
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "src.md").write_text("the exact evidence line")
+    monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path)
+    # A CWD from which the relative path does NOT exist:
+    monkeypatch.chdir(tmp_path / "wiki")
+
+    ok = memory.add_claim(
+        "test claim", "wiki/src.md", "the exact evidence line", "high", ["t"]
+    )
+
+    assert ok is True
+    claims = list((tmp_path / "wiki" / "claims").glob("claim-*.md"))
+    assert len(claims) == 1

@@ -37,6 +37,20 @@ def test_search_hybrid(monkeypatch):
     
     # 3. Test search
     results = search_hybrid("XYZ999")
-    
+
     assert len(results) >= 1
     assert any(r['chunk_id'] == chunk_id for r in results)
+
+
+def test_search_hybrid_survives_fts5_keywords():
+    # Regression: unquoted terms were joined into the MATCH expression, so a
+    # query containing a bareword FTS5 keyword (AND/OR/NOT/NEAR) raised
+    # sqlite3.OperationalError: fts5 syntax error.
+    for query in ("search AND rescue", "NOT this", "what is NEAR the graph", "OR"):
+        results = search_hybrid(query, limit=3)
+        assert isinstance(results, list)
+
+
+def test_search_hybrid_handles_symbol_only_query():
+    # No word characters at all — must not crash on an empty term list.
+    assert isinstance(search_hybrid("!!! ???", limit=3), list)

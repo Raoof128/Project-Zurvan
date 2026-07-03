@@ -38,7 +38,10 @@ def audit_report(report_id: str) -> Dict[str, Any]:
             "status": "fail",
             "warnings": warnings,
             "failures": failures,
-            "checked_at": "now"
+            "checked_at": "now",
+            # Keep the shape consistent: review_index reads audit["stats"]
+            # unconditionally and would 500 the dashboard on a corrupt report.
+            "stats": {"claims": 0, "mapped_citations": 0, "missing_citations": 0}
         }
     
     if report_data.get("redaction_status") != "redacted":

@@ -6,6 +6,18 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import subprocess
 from scripts.memory import add_decision, add_note, add_claim, add_question
 from scripts.context_export import search_memory, export_context
+from scripts.config import PROJECT_ROOT
+
+
+def _run_script(script_name: str, extra_args: list[str] | None = None) -> None:
+    """Run a helper script with the current interpreter from the repo root and
+    propagate its exit code. Previously these used a bare `python` and
+    CWD-relative paths (broken from any other directory) and always exited 0
+    even when the child failed (e.g. `zurvan eval search --min-top3`)."""
+    cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / script_name)] + (extra_args or [])
+    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 def main():
     args_list = sys.argv[1:]
@@ -798,23 +810,18 @@ def main():
             sys.exit(1)
         print(bundle)
     elif args.command == "audit":
-        subprocess.run(["python", "scripts/audit_wiki.py"])
+        _run_script("audit_wiki.py")
     elif args.command == "index" and args.action == "rebuild":
-        subprocess.run(["python", "scripts/rebuild_index.py"])
+        _run_script("rebuild_index.py")
     elif args.command == "index" and args.action == "search":
-        subprocess.run(["python", "scripts/rebuild_search_index.py"])
+        _run_script("rebuild_search_index.py")
     elif args.command == "eval" and args.action == "search":
-        subprocess.run([
-            "python", "scripts/eval_search.py",
+        _run_script("eval_search.py", [
             "--gold", args.gold,
-            "--min-top3", str(args.min_top3)
+            "--min-top3", str(args.min_top3),
         ] + (["--hybrid"] if args.hybrid else []))
     elif args.command == "eval" and args.action == "validate-gold":
-        subprocess.run([
-            "python", "scripts/eval_search.py",
-            "--gold", args.gold,
-            "--validate"
-        ])
+        _run_script("eval_search.py", ["--gold", args.gold, "--validate"])
     elif args.command == "eval" and args.action == "provenance":
         from scripts.eval_provenance import run_provenance_evaluation, validate_gold_dataset
         if args.validate:
@@ -828,7 +835,7 @@ def main():
             )
     elif args.command == "graph":
         if args.action == "rebuild":
-            subprocess.run(["python", "scripts/graph_build.py"])
+            _run_script("graph_build.py")
         elif args.action == "stats":
             from scripts.graph_query import get_stats
             stats = get_stats()
@@ -848,7 +855,7 @@ def main():
             result = trace_node(args.path)
             print(f"Traced {result['nodes_visited']} nodes.")
         elif args.action == "export":
-            subprocess.run(["python", "scripts/graph_export.py", "--format", args.format])
+            _run_script("graph_export.py", ["--format", args.format])
         else:
             graph_parser.print_help()
     elif args.command == "session" and args.action == "start":

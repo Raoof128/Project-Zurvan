@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from scripts.cross_project_search import cross_project_search
 from scripts.federation import get_federated_projects
 
@@ -62,7 +63,7 @@ except Exception as e:
 """
             try:
                 result = subprocess.run(
-                    ["python", "-c", py_code],
+                    [sys.executable, "-c", py_code],
                     cwd=p["path"],
                     capture_output=True,
                     text=True,

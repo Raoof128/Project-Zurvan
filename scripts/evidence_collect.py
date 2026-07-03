@@ -1,7 +1,7 @@
 import os
+import sys
 import hashlib
 from datetime import datetime, timezone
-from scripts.cross_project_search import cross_project_search
 from scripts.cross_project_search import cross_project_search
 from scripts.claim_federation import collect_federated_claims_and_policies
 from scripts.contradiction_radar import detect_contradictions
@@ -74,7 +74,7 @@ except Exception:
     print("[]")
 """
             try:
-                res = subprocess.run(["python", "-c", py_code], cwd=p["path"], capture_output=True, text=True)
+                res = subprocess.run([sys.executable, "-c", py_code], cwd=p["path"], capture_output=True, text=True)
                 data = json.loads(res.stdout.strip())
                 if isinstance(data, list):
                     for gn in data:

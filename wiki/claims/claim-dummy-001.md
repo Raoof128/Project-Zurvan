@@ -4,7 +4,9 @@ claim_id: claim-dummy-001
 source_id: scanned_or_ugly_pdf
 claim_type: fact
 confidence: high
-tags:\n  - ai\n  - retrieval
+tags:
+  - ai
+  - retrieval
 ---
 
 # claim-dummy-001
