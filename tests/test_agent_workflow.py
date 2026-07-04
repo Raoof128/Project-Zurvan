@@ -55,3 +55,40 @@ def test_agent_prime_is_compact_and_complete():
     assert "Open questions:" in out
     # Built for SessionStart hooks — must stay cheap to inject every session.
     assert len(out) < 4000
+
+
+def _staleness_fixture(tmp_path, indexed_at):
+    import sqlite3
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "page.md").write_text("# Page\ncontent")
+    db = tmp_path / "search.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE chunks (chunk_id TEXT, indexed_at TEXT)")
+    conn.execute("INSERT INTO chunks VALUES ('c1', ?)", (indexed_at,))
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_index_staleness_flags_newer_files(tmp_path):
+    from scripts.agent_workflow import _index_staleness
+
+    db = _staleness_fixture(tmp_path, "2020-01-01T00:00:00")  # ancient index
+    verdict = _index_staleness(root=tmp_path, db_path=db)
+    assert verdict.startswith("STALE")
+    assert "zurvan index search" in verdict
+
+
+def test_index_staleness_fresh_when_index_is_newer(tmp_path):
+    import datetime
+    from scripts.agent_workflow import _index_staleness
+
+    future = (datetime.datetime.now() + datetime.timedelta(hours=1)).isoformat()
+    db = _staleness_fixture(tmp_path, future)
+    assert _index_staleness(root=tmp_path, db_path=db) == "fresh"
+
+
+def test_index_staleness_missing_db(tmp_path):
+    from scripts.agent_workflow import _index_staleness
+    (tmp_path / "wiki").mkdir()
+    assert "missing" in _index_staleness(root=tmp_path, db_path=tmp_path / "nope.sqlite")
