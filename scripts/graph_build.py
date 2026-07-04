@@ -137,7 +137,9 @@ def build_graph(db_path: str = DB_PATH):
     
     target_dirs = ['wiki', 'docs']
     target_files = ['AGENTS.md', 'CHANGELOG.md', 'README.md']
-    exclude_dirs = ['raw', 'data', '.git', '__pycache__']
+    # 'traces' holds derived, self-referential trace replay mirrors — the search
+    # chunker excludes them for the same reason, so keep them out of the graph too.
+    exclude_dirs = ['raw', 'data', '.git', '__pycache__', 'traces']
     
     nodes_dict = {}
     

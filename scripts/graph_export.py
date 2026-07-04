@@ -46,6 +46,12 @@ def export_markdown(db_path: str = DB_PATH, out_path: str = DEFAULT_MD_EXPORT):
             
     print(f"Exported markdown to {out_path}")
 
+def _dot_escape(value) -> str:
+    """Escape a DOT quoted-string label: backslash first, then double-quote,
+    so a node/edge title containing " or \\ can't break the generated DOT."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
 def export_dot(db_path: str = DB_PATH, out_path: str = DEFAULT_DOT_EXPORT):
     if not os.path.exists(db_path):
         print(f"Error: {db_path} not found.")
@@ -75,10 +81,10 @@ def export_dot(db_path: str = DB_PATH, out_path: str = DEFAULT_DOT_EXPORT):
         f.write("  node [shape=box, style=rounded];\n")
         
         for n in nodes:
-            f.write(f'  "{n["node_id"]}" [label="{n["title"]}\\n({n["node_type"]})"];\n')
-            
+            f.write(f'  "{_dot_escape(n["node_id"])}" [label="{_dot_escape(n["title"])}\\n({_dot_escape(n["node_type"])})"];\n')
+
         for e in edges:
-            f.write(f'  "{e["from_id"]}" -> "{e["to_id"]}" [label="{e["edge_type"]}"];\n')
+            f.write(f'  "{_dot_escape(e["from_id"])}" -> "{_dot_escape(e["to_id"])}" [label="{_dot_escape(e["edge_type"])}"];\n')
             
         f.write("}\n")
         
