@@ -24,7 +24,9 @@ def replay_trace_file(path: Path | str) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for event in record.events:
-        payload = json.dumps(event.payload, sort_keys=True, ensure_ascii=True)
+        # Escape pipes so a payload value containing "|" doesn't break the
+        # Markdown table (GFM un-escapes "\|" back to "|" inside the cell).
+        payload = json.dumps(event.payload, sort_keys=True, ensure_ascii=True).replace("|", "\\|")
         lines.append(
             f"| {event.event_id} | {event.event_type} | {event.timestamp} | {event.actor} | `{payload}` |"
         )

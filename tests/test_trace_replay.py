@@ -68,6 +68,41 @@ def test_replay_trace_file_rejects_invalid_trace_hash(tmp_path):
         raise AssertionError("invalid trace replay should fail")
 
 
+def test_replay_escapes_pipes_in_payload(tmp_path):
+    # A payload value containing "|" must not break the Markdown table: the
+    # generated cell escapes it as "\|" so the row keeps its 5 columns.
+    payload = {"query": "cats | dogs", "mode": "hybrid"}
+    path = tmp_path / "trace.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "zurvan.trace.v1",
+                "trace_id": "trace-20260614T010203Z-pipe0001",
+                "created_at": "2026-06-14T01:02:03Z",
+                "title": "Pipe payload",
+                "summary": "Payload contains a pipe character.",
+                "events": [
+                    {
+                        "event_id": "evt-001",
+                        "event_type": "retrieval.query",
+                        "timestamp": "2026-06-14T01:02:04Z",
+                        "actor": "zurvan",
+                        "payload": payload,
+                        "payload_hash": hash_payload(payload),
+                    }
+                ],
+            }
+        )
+    )
+
+    markdown = replay_trace_file(path)
+    row = next(l for l in markdown.splitlines() if l.startswith("| evt-001 "))
+    assert "\\|" in row  # the payload pipe is escaped
+    # Unescaped pipes = table columns; escaped "\|" pairs don't count. The row
+    # must still have exactly the 5 structural columns (6 delimiters).
+    assert row.replace("\\|", "").count("|") == 6
+
+
 def test_replay_accepts_legacy_single_retrieval_event(tmp_path):
     path = tmp_path / "trace.json"
     payload = {
