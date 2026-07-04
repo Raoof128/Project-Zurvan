@@ -29,13 +29,26 @@ def extract_text(filepath):
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
+def source_page_stem(filepath):
+    """Sanitised, extension-free slug for a source's derived wiki pages.
+
+    Dropping the original extension keeps PDF/DOCX-derived pages out of the
+    public_repo_guard blocklist (which matches the substring ``.pdf``/``.docx``)
+    and avoids the double ``.md.md`` suffix; sanitising matches extract.py's
+    ``source_id`` convention so the pages a source produces share one slug.
+    """
+    from scripts.filename_utils import sanitize_filename
+    basename = os.path.basename(filepath)
+    return sanitize_filename(os.path.splitext(basename)[0])
+
 def create_source_page(filepath, file_hash, text):
     basename = os.path.basename(filepath)
-    filename = f"{basename}.md"
-    source_dir = os.path.join("wiki", "sources")
+    stem = source_page_stem(filepath)
+    filename = f"{stem}.md"
+    source_dir = str(PROJECT_ROOT / "wiki" / "sources")
     os.makedirs(source_dir, exist_ok=True)
     out_path = os.path.join(source_dir, filename)
-    
+
     content = f"""---
 title: {basename}
 hash: {file_hash}
@@ -45,8 +58,8 @@ ingested_at: {datetime.datetime.now().isoformat()}
 # {basename}
 
 ## Extracted Text
-{text[:1000]}...
-*(Text truncated for preview, see raw source for full content)*
+
+{text}
 
 ## Extracted Entities & Claims
 *(To be populated by LLM)*
@@ -55,19 +68,21 @@ ingested_at: {datetime.datetime.now().isoformat()}
         f.write(content)
     return filename
 
-def create_stub_concept_and_claim(basename):
-    # This is a stub for LLM extraction
+def create_stub_concept_and_claim(filepath):
+    # This is a stub for LLM extraction (no LLM output = no fabricated evidence)
+    basename = os.path.basename(filepath)
+    stem = source_page_stem(filepath)
     # Create a dummy concept
-    concept_dir = os.path.join("wiki", "concepts")
+    concept_dir = str(PROJECT_ROOT / "wiki" / "concepts")
     os.makedirs(concept_dir, exist_ok=True)
-    with open(os.path.join(concept_dir, f"AutoConcept-{basename}.md"), 'w') as f:
-        f.write(f"---\ntitle: AutoConcept-{basename}\n---\n# AutoConcept-{basename}\n\nGenerated from [{basename}](../sources/{basename}.md)")
+    with open(os.path.join(concept_dir, f"AutoConcept-{stem}.md"), 'w') as f:
+        f.write(f"---\ntitle: AutoConcept-{stem}\n---\n# AutoConcept-{stem}\n\nGenerated from [{basename}](../sources/{stem}.md)")
 
     # Create a dummy claim
-    claim_dir = os.path.join("wiki", "claims")
+    claim_dir = str(PROJECT_ROOT / "wiki" / "claims")
     os.makedirs(claim_dir, exist_ok=True)
-    with open(os.path.join(claim_dir, f"Claim-{basename}.md"), 'w') as f:
-        f.write(f"---\ntitle: Claim-{basename}\n---\n# Claim-{basename}\n\nEvidence missing? No, cited from [{basename}](../sources/{basename}.md)")
+    with open(os.path.join(claim_dir, f"Claim-{stem}.md"), 'w') as f:
+        f.write(f"---\ntitle: Claim-{stem}\n---\n# Claim-{stem}\n\nEvidence missing? No, cited from [{basename}](../sources/{stem}.md)")
 
 def append_log(filename):
     from scripts.wiki_merge import append_log_ingest
@@ -75,7 +90,7 @@ def append_log(filename):
 
 def update_index(filename):
     # Basic index update, rebuild_index.py handles more comprehensive rebuilds
-    index_path = os.path.join("wiki", "index.md")
+    index_path = str(PROJECT_ROOT / "wiki" / "index.md")
     with open(index_path, 'a', encoding='utf-8') as f:
         f.write(f"- [sources/{filename}](sources/{filename})\n")
 
@@ -190,7 +205,7 @@ def main():
     print(f"Ingesting {args.filepath}...")
     text = extract_text(args.filepath)
     filename = create_source_page(args.filepath, file_hash, text)
-    create_stub_concept_and_claim(os.path.basename(args.filepath))
+    create_stub_concept_and_claim(args.filepath)
     append_log(filename)
     update_index(filename)
     

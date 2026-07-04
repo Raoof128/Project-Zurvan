@@ -6,8 +6,37 @@ from pathlib import Path
 
 from scripts.config import PROJECT_ROOT
 
+# Heading-only splitting leaves prose without markdown structure (e.g. text
+# extracted from a PDF) as one giant chunk. A single 190k-char chunk is
+# unsearchable: the sentence-transformer embeds only its first ~256 tokens and
+# BM25 dilutes to noise. Any heading-section longer than this is sub-split on
+# line boundaries so every chunk is embeddable. Sized to the embedder's window;
+# only ~6% of the existing corpus exceeds it, so 94% of chunk IDs are unchanged.
+MAX_CHUNK_CHARS = 1000
+
 def hash_content(text: str) -> str:
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+def _split_text_by_size(text: str, limit: int) -> list:
+    """Greedily pack lines into pieces <= limit chars. A single line longer than
+    the limit is hard-wrapped so no piece can exceed it."""
+    pieces, cur, cur_len = [], [], 0
+    for ln in text.split('\n'):
+        if len(ln) > limit:
+            if cur:
+                pieces.append('\n'.join(cur))
+                cur, cur_len = [], 0
+            for i in range(0, len(ln), limit):
+                pieces.append(ln[i:i + limit])
+            continue
+        if cur and cur_len + len(ln) + 1 > limit:
+            pieces.append('\n'.join(cur))
+            cur, cur_len = [], 0
+        cur.append(ln)
+        cur_len += len(ln) + 1
+    if cur:
+        pieces.append('\n'.join(cur))
+    return pieces
 
 def extract_chunks_from_markdown(filepath: str, base_dir: Path | str | None = None):
     """
@@ -32,17 +61,32 @@ def extract_chunks_from_markdown(filepath: str, base_dir: Path | str | None = No
 
     def finalize_chunk():
         text = "\n".join(current_text).strip()
-        if text:
-            # Deterministic chunk ID
-            chunk_id_str = f"{filepath}::{current_heading}::{text}"
+        if not text:
+            return
+
+        # Small sections stay a single chunk with the legacy chunk_id (no
+        # ``::idx::`` segment) so 94% of the corpus keeps byte-identical IDs and
+        # reuses its stored embedding. Oversized sections are sub-split.
+        if len(text) <= MAX_CHUNK_CHARS:
+            parts = [text]
+        else:
+            parts = [p.strip() for p in _split_text_by_size(text, MAX_CHUNK_CHARS) if p.strip()]
+
+        for idx, part in enumerate(parts):
+            if len(parts) == 1:
+                chunk_id_str = f"{filepath}::{current_heading}::{part}"
+            else:
+                # idx keeps otherwise-identical sub-parts (repeated boilerplate)
+                # from colliding on the same chunk_id.
+                chunk_id_str = f"{filepath}::{current_heading}::{idx}::{part}"
             chunk_id = hash_content(chunk_id_str)
 
             chunks.append({
                 "chunk_id": chunk_id,
                 "source_path": filepath,
                 "heading": current_heading,
-                "text": text,
-                "content_hash": hash_content(text),
+                "text": part,
+                "content_hash": hash_content(part),
                 "indexed_at": datetime.now().isoformat()
             })
 
