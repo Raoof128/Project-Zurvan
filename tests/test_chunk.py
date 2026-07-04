@@ -1,6 +1,12 @@
 import pytest
 import os
-from scripts.chunk import extract_chunks_from_markdown, hash_content, scan_markdown_files, chunk_all_markdown
+from scripts.chunk import (
+    extract_chunks_from_markdown,
+    hash_content,
+    scan_markdown_files,
+    chunk_all_markdown,
+    MAX_CHUNK_CHARS,
+)
 
 def test_extract_chunks_from_markdown(tmp_path):
     md_file = tmp_path / "test.md"
@@ -65,3 +71,40 @@ def test_chunk_id_is_deterministic(tmp_path):
     chunks1 = extract_chunks_from_markdown(str(md_file))
     chunks2 = extract_chunks_from_markdown(str(md_file))
     assert chunks1[0]['chunk_id'] == chunks2[0]['chunk_id']
+
+
+def test_small_section_keeps_legacy_chunk_id(tmp_path):
+    # A section under the size limit must produce exactly one chunk whose ID is
+    # the legacy hash(f"{path}::{heading}::{text}") — so re-indexing after adding
+    # sub-splitting reuses stored embeddings for the 94% of small chunks.
+    md_file = tmp_path / "test.md"
+    md_file.write_text("# H\nshort body")
+    chunks = extract_chunks_from_markdown(str(md_file))
+    assert len(chunks) == 1
+    legacy = hash_content(f"{md_file}::H::{chunks[0]['text']}")
+    assert chunks[0]['chunk_id'] == legacy
+
+
+def test_oversized_section_is_sub_split_within_limit(tmp_path):
+    # A heading-less blob (e.g. extracted PDF prose) must not become one giant
+    # unsearchable chunk; every produced chunk stays within the embedder window.
+    md_file = tmp_path / "big.md"
+    body = "\n".join(f"paragraph line number {i} with some filler words" for i in range(400))
+    md_file.write_text(body)  # no '#', so one "root" section far over the limit
+
+    chunks = extract_chunks_from_markdown(str(md_file))
+
+    assert len(chunks) > 1
+    assert all(len(c['text']) <= MAX_CHUNK_CHARS for c in chunks)
+    assert len({c['chunk_id'] for c in chunks}) == len(chunks)  # IDs unique
+    # No content is dropped: concatenated pieces cover every source line.
+    joined = "\n".join(c['text'] for c in chunks)
+    assert "paragraph line number 0 " in joined
+    assert "paragraph line number 399 " in joined
+
+
+def test_single_line_longer_than_limit_is_hard_wrapped(tmp_path):
+    md_file = tmp_path / "wide.md"
+    md_file.write_text("# H\n" + "x" * (MAX_CHUNK_CHARS * 3))
+    chunks = extract_chunks_from_markdown(str(md_file))
+    assert all(len(c['text']) <= MAX_CHUNK_CHARS for c in chunks)

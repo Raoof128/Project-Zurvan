@@ -150,6 +150,38 @@ def test_image_stub_writes_manifest_json(tmp_path, monkeypatch):
     assert not os.path.isabs(manifest[0]["path"])
 
 
+def test_source_page_stores_full_text_not_truncated_preview(tmp_path, monkeypatch):
+    # "Ingest fully": the derived source page must carry the complete extracted
+    # text (previously truncated to text[:1000]), so the whole document is
+    # chunked and searchable rather than only its first 1000 chars.
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page
+
+    big = "Constitution clause. " * 500  # ~10k chars, well over the old cap
+    filename = create_source_page("/somewhere/doc.txt", "deadbeef", big)
+
+    page = (tmp_path / "wiki" / "sources" / filename).read_text()
+    assert big.strip() in page
+    assert "Text truncated for preview" not in page
+
+
+def test_source_page_name_is_guard_safe_for_pdf(tmp_path, monkeypatch):
+    # public_repo_guard blocks any tracked path containing ".pdf"/".docx"; the
+    # derived wiki page (and its stub concept/claim) must not carry the source
+    # extension or a double ".md.md" suffix.
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page, create_stub_concept_and_claim, source_page_stem
+
+    filename = create_source_page("/raw/papers/report_v2.02a.pdf", "hash", "body")
+    assert ".pdf" not in filename and ".md.md" not in filename
+    assert filename == source_page_stem("/raw/papers/report_v2.02a.pdf") + ".md"
+
+    create_stub_concept_and_claim("/raw/papers/report_v2.02a.pdf")
+    for sub in ("concepts", "claims"):
+        for f in (tmp_path / "wiki" / sub).glob("*.md"):
+            assert ".pdf" not in f.name
+
+
 def test_is_image_file_detects_extensions():
     from scripts.ingest import is_image_file
     assert is_image_file("photo.png")
