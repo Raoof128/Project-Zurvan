@@ -49,3 +49,9 @@ wiki/note-*.md
 .obsidian/workspace.json
 .obsidian/appearance.json
 *.canvas
+
+# Auto-generated nav index + activity log — these enumerate ingested (private)
+# source/claim/concept filenames, so they must never be tracked or pushed.
+# Regenerated locally by `zurvan index rebuild`; kept out of git entirely.
+wiki/index.md
+wiki/log.md
