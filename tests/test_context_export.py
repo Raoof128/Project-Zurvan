@@ -26,6 +26,24 @@ def test_search_memory(capsys):
     
     os.remove(test_file)
 
+def test_keyword_search_includes_docs_and_returns_relative_paths(tmp_path):
+    # Regression: keyword mode globbed only wiki/, so `zurvan search <term>`
+    # could not find docs/ pages that hybrid mode surfaces; and it returned
+    # absolute paths. It must scan docs/ too and return repo-relative paths.
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "wiki" / "note.md").write_text("some wiki body")
+    (tmp_path / "docs" / "API.md").write_text("uniquedocsterm integration guide")
+
+    results = _context_export._search_internal(
+        "uniquedocsterm", hybrid=False, root=tmp_path
+    )
+
+    assert results, "keyword search must find the docs/ page"
+    assert results[0]["source_path"] == os.path.join("docs", "API.md")
+    assert all(not os.path.isabs(r["source_path"]) for r in results)
+
+
 def test_export_context(capsys):
     test_file = "wiki/test_context.md"
     os.makedirs("wiki", exist_ok=True)
@@ -130,6 +148,9 @@ def test_format_table_produces_markdown_table(tmp_path, monkeypatch):
 
 def test_format_table_escapes_pipes_in_excerpts(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Pin the search root to the tmp corpus: _search_internal scans PROJECT_ROOT
+    # (now wiki/ + docs/), so without this the test searches the real repo.
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "pipe_test.md").write_text("pipe_kw_unique999 | has | pipes")
 
@@ -154,6 +175,9 @@ def test_format_marp_starts_with_frontmatter(tmp_path, monkeypatch):
 
 def test_format_table_empty_results_graceful(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # Hermetic: search the empty tmp corpus, not the real repo (whose docs/ now
+    # happen to contain the sentinel term).
+    _patch_roots(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
 
     from scripts.context_export import export_context
