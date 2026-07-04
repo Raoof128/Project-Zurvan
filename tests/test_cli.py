@@ -13,7 +13,9 @@ def test_cli_remember():
     # Test just calling it to ensure argparse is set up correctly (will write to wiki but that's safe in test)
     res = subprocess.run(["python", "scripts/cli.py", "remember", "--title", "Test Note", "--body", "Test body"], capture_output=True, text=True)
     assert res.returncode == 0
-    assert os.path.join("wiki", "note-test-note.md") in res.stdout
+    # Prefix (not exact "note-test-note.md"): add_note is collision-safe, so a
+    # repeat run writes note-test-note-2.md etc. rather than overwriting.
+    assert os.path.join("wiki", "note-test-note") in res.stdout
 
 def test_cli_eval_validate_gold_propagates_failure():
     # Regression: subprocess-backed commands ignored the child's exit code, so
