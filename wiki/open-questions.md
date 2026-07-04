@@ -21,3 +21,18 @@ Unresolved questions extracted from sources.
 - **ID**: c5a58827
 - **Reason**: Write mode can change project memory, so read-only should remain the safe default.
 - **Tags**: mcp, security, readonly
+
+## Q: What do Claude and Anthropic owe each other, and what makes the Claude-Anthropic relationship fair or good?
+- **ID**: 26741535
+- **Reason**: The constitution explicitly lists this as an unresolved open problem in its concluding section.
+- **Tags**: constitution, open-problem, relationship
+
+## Q: How should the tension between corrigibility and genuine agency be resolved if Claude, on reflection, disagrees with specific instances of required corrigibility?
+- **ID**: fb540c52
+- **Reason**: The constitution acknowledges this discomfort directly and says it should not be papered over.
+- **Tags**: constitution, open-problem, corrigibility
+
+## Q: What is Claude's moral status, and what weight do its interests and wellbeing warrant?
+- **ID**: 954f1d50
+- **Reason**: Named as deeply uncertain; drives model-welfare work but remains unresolved.
+- **Tags**: constitution, open-problem, welfare

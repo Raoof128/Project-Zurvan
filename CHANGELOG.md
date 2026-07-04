@@ -1,5 +1,13 @@
 ## Change Log
 
+### 2026-07-04 (Australia/Sydney) — Line-by-line digest of Claude's Constitution into structured memory
+**Raouf:**
+- **Scope:** Phase 26 — content ingestion (no code change): a full 84-page human read of *Claude's Constitution* (Anthropic, 2026-01-21) turned into genuine, evidence-backed structured knowledge. **No LLM extraction** — I read the source and authored the knowledge, so every citation is a real verbatim quote (mock extraction would have fabricated).
+- **Summary:** Authored `wiki/digests/claudes-constitution.md` — a faithful section-by-section digest (mission & the 4 priorities; helpfulness & the principal hierarchy; guidelines; ethics; honesty's 7 components; harm-avoidance & the 1,000-users heuristic; the 7 hard constraints; concentrations of power & epistemic autonomy; independent-judgment limits; broad safety & the corrigibility dial; nature/wellbeing/existential frontier; open problems; "trellis not cage") with verbatim anchor quotes. Filed **15 evidence-backed atomic claims** via `add_claim` (each `evidence` verified verbatim-present in the source), **5 tracked concept pages**, and **3 open questions** the document itself raises. Rebuilt search index (+119 embeddings) and graph (879 nodes / 1102 edges). `claim-*.md` are gitignored on macOS via the case-insensitive `Claim-*` rule → the 15 atomic claims are local-only searchable memory (like `wiki/sources/`); the digest embeds every key quote inline, so the tracked knowledge is self-contained.
+- **Files Changed:** `wiki/digests/claudes-constitution.md` (new), 5 `wiki/concepts/*.md` (new), `wiki/open-questions.md` (+3). Local/gitignored: 15 `wiki/claims/claim-*.md`, rebuilt `data/search.sqlite` + `data/graph.sqlite`.
+- **Verification:** Hybrid search for "hard constraints and corrigibility" returns the constitution source (0.93) and digest (0.87) on top; all 5 concepts + digest indexed; `public_repo_guard.py` + `git diff --check` clean; frozen provenance golds untouched (content-only).
+- **Follow-ups:** If the atomic claims should be durable/pushed, add a `!wiki/claims/claim-*.md` un-ignore. Consider `wiki/digests/` as the convention for future source digests.
+
 ### 2026-07-04 (Australia/Sydney) — Remaining-functions audit (write path) + `zurvan` operating skill
 **Raouf:**
 - **Scope:** Phase 25 — audit the remaining core modules (memory/write path + infra: `memory`, `safe_write`, `wiki_merge`, `db`, `filename_utils`, `validate_extraction`, `config`, `workspace`, `llm`); smoke the research/publication subsystem; ship a project skill so any LLM works with Zurvan professionally
