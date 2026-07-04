@@ -17,10 +17,24 @@ def _make_note_slug(name: str) -> str:
     name = name.lower().replace(" ", "-")
     return re.sub(r'[^a-z0-9\-]', '', name)[:50]
 
+
+def _unique_path(directory: str, slug: str, prefix: str = "") -> str:
+    """Return a non-colliding '<dir>/<prefix><slug>.md' path. Two titles that
+    slugify identically (e.g. 'Use SQLite!' and 'Use SQLite?') must not silently
+    overwrite each other, so a numeric suffix is added on collision."""
+    base = str(PROJECT_ROOT / directory / f"{prefix}{slug}.md")
+    if not os.path.exists(base):
+        return base
+    counter = 2
+    while True:
+        candidate = str(PROJECT_ROOT / directory / f"{prefix}{slug}-{counter}.md")
+        if not os.path.exists(candidate):
+            return candidate
+        counter += 1
+
 def add_decision(title: str, reason: str, status: str, tags: List[str]):
-    filename = f"{_make_note_slug(title)}.md"
-    filepath = str(PROJECT_ROOT / "wiki" / "decisions" / filename)
-    
+    filepath = _unique_path("wiki/decisions", _make_note_slug(title))
+
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
 title: {escape_yaml_string(title)}
@@ -47,9 +61,8 @@ tags:
         return False
 
 def add_note(title: str, body: str, tags: List[str]):
-    filename = f"note-{_make_note_slug(title)}.md"
-    filepath = str(PROJECT_ROOT / "wiki" / filename)
-    
+    filepath = _unique_path("wiki", _make_note_slug(title), prefix="note-")
+
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
 title: {escape_yaml_string(title)}

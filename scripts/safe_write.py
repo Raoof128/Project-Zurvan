@@ -27,11 +27,16 @@ def is_safe_path(target_path: Path) -> bool:
         return False
 
 def escape_yaml_string(s: str) -> str:
-    """Safely escape a string for YAML frontmatter."""
+    """Safely escape a string for YAML frontmatter, on a single line.
+
+    ``width`` is set very high so PyYAML never line-wraps a long value: the
+    frontmatter here is consumed by naive line-by-line parsers
+    (``graph_build.parse_frontmatter``, ``wiki_merge._parse_fm``) that would
+    truncate a value split across lines.
+    """
     if not s:
         return ""
-    # Use PyYAML to safely dump the string, then strip the trailing newline
-    return yaml.dump(s, default_style='"').strip()
+    return yaml.dump(s, default_style='"', width=2**20, allow_unicode=True).strip()
 
 def write_file_safely(file_path: str, content: str) -> bool:
     """
