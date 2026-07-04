@@ -15,6 +15,7 @@
 - Frozen research artifacts must not be mutated: `eval/provenance_real_*.jsonl`, their committed traces under `data/traces/`, and the recorded 2C/1B metrics (86%/79%).
 - Retrieval ranking/indexing changes require a documented before/after `eval_search` run in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — never claim complete provenance.
+- **No public pushes.** Per Raouf (2026-07-04) do not `git push` to the public remote; Zurvan data stays local. A `.git/hooks/pre-push` hook enforces this; only override (`ZURVAN_ALLOW_PUSH=1 git push`) when Raouf explicitly requests that specific push. The Claude's Constitution digest (Phase 26) was the last sanctioned public push. Local commits are fine.
 - Quality gate before claiming done: `pytest` (0 failed), `public_repo_guard.py`, `git diff --check`.
 
 See `CLAUDE.md` for the agent quickstart (commands, layout).
