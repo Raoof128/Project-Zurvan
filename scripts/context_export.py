@@ -24,13 +24,21 @@ def _search_internal(
         from scripts.hybrid_search import search_hybrid
         return search_hybrid(query, limit, db_path=str(base / "data" / "search.sqlite"))
 
-    wiki_files = glob.glob(str(base / "wiki" / "**" / "*.md"), recursive=True)
+    # Scan the same corpus the search index does (wiki/ + docs/): keyword mode
+    # previously globbed wiki/ only, so `zurvan search <term>` silently could
+    # not find any docs/ page that hybrid mode surfaces. source_path is returned
+    # repo-relative to match hybrid results (and to avoid leaking absolute
+    # machine paths into stdout / saved syntheses).
+    files = []
+    for directory in ("wiki", "docs"):
+        files += glob.glob(str(base / directory / "**" / "*.md"), recursive=True)
     matches = []
     keywords = query.lower().split()
 
-    for filepath in wiki_files:
+    for filepath in files:
+        rel = os.path.relpath(filepath, base)
         # Skip derived trace mirrors: self-referential, pollute retrieval.
-        if "traces" in filepath.split(os.sep):
+        if "traces" in rel.split(os.sep):
             continue
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -38,13 +46,13 @@ def _search_internal(
             score = sum(1 for k in keywords if k in content.lower())
             if score > 0:
                 matches.append({
-                    'source_path': filepath,
+                    'source_path': rel,
                     'hybrid_score': score,
                     'text': content
                 })
         except Exception:
             continue
-            
+
     matches.sort(key=lambda x: x['hybrid_score'], reverse=True)
     return matches[:limit]
 
