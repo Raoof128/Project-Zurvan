@@ -126,8 +126,10 @@ This repo enforces the `raouf-change-protocol`. Every code change:
    `CHANGELOG.md`. `AGENTS.md` keeps only the two newest entries — rotate older
    ones verbatim into `docs/agents-history.md`.
 
-Commit/push only when asked. End commit messages with the project's
-`Co-Authored-By` trailer. Branch first if on `main` and about to commit.
+Commit locally freely; **do NOT `git push`.** Per Raouf (2026-07-04) Zurvan data
+stays local — a `.git/hooks/pre-push` hook blocks pushes. Push only when Raouf
+explicitly asks for that specific push (`ZURVAN_ALLOW_PUSH=1 git push`). End
+commit messages with the project's `Co-Authored-By` trailer.
 
 ## 7. Environment
 

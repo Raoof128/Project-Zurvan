@@ -27,6 +27,10 @@ PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_real_gold.
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
+- **Do not `git push` to the public remote.** Per Raouf (2026-07-04), Zurvan data
+  stays local from now on. A `pre-push` hook blocks it; only push when Raouf
+  explicitly asks for that specific push (`ZURVAN_ALLOW_PUSH=1 git push`).
+  Committing locally is fine.
 
 ## Change protocol (mandatory)
 
