@@ -44,6 +44,37 @@ def agent_preflight(topic: str, hybrid: bool = True, graph: bool = True, limit: 
         context_bundle=context_bundle
     )
 
+def _index_staleness(root: Path | None = None, db_path: Path | None = None) -> str:
+    """One-line freshness verdict: compares the newest wiki/docs file mtime
+    against the index's newest indexed_at, so every session start says
+    whether search results can be trusted."""
+    import sqlite3
+    root = root or ROOT
+    db_path = db_path or (root / "data" / "search.sqlite")
+    if not Path(db_path).exists():
+        return "missing — run `zurvan index search`"
+    try:
+        conn = sqlite3.connect(str(db_path))
+        newest_indexed = conn.execute("SELECT MAX(indexed_at) FROM chunks").fetchone()[0]
+        conn.close()
+        indexed_at = datetime.datetime.fromisoformat(newest_indexed)
+    except Exception:
+        return "unreadable — run `zurvan index search`"
+
+    from scripts.chunk import scan_markdown_files
+    stale = 0
+    for rel in scan_markdown_files(root):
+        try:
+            mtime = datetime.datetime.fromtimestamp((Path(root) / rel).stat().st_mtime)
+        except OSError:
+            continue
+        if mtime > indexed_at:
+            stale += 1
+    if stale:
+        return f"STALE — {stale} file(s) newer than the index; run `zurvan index search`"
+    return "fresh"
+
+
 def agent_prime() -> str:
     """Compact orientation card (~300 tokens) for agent session starts.
 
@@ -73,7 +104,7 @@ def agent_prime() -> str:
         conn = sqlite3.connect(str(ROOT / "data" / "search.sqlite"))
         chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         conn.close()
-        lines.append(f"Search index: {chunk_count} chunks.")
+        lines.append(f"Search index: {chunk_count} chunks — {_index_staleness()}.")
     except Exception:
         lines.append("Search index: unavailable — run `zurvan index search`.")
 
