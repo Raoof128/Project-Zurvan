@@ -40,3 +40,22 @@ def test_extract_edges():
     assert 'mentions' in edge_types
     assert 'derived_from' in edge_types
     assert len(edges) >= 3
+
+
+def test_obsidian_aliased_and_heading_wikilinks_resolve():
+    # Obsidian's [[target|alias]] and [[target#heading]] must resolve to the
+    # `target` node — otherwise edges an Obsidian user authors are dropped.
+    import hashlib
+    def fake_hash(s): return hashlib.sha256(s.encode('utf-8')).hexdigest()
+    nodes_dict = {
+        fake_hash("wiki/target.md"): {
+            "node_id": fake_hash("wiki/target.md"),
+            "slug": "target", "title": "Target", "path": "wiki/target.md",
+        }
+    }
+
+    for body in ("See [[target|Display Text]].", "See [[target#Some Heading]].",
+                 "See [[target#Sec|Alias]]."):
+        content = "---\ntitle: X\n---\n" + body
+        edges = extract_edges("wiki/x.md", content, nodes_dict)
+        assert any(e['edge_type'] == 'mentions' for e in edges), f"no edge for: {body}"

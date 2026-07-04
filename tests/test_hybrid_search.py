@@ -9,10 +9,25 @@ from scripts.rebuild_search_index import rebuild_search_index
 @pytest.fixture(scope="module")
 def tmp_index(tmp_path_factory):
     """A search index built into a temp DB so tests never touch (or downgrade)
-    the real data/search.sqlite — the real index may be built with a real
-    embedding provider, while tests run with the mock provider."""
+    the real data/search.sqlite.
+
+    The mock provider is pinned for the build regardless of the ambient
+    environment: the repo's own `.claude/settings.json` exports
+    ``ZURVAN_EMBED_PROVIDER=sentence_transformers`` for agent sessions, which
+    would otherwise make this fixture build a real (slow, non-deterministic)
+    index and break the provider-follows-index assertion."""
     db_path = str(tmp_path_factory.mktemp("index") / "search.sqlite")
-    rebuild_search_index(db_path)
+    saved = {k: os.environ.get(k) for k in ("ZURVAN_EMBED_PROVIDER", "ZURVAN_EMBED_MODEL")}
+    os.environ["ZURVAN_EMBED_PROVIDER"] = "mock"
+    os.environ["ZURVAN_EMBED_MODEL"] = "mock_model"
+    try:
+        rebuild_search_index(db_path)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
     return db_path
 
 

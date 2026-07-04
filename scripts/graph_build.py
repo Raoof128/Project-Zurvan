@@ -89,13 +89,18 @@ def extract_edges(path: str, content: str, nodes_dict: Dict[str, Dict]) -> List[
                 'created_at': datetime.now().isoformat()
             })
 
-    # 1. Wikilinks [[example]]
+    # 1. Wikilinks [[example]], including Obsidian's [[target|alias]] and
+    # [[target#heading]] forms — the alias/heading are stripped before matching
+    # so an aliased link an Obsidian user writes still resolves to its node.
     wikilinks = re.findall(r'\[\[(.*?)\]\]', body)
     for wl in wikilinks:
+        target = wl.split('|', 1)[0].split('#', 1)[0].strip()
+        if not target:
+            continue
         # naive matching: find node by slug or title
         target_path = None
         for n_id, n_data in nodes_dict.items():
-            if n_data['slug'] == wl or n_data['title'] == wl:
+            if n_data['slug'] == target or n_data['title'] == target:
                 target_path = n_data['path']
                 break
         if target_path:
