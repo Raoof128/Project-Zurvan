@@ -7,6 +7,16 @@ Zurvan offers two primary methods for external integration: the Command Line Int
 The CLI is designed for bash scripts or direct human/agent interaction on the local machine. 
 *Note: Make sure to set `export PYTHONPATH=.` before running scripts.*
 
+### Global `zurvan` command (optional)
+
+`scripts/zurvan` is a self-locating wrapper — symlink it onto your PATH once and
+call `zurvan` from any directory or project:
+
+```bash
+ln -s "$(pwd)/scripts/zurvan" /opt/homebrew/bin/zurvan   # or any PATH dir
+zurvan search "topic" --hybrid --json                     # works from anywhere
+```
+
 ### Search & Retrieval
 ```bash
 # Keyword Search

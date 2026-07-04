@@ -28,8 +28,15 @@ Controls the embedding model used for semantic/hybrid search (`zurvan search --h
 
 | Variable | Options / Example | Description |
 |---|---|---|
-| `ZURVAN_EMBED_PROVIDER` | `mock`, `sentence_transformers` | Defaults to `mock`. Use `sentence_transformers` for actual local semantic search. |
-| `ZURVAN_EMBED_MODEL` | `all-MiniLM-L6-v2` | The model to load when using `sentence_transformers`. |
+| `ZURVAN_EMBED_PROVIDER` | `mock`, `sentence_transformers` | Defaults to `mock` (deterministic, for tests). Use `sentence_transformers` for real local semantic search — the repo's `.claude/settings.json` sets this for agent sessions. |
+| `ZURVAN_EMBED_MODEL` | `all-MiniLM-L6-v2` | The model to load when using `sentence_transformers`. Models are cached in-process after first load. |
+
+**Index/query consistency:** these variables control which provider builds the
+index (`zurvan index search`). At *query* time the provider/model stored in the
+index always wins — queries are embedded with whatever the index was built
+with, so a mock-env session querying a `sentence_transformers` index still
+gets meaningful similarity scores. Rebuilds reuse stored embeddings for
+unchanged chunks, so re-indexing after edits only embeds what changed.
 
 ## MCP Server Security
 
