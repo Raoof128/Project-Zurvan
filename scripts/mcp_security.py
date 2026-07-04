@@ -27,10 +27,14 @@ def is_safe_path(target_path: str, allow_raw: bool = False) -> bool:
     except Exception:
         return False
 
-    # 3. No raw/ access unless explicitly allowed
+    # 3. No raw/ access unless explicitly allowed. The comparison is
+    # case-insensitive on the top-level component: on a case-insensitive
+    # filesystem (macOS default) "Raw/secret.md" resolves to the real raw/
+    # directory, so a case-sensitive check would let an agent read untrusted
+    # raw content by changing case.
     rel_path = os.path.relpath(str(target), str(base_dir))
-
-    if rel_path == "raw" or rel_path.startswith("raw" + os.sep):
+    parts = Path(rel_path).parts
+    if parts and parts[0].lower() == "raw":
         if not allow_raw:
             return False
 
@@ -38,11 +42,16 @@ def is_safe_path(target_path: str, allow_raw: bool = False) -> bool:
 
 def enforce_read_only(func):
     """
-    Decorator to block write tools if MCP is in read-only mode.
+    Decorator to block write tools unless MCP is explicitly in write mode.
+
+    Fails closed: writes are permitted ONLY when ZURVAN_MCP_READONLY is exactly
+    "0". Any other value — the "1" default, an unset var, or a well-meaning but
+    wrong "true"/"yes"/"" — keeps the server read-only, so a misconfigured
+    variable can never silently open write access.
     """
     def wrapper(*args, **kwargs):
-        readonly = os.environ.get("ZURVAN_MCP_READONLY", "1")
-        if readonly == "1":
-            return "Error: MCP server is in read-only mode (ZURVAN_MCP_READONLY=1). Write operation blocked."
+        readonly = os.environ.get("ZURVAN_MCP_READONLY", "1").strip()
+        if readonly != "0":
+            return "Error: MCP server is in read-only mode (set ZURVAN_MCP_READONLY=0 to enable writes). Write operation blocked."
         return func(*args, **kwargs)
     return wrapper
