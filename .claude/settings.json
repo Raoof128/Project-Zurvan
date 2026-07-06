@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "PYTHONPATH=\"$CLAUDE_PROJECT_DIR\" python \"$CLAUDE_PROJECT_DIR/scripts/cli.py\" agent prime"
+            "command": "PYTHONPATH=\"$CLAUDE_PROJECT_DIR\" python \"$CLAUDE_PROJECT_DIR/scripts/cli.py\" agent prime --fix-stale"
           }
         ]
       }
