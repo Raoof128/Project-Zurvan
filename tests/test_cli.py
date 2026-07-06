@@ -47,3 +47,23 @@ def test_zurvan_wrapper_works_from_any_cwd(tmp_path):
     res = subprocess.run([wrapper, "version"], capture_output=True, text=True, cwd=str(tmp_path))
     assert res.returncode == 0
     assert "Zurvan Version" in res.stdout
+
+
+def test_cli_agent_prime_project_digest():
+    import sys
+    res = subprocess.run(
+        [sys.executable, "scripts/cli.py", "agent", "prime",
+         "--for-project", "zzqxnonexistentzzq"],
+        capture_output=True, text=True)
+    assert res.returncode == 0
+    assert "Zurvan recall — zzqxnonexistentzzq" in res.stdout
+    assert "No Zurvan knowledge for this project yet." in res.stdout
+
+
+def test_cli_agent_prime_has_fix_stale_flag():
+    import sys
+    res = subprocess.run(
+        [sys.executable, "scripts/cli.py", "agent", "prime", "--help"],
+        capture_output=True, text=True)
+    assert "--fix-stale" in res.stdout
+    assert "--for-project" in res.stdout
