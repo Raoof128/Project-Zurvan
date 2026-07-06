@@ -1,5 +1,13 @@
 ## Change Log
 
+### 2026-07-06 (Australia/Sydney) — Design spec: Zurvan as the global brain for Claude Code
+**Raouf:**
+- **Scope:** Phase 27, step 1 (design only — no code change yet): brainstormed with Raouf and recorded the approved design for making Zurvan the persistent cross-project memory ("brain") for every Claude Code session on this machine.
+- **Summary:** Wrote `docs/superpowers/specs/2026-07-06-zurvan-global-brain-design.md`. Decisions fixed by Raouf: **global scope** (all projects); **recall = session-start project digest (~150 tokens, titles/pointers only, no embedding load) + on-demand MCP search** — per-prompt auto-injection rejected for token cost; **write-back stays manual** (Stop/SessionEnd/PreCompact hooks rejected); **auto-reindex when stale** inside the SessionStart hook. Components: (1) `agent prime --fix-stale` + `--project <name>`; (2) global user-scope SessionStart hook via `scripts/zurvan`, failure-proofed (`|| true`, timeout, no double-fire in the Zurvan repo); (3) user-scope read-only MCP registration; (4) ~10-line global `~/.claude/CLAUDE.md` recall/write-back section; (5) advisory MCP-diet list. Out of scope: ranking/index-format changes (frozen-eval rule), daemon (Approach C, deferred), R3. Web research validating the design (Karpathy LLM-wiki pattern; pointer-not-content loading ≈20× token saving; SessionStart injection as the standard mechanism): evomap.ai/blog/best-mcp-servers-for-claude-code-2026, dev.to/dalimay28/how-i-built-memcp-giving-claude-a-real-memory-15co, hackernoon.com/how-i-built-a-self-maintaining-knowledge-base-for-6-projects-using-claude-code-and-karpathys-llm-wiki, mindstudio.ai/blog/claude-code-hooks-pre-session-post-compaction-explained, vibehackers.io/blog/claude-code-second-brain.
+- **Files Changed:** `docs/superpowers/specs/2026-07-06-zurvan-global-brain-design.md` (new); AGENTS.md entry rotation (Phase 25 → `docs/agents-history.md` verbatim).
+- **Verification:** Docs-only change: `pytest` green, `public_repo_guard.py` clean, `git diff --check` clean, frozen artifacts untouched.
+- **Follow-ups:** Implement per the spec (implementation plan next); manual smoke from a non-Zurvan repo once built.
+
 ### 2026-07-04 (Australia/Sydney) — Line-by-line digest of Claude's Constitution into structured memory
 **Raouf:**
 - **Scope:** Phase 26 — content ingestion (no code change): a full 84-page human read of *Claude's Constitution* (Anthropic, 2026-01-21) turned into genuine, evidence-backed structured knowledge. **No LLM extraction** — I read the source and authored the knowledge, so every citation is a real verbatim quote (mock extraction would have fabricated).
