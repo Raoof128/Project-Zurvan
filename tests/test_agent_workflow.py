@@ -92,3 +92,65 @@ def test_index_staleness_missing_db(tmp_path):
     from scripts.agent_workflow import _index_staleness
     (tmp_path / "wiki").mkdir()
     assert "missing" in _index_staleness(root=tmp_path, db_path=tmp_path / "nope.sqlite")
+
+
+from pathlib import Path
+from scripts.agent_workflow import project_digest
+
+
+def _make_corpus(tmp_path: Path):
+    d = tmp_path / "wiki" / "decisions"
+    c = tmp_path / "wiki" / "claims"
+    d.mkdir(parents=True)
+    c.mkdir(parents=True)
+    (d / "nexus-auth.md").write_text(
+        '---\ntitle: "Zero-trust auth for Nexus Archive"\ntype: decision\n'
+        'status: "accepted"\ntags:\n  - "nexus"\n  - "auth"\n---\n\n# Zero-trust auth\n',
+        encoding="utf-8")
+    (d / "unrelated.md").write_text(
+        '---\ntitle: "Delay vector search"\ntype: decision\nstatus: "accepted"\n'
+        'tags:\n  - "roadmap"\n---\n\n# Delay vector search\n', encoding="utf-8")
+    (c / "claim-abc123.md").write_text(
+        '---\ntype: claim\nconfidence: "high"\nsource: "docs/x.md"\n'
+        'tags:\n  - "nexus"\n---\n\n# Claim\nNexus Archive uses Supabase RLS.\n\n'
+        '## Evidence\n> quote\n', encoding="utf-8")
+    (tmp_path / "wiki" / "open-questions.md").write_text(
+        "# Open Questions\n\n## Q: Should nexus-archive rotate JWTs weekly?\n"
+        "- **ID**: aaa\n- **Tags**: nexus, auth\n\n"
+        "## Q: Unrelated question?\n- **ID**: bbb\n- **Tags**: mcp\n",
+        encoding="utf-8")
+
+
+def test_project_digest_matches_tags_titles_and_questions(tmp_path):
+    _make_corpus(tmp_path)
+    out = project_digest("Nexus_Archive", root=tmp_path)
+    assert "Zero-trust auth for Nexus Archive" in out
+    assert "wiki/decisions/nexus-auth.md" in out
+    assert "Supabase RLS" in out
+    assert "rotate JWTs" in out
+    assert "Delay vector search" not in out
+    assert "Unrelated question" not in out
+    assert "1 decision" in out and "1 claim" in out and "1 open question" in out
+    # pointer line for deeper recall
+    assert "zurvan_search" in out
+
+
+def test_project_digest_empty(tmp_path):
+    (tmp_path / "wiki" / "decisions").mkdir(parents=True)
+    out = project_digest("simurghforge", root=tmp_path)
+    assert "No Zurvan knowledge for this project yet." in out
+    assert "zurvan_search" in out
+
+
+def test_project_digest_caps_output(tmp_path):
+    d = tmp_path / "wiki" / "decisions"
+    d.mkdir(parents=True)
+    for i in range(12):
+        (d / f"dec-{i}.md").write_text(
+            f'---\ntitle: "Simurgh decision {i} ' + "x" * 200 + '"\n'
+            'tags:\n  - "simurgh"\n---\n', encoding="utf-8")
+    out = project_digest("simurgh", root=tmp_path)
+    lines = [l for l in out.splitlines() if l.startswith("- ")]
+    assert len(lines) <= 5                       # decision cap
+    assert all(len(l) <= 160 for l in lines)     # line cap (120 + path suffix)
+    assert "12 decisions" in out                 # counts reflect the true total
