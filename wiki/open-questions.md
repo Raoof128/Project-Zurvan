@@ -51,3 +51,18 @@ Unresolved questions extracted from sources.
 - **ID**: ebfcb734
 - **Reason**: BEAM benchmark shows contradiction resolution <0.05 across all major memory systems (unsolved). Zurvan has contradiction_radar, decision status fields, and the graph; missing pieces are bitemporal claim fields and a supersession rule.
 - **Tags**: research, contradiction, belief-revision, graph
+
+## Q: Invent D — graph-aware drift propagation: when a wiki page changes, walk graph edges to mark dependent pages dirty and emit a repair queue (mechanical fix for Karpathy's acknowledged 'drift over time' problem)?
+- **ID**: c3f3f1fc
+- **Reason**: Karpathy's LLM-wiki gist names drift as unsolved; Zurvan has the graph + mtimes but no content-level dirty propagation. Feeds invention C (belief revision).
+- **Tags**: research, drift, graph, lint, karpathy
+
+## Q: Invent E — evidence-coverage score per page: fraction of statements backed by claim links, quantifying Karpathy's 'confidence/verification status' problem?
+- **ID**: 3c7cad89
+- **Reason**: Gist names well-supported-vs-speculative tracking as unsolved; Zurvan's verbatim-evidence claims make it measurable. Becomes an axis of MemProv-Bench (invention A).
+- **Tags**: research, evidence-coverage, claims, memprov-bench, karpathy
+
+## Q: Invent F — 'zurvan lint' as a first-class self-maintenance loop: contradictions + drift + orphans + evidence coverage in one command emitting a repair queue?
+- **ID**: 2c5f6d5b
+- **Reason**: Karpathy describes lint only abstractly; Zurvan has audit_wiki + contradiction_radar as separate pieces. F is the delivery vehicle for D and E.
+- **Tags**: research, lint, self-maintenance, karpathy
