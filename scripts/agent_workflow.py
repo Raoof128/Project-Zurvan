@@ -75,6 +75,123 @@ def _index_staleness(root: Path | None = None, db_path: Path | None = None) -> s
     return "fresh"
 
 
+def _norm(s: str) -> str:
+    return s.strip().lower().replace("_", "-")
+
+
+def _frontmatter_title_tags(path: Path) -> tuple[str, list[str]]:
+    """Naive line-based frontmatter reader (same approach as graph_build):
+    returns (title, [tags]) — enough for digest matching, no YAML dependency."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "", []
+    if not lines or lines[0].strip() != "---":
+        return "", []
+    title, tags, in_tags = "", [], False
+    for line in lines[1:80]:
+        if line.strip() == "---":
+            break
+        if line.startswith("title:"):
+            title = line.split(":", 1)[1].strip().strip('"')
+            in_tags = False
+        elif line.startswith("tags:"):
+            in_tags = True
+        elif in_tags and line.strip().startswith("- "):
+            tags.append(_norm(line.strip()[2:].strip('"')))
+        elif line and not line.startswith(" ") and ":" in line:
+            in_tags = False
+    return title, tags
+
+
+def _claim_text(path: Path) -> str:
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    parts = body.split("# Claim", 1)
+    if len(parts) == 2:
+        for line in parts[1].splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and not line.startswith(">"):
+                return line
+    return ""
+
+
+def _matches(name: str, tokens: list[str], text: str, tags: list[str]) -> bool:
+    if name in _norm(text):
+        return True
+    return any(t in tags for t in tokens)
+
+
+def project_digest(project: str, root: Path | None = None) -> str:
+    """~150-token, titles-only recall digest for a project name. Pure keyword
+    scan over decisions/claims/open questions — never loads the embedding
+    model, so it is safe in a SessionStart hook for any repo."""
+    root = root or ROOT
+    name = _norm(project)
+    tokens = [t for t in name.split("-") if len(t) >= 4] or [name]
+
+    decisions, claims, questions = [], [], []
+    n_dec = n_claim = n_q = 0
+
+    for path in sorted((root / "wiki" / "decisions").glob("*.md")):
+        title, tags = _frontmatter_title_tags(path)
+        if _matches(name, tokens, title, tags):
+            n_dec += 1
+            if len(decisions) < 5:
+                rel = path.relative_to(root)
+                decisions.append(f"- {title[:120]} ({rel})")
+
+    for path in sorted((root / "wiki" / "claims").glob("*.md")):
+        _, tags = _frontmatter_title_tags(path)
+        text = _claim_text(path)
+        if _matches(name, tokens, text, tags):
+            n_claim += 1
+            if len(claims) < 3:
+                rel = path.relative_to(root)
+                claims.append(f"- {text[:120]} ({rel})")
+
+    oq = root / "wiki" / "open-questions.md"
+    if oq.exists():
+        block_q, block_tags = "", ""
+        blocks = []
+        for line in oq.read_text(encoding="utf-8").splitlines() + ["## Q:"]:
+            if line.startswith("## Q:"):
+                if block_q:
+                    blocks.append((block_q, block_tags))
+                block_q, block_tags = line[5:].strip(), ""
+            elif "**Tags**:" in line:
+                block_tags = line.split("**Tags**:", 1)[1]
+        for q, qtags in blocks:
+            tag_list = [_norm(t) for t in qtags.replace(",", " ").split()]
+            if _matches(name, tokens, q, tag_list):
+                n_q += 1
+                if len(questions) < 3:
+                    questions.append(f"- {q[:120]}")
+
+    lines = [f"# Zurvan recall — {project}"]
+    if not (n_dec or n_claim or n_q):
+        lines.append("No Zurvan knowledge for this project yet.")
+    else:
+        if decisions:
+            lines += ["Decisions:"] + decisions
+        if claims:
+            lines += ["Claims:"] + claims
+        if questions:
+            lines += ["Open questions:"] + questions
+
+        def _plural(n, w):
+            return f"{n} {w}{'' if n == 1 else 's'}"
+
+        lines.append(f"{_plural(n_dec, 'decision')}, {_plural(n_claim, 'claim')}, "
+                     f"{_plural(n_q, 'open question')} match.")
+    lines.append("Deeper: `zurvan_search` MCP tool (hybrid) or "
+                 "`zurvan search \"<topic>\" --hybrid --json`; "
+                 "write back with `zurvan decision/claim/question add` (tag the project).")
+    return "\n".join(lines)
+
+
 def agent_prime() -> str:
     """Compact orientation card (~300 tokens) for agent session starts.
 
