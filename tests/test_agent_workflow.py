@@ -154,3 +154,40 @@ def test_project_digest_caps_output(tmp_path):
     assert len(lines) <= 5                       # decision cap
     assert all(len(l) <= 160 for l in lines)     # line cap (120 + path suffix)
     assert "12 decisions" in out                 # counts reflect the true total
+
+
+from unittest.mock import patch as _patch
+from scripts.agent_workflow import agent_prime
+
+
+def test_agent_prime_project_routes_to_digest(tmp_path, monkeypatch):
+    _make_corpus(tmp_path)
+    monkeypatch.setattr("scripts.agent_workflow.ROOT", tmp_path)
+    out = agent_prime(project="nexus-archive")
+    assert out.startswith("# Zurvan recall — nexus-archive")
+    assert "# Zurvan prime" not in out  # digest replaces the full card
+
+
+def test_agent_prime_fix_stale_triggers_incremental_reindex(monkeypatch):
+    monkeypatch.setattr("scripts.agent_workflow._index_staleness",
+                        lambda *a, **k: "STALE — 3 file(s) newer than the index; run `zurvan index search`")
+    with _patch("scripts.rebuild_search_index.rebuild_search_index") as rb:
+        agent_prime(fix_stale=True)
+    rb.assert_called_once()
+
+
+def test_agent_prime_fix_stale_survives_reindex_failure(monkeypatch):
+    monkeypatch.setattr("scripts.agent_workflow._index_staleness",
+                        lambda *a, **k: "STALE — 1 file(s) newer than the index; run `zurvan index search`")
+    with _patch("scripts.rebuild_search_index.rebuild_search_index",
+                side_effect=RuntimeError("boom")):
+        out = agent_prime(fix_stale=True)   # must not raise
+    assert "STALE" in out                    # degrades to the existing warning
+
+
+def test_agent_prime_fix_stale_skips_when_fresh(monkeypatch):
+    monkeypatch.setattr("scripts.agent_workflow._index_staleness",
+                        lambda *a, **k: "fresh")
+    with _patch("scripts.rebuild_search_index.rebuild_search_index") as rb:
+        agent_prime(fix_stale=True)
+    rb.assert_not_called()
