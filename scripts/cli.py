@@ -411,7 +411,14 @@ def main():
     agent_pref.add_argument("--graph", action="store_true")
     agent_pref.add_argument("--limit", type=int, default=10)
     
-    agent_sub.add_parser("prime", help="Compact session-start orientation card (~300 tokens)")
+    agent_prime_p = agent_sub.add_parser(
+        "prime", help="Compact session-start orientation card (~300 tokens)")
+    agent_prime_p.add_argument(
+        "--for-project", default=None,
+        help="Lean cross-project recall digest for this project name (~150 tokens)")
+    agent_prime_p.add_argument(
+        "--fix-stale", action="store_true",
+        help="Incrementally rebuild the search index first when it is stale")
 
     agent_post = agent_sub.add_parser("postedit", help="Agent post-edit log")
     agent_post.add_argument("--summary", required=True)
@@ -878,7 +885,7 @@ def main():
         print(session_close(args.topic, args.summary, args.checks))
     elif args.command == "agent" and args.action == "prime":
         from scripts.agent_workflow import agent_prime
-        print(agent_prime())
+        print(agent_prime(project=args.for_project, fix_stale=args.fix_stale))
     elif args.command == "agent" and args.action == "preflight":
         from scripts.agent_workflow import agent_preflight
         print(agent_preflight(args.topic, args.hybrid, args.graph, args.limit))
