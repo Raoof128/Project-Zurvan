@@ -192,14 +192,29 @@ def project_digest(project: str, root: Path | None = None) -> str:
     return "\n".join(lines)
 
 
-def agent_prime() -> str:
+def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
     """Compact orientation card (~300 tokens) for agent session starts.
 
     Unlike agent_preflight (which builds a full topic context bundle), this is
     topic-free and cheap: hard rules digest, index/graph health, recent
     activity, open-question count. Designed for a SessionStart hook.
+
+    fix_stale: if the search index is STALE, run the incremental rebuild first
+    (reuses unchanged embeddings); on failure degrade to the STALE warning.
+    project: return the lean cross-project recall digest instead of the full
+    Zurvan card (for SessionStart hooks in other repos).
     """
     import sqlite3
+
+    if fix_stale and _index_staleness().startswith("STALE"):
+        try:
+            from scripts.rebuild_search_index import rebuild_search_index
+            rebuild_search_index()
+        except Exception:
+            pass  # degrade to the STALE warning below
+
+    if project:
+        return project_digest(project)
 
     lines = [
         "# Zurvan prime",
