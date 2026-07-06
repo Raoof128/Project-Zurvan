@@ -66,3 +66,13 @@ Unresolved questions extracted from sources.
 - **ID**: 2c5f6d5b
 - **Reason**: Karpathy describes lint only abstractly; Zurvan has audit_wiki + contradiction_radar as separate pieces. F is the delivery vehicle for D and E.
 - **Tags**: research, lint, self-maintenance, karpathy
+
+## Q: Invent G — the compiled wiki: make the claim database the source of truth and compile wiki pages as materialized views over claim clusters; includes verbatim-heartbeat drift detection (claim alive iff its quote still exists byte-for-byte in the source; dead claims propagate drift pressure through graph edges)?
+- **ID**: e525aaea
+- **Reason**: Karpathy's drift + page-vs-edit + confidence problems are all symptoms of pages-as-truth. Zurvan's verbatim-anchored claims are uniquely strong enough to invert this: pages become regenerable cache, drift becomes exactly detectable (O(seconds) evidence re-grep), confidence becomes per-claim survival aggregate. Umbrella over inventions C/D/E.
+- **Tags**: research, compiled-wiki, claims, drift, heartbeat, karpathy
+
+## Q: Invent H — eval-gated crystallization: ingest only appends claims; a periodic librarian pass clusters claim embeddings and lets pages precipitate when cluster density saturates, with any reorganization accepted only if the retrieval gold-set eval does not regress?
+- **ID**: 4431ea58
+- **Reason**: Solves Karpathy's unsolved new-page-vs-edit heuristic by (a) making the decision reversible (claims first, pages later) and (b) replacing aesthetic judgment with the repo's existing eval-gate discipline (top-3 recall must not drop).
+- **Tags**: research, crystallization, librarian, eval-gate, karpathy
