@@ -19,3 +19,18 @@ def get_config_dir() -> Path:
 
 def get_registry_path() -> Path:
     return get_config_dir() / "projects.json"
+
+
+def get_search_db_path() -> Path:
+    """Path to the search index, honouring ZURVAN_SEARCH_DB.
+
+    The smoke test runs under ZURVAN_EMBED_PROVIDER=mock so it needs no model
+    download. Without a redirect it rebuilt the REAL index with
+    deterministic-hash vectors, silently destroying semantic search — measured
+    at 0% semantic recall afterwards, twice. Every component that opens the
+    index resolves it here so one environment variable moves all of them.
+    """
+    override = os.environ.get("ZURVAN_SEARCH_DB")
+    if override:
+        return Path(override)
+    return PROJECT_ROOT / "data" / "search.sqlite"

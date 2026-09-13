@@ -43,7 +43,14 @@ def _insert_chunk(db_path, chunk_id, heading, text):
         (chunk_id, heading, text),
     )
     from scripts.embed import get_embedding
-    vec = get_embedding(text)["vector"]
+    # Pin the provider, exactly as the fixture does. Without this the vector is
+    # built with whatever the ambient environment sets (the repo exports
+    # sentence_transformers) while still being LABELLED mock, so the query —
+    # which follows the index config and is embedded with mock — is compared
+    # against a vector from a different space and scores ~0. The old
+    # keyword-heavy fusion masked it; it surfaced once semantic carried the
+    # majority of the score.
+    vec = get_embedding(text, provider="mock", model="deterministic_hash")["vector"]
     cursor.execute(
         "INSERT INTO embeddings (chunk_id, provider, model, dimension, vector) VALUES (?, ?, ?, ?, ?)",
         (chunk_id, "mock", "deterministic_hash", len(vec), json.dumps(vec)),
@@ -115,11 +122,20 @@ def test_fts_porter_stemming_matches_inflected_terms(tmp_index):
         "## Citation Rules ZQSTEM777\nEvery citation needs a source.",
     )
 
-    # Plural query against singular indexed text: keyword score must be > 0.
-    results = search_hybrid("citations ZQSTEM777", limit=5, db_path=tmp_index)
-    hit = next((r for r in results if r["chunk_id"] == chunk_id), None)
-    assert hit is not None
-    assert hit["keyword_score"] > 0.0
+    # Asserted at the FTS layer, which is where stemming actually happens.
+    # Going through search_hybrid coupled this to the fusion ranking: semantic
+    # now carries most of the score, and a synthetic chunk cannot out-rank
+    # 26k real ones on a mock-space vector however well it matches lexically.
+    # The claim under test is unchanged — a plural query matches singular text.
+    conn = sqlite3.connect(tmp_index)
+    try:
+        matched = conn.execute(
+            "SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ?", ('"citations"',)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert (chunk_id,) in matched, "porter stemming should match 'citations' to 'Citation'"
 
 
 def test_query_embedding_follows_index_provider(tmp_index, monkeypatch):

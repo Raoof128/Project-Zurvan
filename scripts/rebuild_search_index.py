@@ -25,8 +25,13 @@ def _harvest_reusable_embeddings(db_path: str) -> dict:
 
 def rebuild_search_index(db_path: str | None = None):
     if db_path is None:
-        os.makedirs(str(PROJECT_ROOT / "data"), exist_ok=True)
-        db_path = str(PROJECT_ROOT / "data" / "search.sqlite")
+        # ZURVAN_SEARCH_DB lets a test build its index somewhere disposable.
+        # Without it the smoke test, which runs under the mock embedding
+        # provider, rebuilt the REAL index with deterministic-hash vectors and
+        # silently destroyed semantic search — measured at 0% recall afterwards.
+        from scripts.config import get_search_db_path
+        db_path = str(get_search_db_path())
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     else:
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 

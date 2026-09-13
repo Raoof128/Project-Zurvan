@@ -150,11 +150,40 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
         print("=========================")
 
     if top3_accuracy < min_top3:
+        if _index_uses_mock_embeddings():
+            # Retrieval quality cannot be judged against deterministic-hash
+            # vectors: the semantic half of the score is noise, so the number
+            # measures nothing. The smoke test runs under the mock provider,
+            # and this gate previously "passed" there only because that run had
+            # overwritten the real index with mock embeddings — the very bug
+            # this skip exists to stop masking.
+            if not as_json:
+                print(
+                    f"Skipping the retrieval quality gate: the index was built with mock "
+                    f"embeddings, so top-3 ({top3_accuracy:.2f}) is not a meaningful "
+                    f"measurement. Rebuild with a real provider to enforce it."
+                )
+            metrics["skipped_reason"] = "mock embeddings"
+            return metrics
         if not as_json:
             print(f"Error: Top-3 accuracy ({top3_accuracy}) is below required minimum ({min_top3})")
         sys.exit(1)
 
     return metrics
+
+
+def _index_uses_mock_embeddings() -> bool:
+    """True when the search index holds deterministic-hash vectors."""
+    import sqlite3
+    from scripts.config import get_search_db_path
+
+    try:
+        conn = sqlite3.connect(str(get_search_db_path()))
+        row = conn.execute("SELECT provider FROM embeddings LIMIT 1").fetchone()
+        conn.close()
+        return bool(row) and row[0] == "mock"
+    except sqlite3.Error:
+        return False
 
 if __name__ == "__main__":
     import argparse

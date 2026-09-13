@@ -22,7 +22,8 @@ def _search_internal(
     base = Path(root) if root is not None else PROJECT_ROOT
     if hybrid:
         from scripts.hybrid_search import search_hybrid
-        return search_hybrid(query, limit, db_path=str(base / "data" / "search.sqlite"))
+        from scripts.config import get_search_db_path
+        return search_hybrid(query, limit, db_path=str(get_search_db_path()))
 
     # Scan the same corpus the search index does (wiki/ + docs/): keyword mode
     # previously globbed wiki/ only, so `zurvan search <term>` silently could

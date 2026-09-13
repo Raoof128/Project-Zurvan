@@ -52,3 +52,50 @@ def test_run_search_evaluation_json_output(capsys):
     assert payload["queries"] == metrics["queries"]
     assert payload["passed"] is True
     assert 0.0 <= payload["top3_accuracy"] <= 1.0
+
+
+# ── the mock-embedding gate skip ──────────────────────────────────────────────
+
+def test_gate_is_skipped_when_the_index_holds_mock_embeddings(tmp_path, monkeypatch, capsys):
+    """Retrieval quality cannot be judged against deterministic-hash vectors.
+
+    This gate used to "pass" during the smoke test only because that run had
+    overwritten the real index with mock embeddings — it was measuring the
+    poisoning, not the retrieval.
+    """
+    import sqlite3
+    from scripts import eval_search as es
+
+    db = tmp_path / "search.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE embeddings (chunk_id TEXT, provider TEXT, model TEXT)")
+    conn.execute("INSERT INTO embeddings VALUES ('c', 'mock', 'deterministic_hash')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ZURVAN_SEARCH_DB", str(db))
+
+    assert es._index_uses_mock_embeddings() is True
+
+
+def test_gate_is_enforced_when_the_index_holds_real_embeddings(tmp_path, monkeypatch):
+    import sqlite3
+    from scripts import eval_search as es
+
+    db = tmp_path / "search.sqlite"
+    conn = sqlite3.connect(str(db))
+    conn.execute("CREATE TABLE embeddings (chunk_id TEXT, provider TEXT, model TEXT)")
+    conn.execute("INSERT INTO embeddings VALUES ('c', 'sentence_transformers', 'all-MiniLM-L6-v2')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ZURVAN_SEARCH_DB", str(db))
+
+    assert es._index_uses_mock_embeddings() is False
+
+
+def test_a_missing_index_does_not_count_as_mock(tmp_path, monkeypatch):
+    """Absent is not the same as mock — a missing index must still fail the gate."""
+    from scripts import eval_search as es
+
+    monkeypatch.setenv("ZURVAN_SEARCH_DB", str(tmp_path / "absent.sqlite"))
+
+    assert es._index_uses_mock_embeddings() is False

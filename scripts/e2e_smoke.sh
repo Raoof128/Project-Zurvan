@@ -6,6 +6,14 @@ export ZURVAN_LLM_PROVIDER="${ZURVAN_LLM_PROVIDER:-mock}"
 export ZURVAN_LLM_MODEL="${ZURVAN_LLM_MODEL:-mock}"
 export ZURVAN_EMBED_PROVIDER="${ZURVAN_EMBED_PROVIDER:-mock}"
 
+# The smoke test runs under the mock embedding provider so it needs no model
+# download. Every index rebuild inside this run — including the ones inside
+# check.sh — must therefore go somewhere disposable: rebuilding the REAL index
+# under mock replaces all 26k vectors with deterministic hashes and silently
+# destroys semantic search. That happened twice before this redirect existed.
+export ZURVAN_SEARCH_DB="${ZURVAN_SEARCH_DB:-$(mktemp -d)/search.sqlite}"
+echo "Smoke-test search index: $ZURVAN_SEARCH_DB"
+
 echo "[1/12] Installing/checking dependencies..."
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
