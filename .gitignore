@@ -48,11 +48,17 @@ coverage.json
 # private source page became committable on a public remote.
 wiki/sources/*
 !wiki/sources/.gitkeep
-wiki/claims/Claim-*.md
-wiki/concepts/AutoConcept-*.md
+# Case-folded globs. gitignore matching is CASE-SENSITIVE, but the CLI writes
+# lowercase `claim-<id>.md` while these rules were spelled `Claim-*`. That only
+# ever matched because macOS is case-insensitive; on Linux or in CI every
+# CLI-written claim — each quoting a private source verbatim — became
+# trackable. Claims are ignored wholesale for the same reason as sources.
+wiki/claims/*
+!wiki/claims/.gitkeep
+wiki/concepts/[Aa]uto[Cc]oncept-*.md
 
 # Zurvan MCP knowledge nodes (written by zurvan_remember)
-wiki/note-*.md
+wiki/[Nn]ote-*.md
 
 # Obsidian auto-generated session state (not config)
 .obsidian/workspace.json

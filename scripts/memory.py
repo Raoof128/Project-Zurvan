@@ -32,6 +32,23 @@ def _unique_path(directory: str, slug: str, prefix: str = "") -> str:
             return candidate
         counter += 1
 
+def current_project_name() -> str:
+    """Name of the active workspace, or 'unknown'.
+
+    Written into every decision as `project:` because wiki/decisions/ is tracked
+    and this store holds every project's memory. public_repo_guard publishes a
+    page only if that field names an allowlisted public project, so an
+    undeclared or wrongly-declared page is blocked rather than leaked. Correct
+    the field by hand if the active workspace was not the decision's subject.
+    """
+    try:
+        from scripts.project_registry import get_current_project
+        name, _path = get_current_project()
+        return name or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def add_decision(title: str, reason: str, status: str, tags: List[str]):
     filepath = _unique_path("wiki/decisions", _make_note_slug(title))
 
@@ -39,6 +56,7 @@ def add_decision(title: str, reason: str, status: str, tags: List[str]):
     content = f"""---
 title: {escape_yaml_string(title)}
 type: decision
+project: {escape_yaml_string(current_project_name())}
 status: {escape_yaml_string(status)}
 tags:
 {tags_yaml}

@@ -9,6 +9,9 @@ BLOCKED_PATTERNS = [
     # (<page>.md.pre-repair.bak) slipped past both this guard and .gitignore.
     # Directory patterns match the whole subtree, which closes that.
     "wiki/sources/",
+    # Claims quote their source verbatim, so a claim page carries private
+    # source text even though the source page itself is ignored.
+    "wiki/claims/",
     "dist/snapshots/",
     "dist/backups/",
     "evidence-packs/",
@@ -33,10 +36,15 @@ BLOCKED_PATTERNS = [
 # wiki/decisions/ as a decision about this repo — and the remote is public.
 CROSS_PROJECT_DIRS = ("wiki/decisions/", "wiki/digests/")
 
-# Allowlist, not a denylist: a page may only be tracked if it is tagged for a
-# project that is already public. A denylist would fail OPEN for every new
-# private project, which is exactly the case that matters.
-PUBLIC_PROJECT_TAGS = frozenset({
+# Publishability is decided by ONE thing: a `project:` frontmatter field naming
+# a project on this allowlist. Tags do not confer it.
+#
+# Tags used to, and that failed open: a page tagged `zurvan` (public) plus
+# `private-project-c` (private) passed, because the veto below only knows the private
+# names somebody remembered to list. With an explicit declaration checked
+# against an allowlist, an unlisted project is blocked by construction — there
+# is no list of private names to keep up to date.
+PUBLIC_PROJECTS = frozenset({
     "zurvan",
     "project-zurvan",
     "simurgh",
@@ -48,11 +56,10 @@ PUBLIC_PROJECT_TAGS = frozenset({
     "raoof128",
 })
 
-# A VETO, checked before the allowlist. Red-teaming the allowlist showed it is
-# not sufficient on its own: a page can be correctly tagged for a public
-# project AND carry another project's content (e.g. a decision tagged
-# "zurvan" whose subject is ingesting a private research corpus). Any of these
-# tags blocks the page no matter what else it carries.
+# Defence in depth only — NOT load-bearing. Since publishability now requires a
+# declared, allowlisted project, an unlisted private project is already blocked.
+# This veto exists to catch a page whose `project:` is right but whose tags show
+# it has picked up another project's content, and to give a clearer message.
 PRIVATE_PROJECT_TAGS = frozenset({
     "private-project-a", "private-project-b", "private-project-b-full", "private-project-c",
     "private-project-c", "private-project-d", "private-project-e", "private-project-f", "private-project-g", "private-project-h", "private-project-h",
@@ -126,23 +133,36 @@ def page_tags(text):
     return {t for t in cleaned if t}
 
 
+def page_project(text):
+    """The project a page declares in frontmatter, lowercased, or None."""
+    import re
+
+    fm = _frontmatter(text)
+    if not fm:
+        return None
+    match = re.search(r'^project:[ \t]*(\S.*?)[ \t]*$', fm, re.M)
+    if not match:
+        return None
+    value = match.group(1).strip().strip('"').strip("'").strip().lower()
+    return value or None
+
+
 def page_verdict(text):
     """Why a page may not be published, or None if it may.
 
-    Three layers, cheapest and most decisive first. Each exists because the
-    one before it was shown insufficient when red-teamed against the real
-    store: a private-project veto, then a public-project allowlist, then a
-    scan for identifiers that must not be published even on a public project's
-    page.
+    Load-bearing check is the declared project against PUBLIC_PROJECTS. The tag
+    veto and the identifier scan are additional layers, each added because
+    red-teaming showed the check before it insufficient against the real store.
     """
-    tags = page_tags(text)
-
-    private = sorted(tags & PRIVATE_PROJECT_TAGS)
+    private = sorted(page_tags(text) & PRIVATE_PROJECT_TAGS)
     if private:
         return f"tagged for a private project: {', '.join(private)}"
 
-    if not tags & PUBLIC_PROJECT_TAGS:
-        return f"no public project tag (tags={sorted(tags) or 'none'})"
+    project = page_project(text)
+    if project is None:
+        return "no `project:` declared in frontmatter"
+    if project not in PUBLIC_PROJECTS:
+        return f"project '{project}' is not a public project"
 
     identifiers = page_identifiers(text)
     if identifiers:
@@ -254,9 +274,11 @@ def main():
         for path, why in unmarked:
             print(f" - {path} ({why})")
         print(
-            "\nEither add a public project tag (one of: "
-            f"{', '.join(sorted(PUBLIC_PROJECT_TAGS))})\n"
-            "or untrack the page:  git rm --cached <path>"
+            "\nEither declare a public project in the page's frontmatter —\n"
+            f"    project: <one of {', '.join(sorted(PUBLIC_PROJECTS))}>\n"
+            "or untrack the page:  git rm --cached <path>\n"
+            "Declaring a project that is not on that list does NOT unblock it;\n"
+            "adding a project to the list means its decisions are publishable."
         )
         sys.exit(1)
 
