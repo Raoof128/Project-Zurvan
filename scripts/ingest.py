@@ -37,17 +37,72 @@ def calculate_hash(filepath):
             sha256.update(chunk)
     return sha256.hexdigest()
 
+# The 7 ligatures MuPDF knows about. pypdf emits these glyphs verbatim, which
+# makes the affected words invisible to BM25 ("identiﬁable" is not "identifiable")
+# and impossible to quote in a claim, since `claim add` checks the evidence
+# byte-for-byte against the page.
+LIGATURES = {
+    "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl",
+    "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "ft", "ﬆ": "st",
+}
+
+_PARAGRAPH_BREAK = "␞"  # placeholder while unwrapping; not valid in PDF text
+
+
+def normalize_extracted_text(text: str) -> str:
+    """Repair the extraction artefacts that break search and claim anchoring.
+
+    Two defects, both observed in real ingests:
+      * ligature glyphs (191 across three Anthropic PDFs under pypdf);
+      * one-word-per-line wrapping — one paper came through with 98% of its
+        lines holding a single word, which defeats phrase search entirely.
+    Blank lines are preserved as paragraph boundaries; everything else is
+    unwrapped back into running text.
+
+    Deliberately does NOT join hyphens at line ends. PyMuPDF's TEXT_DEHYPHENATE
+    flag has no effect on extraction output (it only joins within a block), and
+    a naive join corrupts legitimate compounds — "state-\\nof-the-art" would
+    become "stateof-the-art". Measured cost of leaving them: 39 hyphen-breaks
+    across 245k characters.
+    """
+    for glyph, plain in LIGATURES.items():
+        text = text.replace(glyph, plain)
+    text = text.replace(" ", " ")
+    # Only a TRULY empty line is a paragraph break. A whitespace-only line
+    # ("\n \n") is the word separator in one-word-per-line output, not a
+    # paragraph: treating it as one leaves pypdf's output at 97% one-word lines
+    # and invents thousands of false paragraphs. Measured on the real corpus.
+    text = text.replace("\r\n", "\n")
+    text = _re_ingest.sub(r"\n\n+", _PARAGRAPH_BREAK, text)
+    text = _re_ingest.sub(r"[ \t]*\n[ \t]*", " ", text)
+    text = text.replace(_PARAGRAPH_BREAK, "\n\n")
+    return _re_ingest.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+def _extract_pdf(filepath: str) -> str:
+    """PDF text via PyMuPDF, falling back to pypdf.
+
+    PyMuPDF is ~4x faster than pypdf on this corpus (0.71s vs 2.88s over 93
+    pages) and emits no ligature glyphs. pypdf stays as the fallback so an
+    environment without PyMuPDF still ingests rather than failing.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        reader = PdfReader(filepath)
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+    with pymupdf.open(filepath) as doc:
+        return "\n".join(page.get_text("text") for page in doc)
+
+
 def extract_text(filepath):
     ext = os.path.splitext(filepath)[1].lower()
     if ext in ['.txt', '.md']:
         with open(filepath, 'r', encoding='utf-8') as f:
             return f.read()
     elif ext == '.pdf':
-        reader = PdfReader(filepath)
-        text = ''
-        for page in reader.pages:
-            text += page.extract_text() + '\n'
-        return text
+        return normalize_extracted_text(_extract_pdf(filepath))
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 

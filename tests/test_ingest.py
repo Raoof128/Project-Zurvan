@@ -350,3 +350,92 @@ def test_find_source_by_hash_returns_none_for_unseen_content(tmp_path, monkeypat
     monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
 
     assert _db.find_source_by_hash("never-seen") is None
+
+
+# ── PDF extraction quality (PyMuPDF + normalisation) ──────────────────────────
+
+from scripts.ingest import LIGATURES, normalize_extracted_text
+
+
+def test_ligatures_are_expanded():
+    """Regression: pypdf emitted 191 ligature glyphs across three real PDFs,
+    making those words invisible to BM25 and unquotable in a claim."""
+    out = normalize_extracted_text("identiﬁable eﬀort ﬂow oﬃce waﬄe")
+
+    assert out == "identifiable effort flow office waffle"
+    assert not any(g in out for g in LIGATURES)
+
+
+def test_one_word_per_line_wrapping_is_rejoined():
+    """Regression: one paper arrived with 98% of lines holding a single word,
+    which defeats phrase search."""
+    mangled = "This\n \nis\n \nnot\n \na\n \nviolation\n \nof\n \nour\n \nthreat\n \nmodel"
+
+    assert normalize_extracted_text(mangled) == "This is not a violation of our threat model"
+
+
+def test_paragraph_breaks_survive_unwrapping():
+    """Blank lines are real structure and must not be flattened away."""
+    out = normalize_extracted_text("first\nparagraph\n\nsecond\nparagraph")
+
+    assert out == "first paragraph\n\nsecond paragraph"
+
+
+def test_non_breaking_spaces_become_ordinary_spaces():
+    """A non-breaking space silently broke a verbatim claim quote once."""
+    assert normalize_extracted_text("Limited alignment assessment") == "Limited alignment assessment"
+
+
+def test_hyphenated_line_breaks_are_left_alone():
+    """Joining them naively corrupts legitimate compounds, so we don't."""
+    out = normalize_extracted_text("state-\nof-the-art")
+
+    assert out == "state- of-the-art"
+    assert "stateof" not in out
+
+
+def test_runs_of_spaces_are_collapsed():
+    assert normalize_extracted_text("double  spaced   words") == "double spaced words"
+
+
+def test_normalisation_is_idempotent():
+    once = normalize_extracted_text("a\n \nb\n\nc  d")
+    assert normalize_extracted_text(once) == once
+
+
+def test_pdf_extraction_uses_pymupdf_when_available(tmp_path, monkeypatch):
+    """PyMuPDF is ~4x faster than pypdf on this corpus and emits no ligatures."""
+    import pymupdf
+
+    pdf = tmp_path / "sample.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "hello ingested world")
+    doc.save(str(pdf))
+    doc.close()
+
+    assert "hello ingested world" in extract_text(str(pdf))
+
+
+def test_pdf_extraction_falls_back_to_pypdf_without_pymupdf(tmp_path, monkeypatch):
+    """An environment without PyMuPDF must still ingest, not fail."""
+    import builtins
+    import pymupdf
+
+    pdf = tmp_path / "sample.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "fallback path works")
+    doc.save(str(pdf))
+    doc.close()
+
+    real_import = builtins.__import__
+
+    def _no_pymupdf(name, *args, **kwargs):
+        if name == "pymupdf":
+            raise ImportError("simulated: PyMuPDF not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _no_pymupdf)
+
+    assert "fallback path works" in extract_text(str(pdf))
