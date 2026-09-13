@@ -13,4 +13,19 @@ while [ -L "$SOURCE" ]; do
 done
 ZURVAN_ROOT="$(cd -P "$(dirname "$SOURCE")/.." >/dev/null 2>&1 && pwd)"
 
-PYTHONPATH="$ZURVAN_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec python3 "$ZURVAN_ROOT/scripts/cli.py" "$@"
+# Pick an interpreter that actually has Zurvan's deps. On some machines the bare
+# `python3` is a bleeding-edge or PEP 668 externally-managed interpreter (e.g.
+# Homebrew 3.14) with no PyYAML, so it dies with "ModuleNotFoundError: yaml".
+# Honor an explicit override, else use the first candidate that can import yaml,
+# else fall back to python3 (preserving the historical default).
+ZURVAN_PYBIN="${ZURVAN_PYTHON:-}"
+if [ -z "$ZURVAN_PYBIN" ]; then
+  for _cand in python3 python; do
+    if command -v "$_cand" >/dev/null 2>&1 && "$_cand" -c 'import yaml' >/dev/null 2>&1; then
+      ZURVAN_PYBIN="$_cand"; break
+    fi
+  done
+fi
+[ -z "$ZURVAN_PYBIN" ] && ZURVAN_PYBIN=python3
+
+PYTHONPATH="$ZURVAN_ROOT${PYTHONPATH:+:$PYTHONPATH}" exec "$ZURVAN_PYBIN" "$ZURVAN_ROOT/scripts/cli.py" "$@"

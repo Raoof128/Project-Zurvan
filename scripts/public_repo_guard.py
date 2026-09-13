@@ -39,8 +39,8 @@ CROSS_PROJECT_DIRS = ("wiki/decisions/", "wiki/digests/")
 # Publishability is decided by ONE thing: a `project:` frontmatter field naming
 # a project on this allowlist. Tags do not confer it.
 #
-# Tags used to, and that failed open: a page tagged `zurvan` (public) plus
-# `private-project-c` (private) passed, because the veto below only knows the private
+# Tags used to, and that failed open: a page tagged `zurvan` (public) plus an
+# unlisted private project passed, because the veto below only knows the private
 # names somebody remembered to list. With an explicit declaration checked
 # against an allowlist, an unlisted project is blocked by construction — there
 # is no list of private names to keep up to date.
@@ -56,15 +56,34 @@ PUBLIC_PROJECTS = frozenset({
     "raoof128",
 })
 
-# Defence in depth only — NOT load-bearing. Since publishability now requires a
-# declared, allowlisted project, an unlisted private project is already blocked.
-# This veto exists to catch a page whose `project:` is right but whose tags show
-# it has picked up another project's content, and to give a clearer message.
-PRIVATE_PROJECT_TAGS = frozenset({
-    "private-project-a", "private-project-b", "private-project-b-full", "private-project-c",
-    "private-project-c", "private-project-d", "private-project-e", "private-project-f", "private-project-g", "private-project-h", "private-project-h",
-    "private-project-i", "private-person", "private-project-k",
-})
+# Defence in depth only — NOT load-bearing. Publishability already requires a
+# declared, allowlisted project, so an unlisted private project is blocked
+# regardless. This veto only adds a clearer message when a page's tags show it
+# has picked up another project's content.
+#
+# The names live OUTSIDE this file, because listing them here would publish
+# them: this repo is public, and the whole point of the list is that those
+# projects are not. `.private-projects` is gitignored, one lowercase tag per
+# line, `#` for comments. Absent file means an empty veto, which is safe — the
+# allowlist is what actually decides.
+PRIVATE_PROJECTS_FILE = Path(__file__).resolve().parent.parent / ".private-projects"
+
+
+def _load_private_project_tags(path=None):
+    """Read the local private-project veto list, or an empty set."""
+    source = Path(path) if path else PRIVATE_PROJECTS_FILE
+    try:
+        lines = source.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return frozenset()
+    return frozenset(
+        stripped.lower()
+        for stripped in (line.split("#", 1)[0].strip() for line in lines)
+        if stripped
+    )
+
+
+PRIVATE_PROJECT_TAGS = _load_private_project_tags()
 
 # Identifiers that must never reach a public remote even inside an otherwise
 # publishable page: account/organisation IDs and support-ticket references.
@@ -126,9 +145,9 @@ def page_tags(text):
                 return set()
             raw = re.findall(r'^[ \t]+-[ \t]*(.*)$', block.group(1), re.M)
 
-    # strip() again AFTER unquoting: '  private-project-a  ' would otherwise keep its inner
-    # padding, match neither the veto nor the allowlist, and let a padded
-    # private tag ride along beside a genuine public one.
+    # strip() again AFTER unquoting: a padded value ('  name  ') would otherwise
+    # keep its inner padding, match neither the veto nor the allowlist, and let a
+    # padded private tag ride along beside a genuine public one.
     cleaned = (t.strip().strip('"').strip("'").strip().lower() for t in raw)
     return {t for t in cleaned if t}
 

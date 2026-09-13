@@ -70,3 +70,6 @@ wiki/[Nn]ote-*.md
 # Regenerated locally by `zurvan index rebuild`; kept out of git entirely.
 wiki/index.md
 wiki/log.md
+
+# Local private-project veto list for public_repo_guard (never publish these names)
+.private-projects

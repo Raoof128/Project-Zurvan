@@ -10,6 +10,17 @@ Every fixture is synthetic. The private-looking values here are invented.
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _synthetic_private_tags(monkeypatch):
+    """The real veto list is loaded from a gitignored file and must never be
+    named in tracked source. These tests use invented project names instead."""
+    monkeypatch.setattr(
+        guard_module, "PRIVATE_PROJECT_TAGS",
+        frozenset({"acme-private", "other-private"}),
+    )
+
+import scripts.public_repo_guard as guard_module
 from scripts.public_repo_guard import (
     PRIVATE_PROJECT_TAGS,
     PUBLIC_PROJECTS,
@@ -40,7 +51,7 @@ def test_a_declared_public_project_page_is_publishable():
 
 
 def test_a_private_project_page_is_blocked():
-    assert page_verdict(page(block_tags("private-project-a"), project="zurvan")) is not None
+    assert page_verdict(page(block_tags("acme-private"), project="zurvan")) is not None
 
 
 # ── evasion 1: hide the tags somewhere the parser might still find them ───────
@@ -81,7 +92,7 @@ def test_a_declared_project_matches_regardless_of_case_or_quoting(spelling):
     assert is_publishable_page(page(project=spelling))
 
 
-@pytest.mark.parametrize("spelling", ["private-project-a", "private-project-a", "private-project-a", "  private-project-a  "])
+@pytest.mark.parametrize("spelling", ["acme-private", "Acme-Private", "ACME-PRIVATE", "  acme-private  "])
 def test_private_tags_are_vetoed_regardless_of_case_or_padding(spelling):
     """Asserted ALONGSIDE a public tag on purpose. Without the public tag the
     page is blocked anyway for having no public tag, so the test would pass
@@ -111,7 +122,7 @@ def test_a_project_name_that_merely_contains_a_public_one_does_not_match(lookali
 def test_a_private_tag_vetoes_even_under_a_public_project():
     """The bypass found when red-teaming the allowlist: correctly declared for a
     public project, but carrying another project's content."""
-    mixed = page(block_tags("zurvan", "simurgh", "private-project-c"), project="zurvan")
+    mixed = page(block_tags("zurvan", "simurgh", "other-private"), project="zurvan")
 
     verdict = page_verdict(mixed)
     assert verdict is not None
@@ -160,34 +171,34 @@ def _reader(mapping):
 
 
 def test_a_nested_subdirectory_is_still_checked():
-    files = {"wiki/decisions/2026/q3/private.md": page(block_tags("private-project-a"), project="zurvan")}
+    files = {"wiki/decisions/2026/q3/private.md": page(block_tags("acme-private"), project="zurvan")}
 
     assert audit_cross_project_pages(list(files), _reader(files))
 
 
 def test_a_capitalised_path_is_still_checked():
     """macOS is case-insensitive, so wiki/Decisions/ addresses the same file."""
-    files = {"wiki/Decisions/private.md": page(block_tags("private-project-a"), project="zurvan")}
+    files = {"wiki/Decisions/private.md": page(block_tags("acme-private"), project="zurvan")}
 
     assert audit_cross_project_pages(list(files), _reader(files))
 
 
 def test_a_non_markdown_file_under_decisions_is_still_checked():
     """The wiki/sources leak was exactly a non-.md sibling."""
-    files = {"wiki/decisions/private.md.bak": page(block_tags("private-project-a"), project="zurvan")}
+    files = {"wiki/decisions/private.md.bak": page(block_tags("acme-private"), project="zurvan")}
 
     assert audit_cross_project_pages(list(files), _reader(files))
 
 
 def test_digests_are_checked_as_well_as_decisions():
-    files = {"wiki/digests/private.md": page(block_tags("private-project-a"), project="zurvan")}
+    files = {"wiki/digests/private.md": page(block_tags("acme-private"), project="zurvan")}
 
     assert audit_cross_project_pages(list(files), _reader(files))
 
 
 def test_paths_outside_the_cross_project_dirs_are_not_checked():
     """Scope discipline: this check must not start policing scripts/ or tests/."""
-    files = {"scripts/thing.py": "tags: private-project-a", "tests/test_x.py": "private-project-a"}
+    files = {"scripts/thing.py": "tags: acme-private", "tests/test_x.py": "acme-private"}
 
     assert audit_cross_project_pages(list(files), _reader(files)) == []
 
@@ -209,11 +220,11 @@ def test_a_page_with_tags_but_no_project_is_blocked():
 
 
 @pytest.mark.parametrize("form,expected", [
-    ('tags: [private-project-a, search]\n', {"private-project-a", "search"}),
-    ('tags: private-project-a, search\n', {"private-project-a", "search"}),
-    ('tags:\n  - "private-project-a"\n  - "search"\n', {"private-project-a", "search"}),
-    ('tags:\n    - private-project-a\n    - search\n', {"private-project-a", "search"}),
-    ('tags:\n\t- private-project-a\n', {"private-project-a"}),
+    ('tags: [acme-private, search]\n', {"acme-private", "search"}),
+    ('tags: acme-private, search\n', {"acme-private", "search"}),
+    ('tags:\n  - "acme-private"\n  - "search"\n', {"acme-private", "search"}),
+    ('tags:\n    - acme-private\n    - search\n', {"acme-private", "search"}),
+    ('tags:\n\t- acme-private\n', {"acme-private"}),
 ])
 def test_every_tag_spelling_used_in_the_wiki_parses(form, expected):
     """All three forms appear in the real store. A parser that misses one lets

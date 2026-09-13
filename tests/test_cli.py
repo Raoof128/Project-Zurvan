@@ -49,6 +49,21 @@ def test_zurvan_wrapper_works_from_any_cwd(tmp_path):
     assert "Zurvan Version" in res.stdout
 
 
+def test_zurvan_wrapper_honors_python_override(tmp_path):
+    # Regression: the wrapper hardcoded `python3`, which on some machines is an
+    # interpreter without PyYAML (Homebrew 3.14), so `zurvan ...` died with
+    # ModuleNotFoundError. The wrapper now auto-selects an interpreter that can
+    # import yaml and honors an explicit ZURVAN_PYTHON override.
+    import sys
+    wrapper = os.path.abspath(os.path.join("scripts", "zurvan"))
+    env = dict(os.environ, ZURVAN_PYTHON=sys.executable)
+    res = subprocess.run(
+        [wrapper, "version"], capture_output=True, text=True, cwd=str(tmp_path), env=env
+    )
+    assert res.returncode == 0
+    assert "Zurvan Version" in res.stdout
+
+
 def test_cli_agent_prime_project_digest():
     import sys
     res = subprocess.run(
