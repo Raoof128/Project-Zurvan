@@ -17,10 +17,32 @@ def get_db():
     conn.commit()
     return conn
 
+def find_source_by_hash(file_hash):
+    """Return the path a given content hash was ingested under, or None.
+
+    Dedup is documented as being by content hash, so the same document is a
+    no-op even when it arrives under a different filename.
+    """
+    conn = get_db()
+    try:
+        row = conn.execute(
+            'SELECT path FROM sources WHERE hash = ?', (file_hash,)
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
 def register_source(path, file_hash):
     conn = get_db()
     cursor = conn.cursor()
     try:
+        # Refuse on identical CONTENT, not just an identical path: the table's
+        # UNIQUE constraint is on path alone, so the same document copied to a
+        # second filename used to ingest twice.
+        if cursor.execute(
+            'SELECT 1 FROM sources WHERE hash = ?', (file_hash,)
+        ).fetchone():
+            return False
         cursor.execute('INSERT INTO sources (path, hash) VALUES (?, ?)', (path, file_hash))
         conn.commit()
         return True

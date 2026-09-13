@@ -129,8 +129,13 @@ def add_question(question: str, reason: str, tags: List[str]):
     q_id = str(uuid.uuid4())[:8]
     questions_path = str(PROJECT_ROOT / "wiki" / "open-questions.md")
     
+    # rstrip so an untagged question writes "- **Tags**:" rather than a line
+    # with a trailing space, which `git diff --check` reports as an error.
     tags_str = ", ".join(tags)
-    entry = f"\n## Q: {question}\n- **ID**: {q_id}\n- **Reason**: {reason}\n- **Tags**: {tags_str}\n"
+    entry = (
+        f"\n## Q: {question}\n- **ID**: {q_id}\n- **Reason**: {reason}\n"
+        f"- **Tags**: {tags_str}".rstrip() + "\n"
+    )
     
     if append_file_safely(questions_path, entry):
         append_to_log("Question Added", question)

@@ -47,6 +47,7 @@ def test_guard_passes_when_no_private_paths_are_tracked(monkeypatch, capsys):
         "dist/publications/paper.md",
         "wiki/sources/leaked.pdf",
         "wiki/sources/leaked.docx",
+        "wiki/sources/",
     ],
 )
 def test_guard_fails_on_each_blocked_pattern(monkeypatch, capsys, tracked):
@@ -111,3 +112,48 @@ def test_guard_exits_nonzero_when_git_is_unavailable(monkeypatch, capsys):
 
     assert excinfo.value.code == 1
     assert "Failed to run git ls-files" in capsys.readouterr().out
+
+
+# ── ingested source pages (regression) ────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "tracked",
+    [
+        "wiki/sources/private-report.md",
+        "wiki/sources/private-report.md.pre-repair.bak",
+        "wiki/sources/private-report.md.orig",
+        "wiki/sources/notes.txt",
+        "wiki/sources/nested/deep-page.md",
+    ],
+)
+def test_guard_blocks_anything_under_wiki_sources(monkeypatch, capsys, tracked):
+    """Regression: a source page's full private text must never be trackable.
+
+    .gitignore matched only wiki/sources/*.md and the guard's extension
+    patterns only .pdf/.docx, so a sibling artefact such as
+    <page>.md.pre-repair.bak was committable on a public remote.
+    """
+    _fake_ls_files(monkeypatch, [tracked])
+
+    with pytest.raises(SystemExit) as excinfo:
+        guard.main()
+
+    assert excinfo.value.code == 1
+    assert tracked in capsys.readouterr().out
+
+
+def test_guard_still_allows_the_sources_gitkeep(monkeypatch, capsys):
+    _fake_ls_files(monkeypatch, ["wiki/sources/.gitkeep"])
+
+    guard.main()
+
+    assert "passed" in capsys.readouterr().out
+
+
+def test_guard_does_not_block_other_wiki_directories(monkeypatch, capsys):
+    """Decisions and digests are tracked by design."""
+    _fake_ls_files(monkeypatch, ["wiki/decisions/a.md", "wiki/digests/b.md"])
+
+    guard.main()
+
+    assert "passed" in capsys.readouterr().out

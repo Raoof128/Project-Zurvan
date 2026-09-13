@@ -284,3 +284,69 @@ def test_ingest_refuses_to_start_without_pyyaml(monkeypatch):
     message = str(excinfo.value)
     assert "PyYAML" in message
     assert "ZURVAN_PYTHON" in message
+
+
+def test_identical_content_under_a_new_filename_is_not_ingested_twice(tmp_path, monkeypatch, capsys):
+    """Dedup is documented as by content hash, but the table is UNIQUE on path,
+    so the same document copied to a second filename used to ingest twice."""
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
+
+    first = tmp_path / "paper.txt"
+    first.write_text("identical content")
+    second = tmp_path / "paper-copy.txt"
+    second.write_text("identical content")
+
+    monkeypatch.setattr(sys, "argv", ["ingest", str(first)])
+    _ingest.main()
+    capsys.readouterr()
+
+    monkeypatch.setattr(sys, "argv", ["ingest", str(second)])
+    _ingest.main()
+
+    out = capsys.readouterr().out
+    assert "same content as already-ingested" in out
+    assert str(first) in out
+
+
+def test_re_ingesting_the_same_path_still_reports_already_ingested(tmp_path, monkeypatch, capsys):
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
+
+    src = tmp_path / "paper.txt"
+    src.write_text("content")
+
+    monkeypatch.setattr(sys, "argv", ["ingest", str(src)])
+    _ingest.main()
+    capsys.readouterr()
+    _ingest.main()
+
+    assert "has already been ingested" in capsys.readouterr().out
+
+
+def test_different_content_still_ingests(tmp_path, monkeypatch, capsys):
+    """The hash guard must not block genuinely new documents."""
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
+
+    for name, body in (("a.txt", "first document"), ("b.txt", "second document")):
+        src = tmp_path / name
+        src.write_text(body)
+        monkeypatch.setattr(sys, "argv", ["ingest", str(src)])
+        _ingest.main()
+
+    assert "Successfully ingested" in capsys.readouterr().out
+    assert (tmp_path / "wiki" / "sources" / "a.md").exists()
+    assert (tmp_path / "wiki" / "sources" / "b.md").exists()
+
+
+def test_find_source_by_hash_returns_none_for_unseen_content(tmp_path, monkeypatch):
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
+
+    assert _db.find_source_by_hash("never-seen") is None

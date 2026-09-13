@@ -77,3 +77,40 @@ def test_add_decision_colliding_slugs_do_not_overwrite(tmp_path, monkeypatch):
     assert len(files) == 2, files
     bodies = [(tmp_path / "wiki" / "decisions" / f).read_text() for f in files]
     assert any("reason A" in b for b in bodies) and any("reason B" in b for b in bodies)
+
+
+def test_untagged_question_writes_no_trailing_whitespace(tmp_path, monkeypatch):
+    """Regression: an empty tag list left "- **Tags**: " with a trailing space,
+    which `git diff --check` reports as a whitespace error on every commit."""
+    import scripts.memory as memory
+    import scripts.safe_write as safe_write
+
+    # safe_write derives the allowed root from its own __file__, so redirect
+    # that too or every tmp_path write is (correctly) refused.
+    monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path.resolve())
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "open-questions.md").write_text("")
+
+    memory.add_question("Is this tagged?", "no tags given", [])
+
+    content = (tmp_path / "wiki" / "open-questions.md").read_text()
+    assert "- **Tags**:\n" in content
+    assert not any(line.rstrip() != line for line in content.splitlines())
+
+
+def test_tagged_question_still_lists_its_tags(tmp_path, monkeypatch):
+    import scripts.memory as memory
+    import scripts.safe_write as safe_write
+
+    # safe_write derives the allowed root from its own __file__, so redirect
+    # that too or every tmp_path write is (correctly) refused.
+    monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path.resolve())
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "open-questions.md").write_text("")
+
+    memory.add_question("Tagged?", "reason", ["zurvan", "tests"])
+
+    content = (tmp_path / "wiki" / "open-questions.md").read_text()
+    assert "- **Tags**: zurvan, tests\n" in content

@@ -13,7 +13,10 @@ def mock_decisions():
             "title": "Use SQLite for everything",
             "status": "accepted",
             "tags": ["db", "architecture"],
-            "created_at": "2026-05-01T12:00:00",
+            # Relative, not a hardcoded date: this decision must stay INSIDE the
+            # 90-day window the staleness test asserts on. As a fixed date it
+            # silently aged past the threshold and broke the test months later.
+            "created_at": (datetime.now() - timedelta(days=10)).isoformat(),
             "excerpt": "We will use SQLite."
         },
         {

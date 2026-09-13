@@ -5,7 +5,7 @@ import datetime
 import json
 import re as _re_ingest
 from pypdf import PdfReader
-from scripts.db import register_source, unregister_source
+from scripts.db import find_source_by_hash, register_source, unregister_source
 from scripts.config import PROJECT_ROOT
 
 def require_ingest_dependencies():
@@ -222,6 +222,14 @@ def main():
 
     file_hash = calculate_hash(args.filepath)
     
+    existing = find_source_by_hash(file_hash)
+    if existing is not None and existing != args.filepath:
+        print(
+            f"Source '{args.filepath}' has the same content as already-ingested "
+            f"'{existing}'. Nothing to do."
+        )
+        return
+
     if not register_source(args.filepath, file_hash):
         print(f"Source '{args.filepath}' has already been ingested.")
         return

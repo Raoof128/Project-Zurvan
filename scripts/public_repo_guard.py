@@ -4,6 +4,11 @@ from pathlib import Path
 
 BLOCKED_PATTERNS = [
     "raw/",
+    # Ingested source pages carry the full text of private documents. The
+    # extension patterns below only catch .pdf/.docx, so a sibling artefact
+    # (<page>.md.pre-repair.bak) slipped past both this guard and .gitignore.
+    # Directory patterns match the whole subtree, which closes that.
+    "wiki/sources/",
     "dist/snapshots/",
     "dist/backups/",
     "evidence-packs/",

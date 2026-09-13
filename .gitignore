@@ -34,11 +34,20 @@ data/image_manifest.json
 .venv/
 __pycache__/
 .pytest_cache/
+# pytest-cov artefacts (per-host suffixed files from parallel/subprocess runs)
+.coverage
+.coverage.*
+htmlcov/
+coverage.json
 .DS_Store
 
 # Ingested external knowledge (private — generated from other projects)
-# ingest.py produces <original-filename>.<ext>.md stubs in these dirs
-wiki/sources/*.md
+# ingest.py produces <original-filename>.<ext>.md stubs in these dirs.
+# Ignore EVERY file, not just *.md: a repair/edit leaves siblings like
+# <page>.md.pre-repair.bak, which *.md does not match, so the full text of a
+# private source page became committable on a public remote.
+wiki/sources/*
+!wiki/sources/.gitkeep
 wiki/claims/Claim-*.md
 wiki/concepts/AutoConcept-*.md
 
