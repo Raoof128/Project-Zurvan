@@ -106,6 +106,54 @@ def extract_text(filepath):
     else:
         raise ValueError(f"Unsupported file format: {ext}")
 
+def pdf_figure_inventory(filepath: str) -> list:
+    """Per-page count of embedded images in a PDF. No extraction, no OCR.
+
+    A PDF's text layer contains nothing of what a chart shows. In one real
+    ingest four raster charts held per-model values that appear nowhere in the
+    prose, and the caption-count heuristic missed them entirely because that
+    paper used no "Figure N" captions. Nothing warned about any of it.
+
+    This records what is there so the gap is stated rather than silent; reading
+    the figures is a separate, opt-in visual pass (``scripts/export_figures.py``).
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        return []
+
+    figures = []
+    try:
+        with pymupdf.open(filepath) as doc:
+            for number, page in enumerate(doc, start=1):
+                count = len(page.get_images(full=True))
+                if count:
+                    figures.append({"page": number, "images": count})
+    except Exception:
+        return []
+    return figures
+
+
+def render_figure_notice(figures: list) -> str:
+    """The 'these are not transcribed' banner appended to a source page."""
+    if not figures:
+        return ""
+    total = sum(f["images"] for f in figures)
+    pages = ", ".join(str(f["page"]) for f in figures)
+    return (
+        "\n## Figures — NOT transcribed\n\n"
+        f"This PDF contains **{total} embedded image(s)** across "
+        f"{len(figures)} page(s): {pages}.\n\n"
+        "Their content is **absent from the text above** — a chart's values, a "
+        "diagram's labels and any text inside a screenshot do not appear in a "
+        "PDF's text layer. Do not treat this page as complete coverage of the "
+        "document, and do not anchor a claim to a figure through it.\n\n"
+        "To read them: `python scripts/export_figures.py <pdf>` writes the "
+        "images to disk for a visual pass, then record what they show in a "
+        "companion note.\n"
+    )
+
+
 def source_page_stem(filepath):
     """Sanitised, extension-free slug for a source's derived wiki pages.
 
@@ -126,9 +174,14 @@ def create_source_page(filepath, file_hash, text):
     os.makedirs(source_dir, exist_ok=True)
     out_path = os.path.join(source_dir, filename)
 
+    figures = pdf_figure_inventory(filepath) if filepath.lower().endswith(".pdf") else []
+    figure_count = sum(f["images"] for f in figures)
+
     content = f"""---
 title: {basename}
 hash: {file_hash}
+figures: {figure_count}
+figures_transcribed: false
 ingested_at: {datetime.datetime.now().isoformat()}
 ---
 
@@ -137,7 +190,7 @@ ingested_at: {datetime.datetime.now().isoformat()}
 ## Extracted Text
 
 {text}
-
+{render_figure_notice(figures)}
 ## Extracted Entities & Claims
 *(To be populated by LLM)*
 """
