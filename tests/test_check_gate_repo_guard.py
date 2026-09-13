@@ -150,10 +150,18 @@ def test_guard_still_allows_the_sources_gitkeep(monkeypatch, capsys):
     assert "passed" in capsys.readouterr().out
 
 
-def test_guard_does_not_block_other_wiki_directories(monkeypatch, capsys):
-    """Decisions and digests are tracked by design."""
-    _fake_ls_files(monkeypatch, ["wiki/decisions/a.md", "wiki/digests/b.md"])
+def test_blocked_patterns_do_not_cover_decisions_and_digests(monkeypatch):
+    """Decisions and digests are tracked by design, so the path blocklist must
+    not touch them. Whether an individual page may be published is a separate
+    question, decided by the publishability check (see
+    tests/test_repo_guard_redteam.py) — this asserts only the pattern layer."""
+    from scripts.public_repo_guard import BLOCKED_PATTERNS
 
-    guard.main()
-
-    assert "passed" in capsys.readouterr().out
+    for path in ("wiki/decisions/a.md", "wiki/digests/b.md"):
+        for pattern in BLOCKED_PATTERNS:
+            if pattern.endswith("/"):
+                assert not path.startswith(pattern)
+            elif pattern.startswith("."):
+                assert not path.endswith(pattern)
+            else:
+                assert path != pattern
