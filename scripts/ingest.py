@@ -5,8 +5,30 @@ import datetime
 import json
 import re as _re_ingest
 from pypdf import PdfReader
-from scripts.db import register_source
+from scripts.db import register_source, unregister_source
 from scripts.config import PROJECT_ROOT
+
+def require_ingest_dependencies():
+    """Fail fast, and legibly, if the interpreter can't finish an ingest.
+
+    ``append_log`` reaches PyYAML through ``wiki_merge`` → ``safe_write``, but
+    only at the very end of the run. On an interpreter without PyYAML (a bare
+    Homebrew ``python3``, say) the ingest therefore wrote the source page and
+    then died on an import — so check before touching anything. Mirrors the
+    interpreter probe in ``scripts/zurvan``.
+    """
+    try:
+        import yaml  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit(
+            f"Error: this interpreter cannot run an ingest ({exc}).\n"
+            "Zurvan needs an interpreter with PyYAML installed. Either run the\n"
+            "wrapper, which probes for one:\n"
+            "    scripts/zurvan ...\n"
+            "or point PYTHONPATH at the repo and use that interpreter directly:\n"
+            "    PYTHONPATH=. <python-with-pyyaml> -m scripts.ingest <file>\n"
+            "ZURVAN_PYTHON=<path> selects the interpreter for the wrapper."
+        )
 
 def calculate_hash(filepath):
     sha256 = hashlib.sha256()
@@ -183,6 +205,8 @@ def main():
     parser.add_argument("filepath", help="Path to the raw source file")
     args = parser.parse_args()
 
+    require_ingest_dependencies()
+
     if not os.path.exists(args.filepath):
         print(f"Error: File '{args.filepath}' does not exist.")
         return
@@ -203,12 +227,19 @@ def main():
         return
 
     print(f"Ingesting {args.filepath}...")
-    text = extract_text(args.filepath)
-    filename = create_source_page(args.filepath, file_hash, text)
-    create_stub_concept_and_claim(args.filepath)
-    append_log(filename)
-    update_index(filename)
-    
+    try:
+        text = extract_text(args.filepath)
+        filename = create_source_page(args.filepath, file_hash, text)
+        create_stub_concept_and_claim(args.filepath)
+        append_log(filename)
+        update_index(filename)
+    except BaseException:
+        # The registration above claims the path before any of this work runs.
+        # Release it so the half-finished ingest can simply be re-run, instead
+        # of the retry being refused as "already been ingested".
+        unregister_source(args.filepath)
+        raise
+
     print(f"Successfully ingested {args.filepath}")
 
 if __name__ == "__main__":

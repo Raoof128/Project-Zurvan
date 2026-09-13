@@ -29,3 +29,18 @@ def register_source(path, file_hash):
         return False
     finally:
         conn.close()
+
+def unregister_source(path):
+    """Drop a source's registration so a failed ingest can be retried.
+
+    ``register_source`` claims the path up front to guard against a double
+    ingest, but the page/log/index writes happen after that. Without this
+    rollback a crash mid-ingest leaves the path registered with no source page,
+    and every retry is refused with "has already been ingested".
+    """
+    conn = get_db()
+    try:
+        conn.execute('DELETE FROM sources WHERE path = ?', (path,))
+        conn.commit()
+    finally:
+        conn.close()

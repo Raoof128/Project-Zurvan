@@ -238,3 +238,49 @@ def test_image_stub_handles_filename_collision_with_counter(tmp_path, monkeypatc
 
     stubs = list((tmp_path / "wiki" / "sources").glob("test_png*.md"))
     assert len(stubs) == 3
+
+
+# ── Failed-ingest recovery + dependency preflight ─────────────────────────────
+
+import sys
+import scripts.db as _db
+
+
+def test_failed_ingest_releases_registration_so_it_can_be_retried(tmp_path, monkeypatch):
+    """A crash after register_source must not poison the path.
+
+    Regression: register_source claims the path before the page/log/index
+    writes, so a failure in append_log left the path registered with no log
+    entry and every retry was refused as "already been ingested".
+    """
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("")
+    monkeypatch.setattr(_db, "DB_PATH", str(tmp_path / "registry.sqlite"))
+
+    src = tmp_path / "paper.txt"
+    src.write_text("some content")
+
+    def _boom(_filename):
+        raise ModuleNotFoundError("No module named 'yaml'")
+
+    monkeypatch.setattr(_ingest, "append_log", _boom)
+    monkeypatch.setattr(sys, "argv", ["ingest", str(src)])
+
+    with pytest.raises(ModuleNotFoundError):
+        _ingest.main()
+
+    # The path is free again, so the retry is allowed to proceed.
+    assert _db.register_source(str(src), "deadbeef") is True
+
+
+def test_ingest_refuses_to_start_without_pyyaml(monkeypatch):
+    """Preflight fails loudly before writing anything, not midway through."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _ingest.require_ingest_dependencies()
+
+    message = str(excinfo.value)
+    assert "PyYAML" in message
+    assert "ZURVAN_PYTHON" in message

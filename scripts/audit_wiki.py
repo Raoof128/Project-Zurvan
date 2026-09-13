@@ -6,12 +6,32 @@ def audit_frontmatter(content, path):
         return f"Missing YAML frontmatter in {path}"
     return None
 
+def claim_is_cited(content):
+    """True if a claim page carries a citation in any form the repo actually writes.
+
+    Three shapes are in use and all count:
+      * ``source: "wiki/sources/x.md"`` frontmatter — what ``zurvan claim add``
+        emits (and what the CLI validates the evidence quote against);
+      * a ``[[wikilink]]`` — the Obsidian-style ``**Source**:`` line on those
+        same pages;
+      * a Markdown inline link, or the legacy "cited from"/"missing?" phrasing
+        used by the ingest stubs.
+    Matching only the last shape flagged every CLI-created claim as uncited.
+    """
+    lowered = content.lower()
+    if "cited from" in lowered or "missing?" in lowered:
+        return True
+    # [ \t]* not \s* — \s would span the newline and let a bare "source:" match
+    # whatever the following line starts with.
+    if re.search(r'^source:[ \t]*["\']?[^"\'\s]', content, re.MULTILINE):
+        return True
+    if re.search(r'\[\[.+?\]\]', content):
+        return True
+    return bool(re.search(r'\[.*?\]\(.*?\)', content))
+
 def audit_uncited_claims(content, path):
-    if "claims/" in path:
-        if "cited from" not in content.lower() and "missing?" not in content.lower():
-             # Basic heuristic for stub
-             if not re.search(r'\[.*?\]\(.*?\)', content):
-                 return f"Potentially uncited claim in {path} (say 'evidence is missing' if true)"
+    if "claims/" in path and not claim_is_cited(content):
+        return f"Potentially uncited claim in {path} (say 'evidence is missing' if true)"
     return None
 
 def audit_duplicate_titles(wiki_dir):
