@@ -221,7 +221,8 @@ def tool_zurvan_graph_expand(path_or_node_id: str, depth: int = 2,
         return f"Error expanding graph around '{path_or_node_id}': {e}"
 
 @_protocol_safe
-def tool_zurvan_eval_search(hybrid: bool = True, min_top3: float = 0.6) -> str:
+def tool_zurvan_eval_search(hybrid: bool = True, min_top3: float = 0.6,
+                            max_queries: int | None = None) -> str:
     """Evaluates search retrieval against gold set.
 
     Runs in-process (no subprocess / no `python` interpreter assumption) and
@@ -232,7 +233,7 @@ def tool_zurvan_eval_search(hybrid: bool = True, min_top3: float = 0.6) -> str:
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            run_search_evaluation(hybrid=hybrid, min_top3=min_top3)
+            run_search_evaluation(hybrid=hybrid, min_top3=min_top3, max_queries=max_queries)
     except SystemExit:
         pass  # threshold/validation failure — message already captured in buf
     except Exception as e:

@@ -167,13 +167,14 @@ def zurvan_status() -> str:
 def zurvan_eval_search(
     hybrid: Annotated[bool, Field(description="Evaluate the hybrid retriever (vs. pure keyword).")] = True,
     min_top3: Annotated[float, Field(description="Minimum acceptable top-3 accuracy; the report flags a failure below this.", ge=0.0, le=1.0)] = 0.6,
+    max_queries: Annotated[int | None, Field(description="Run only the first N gold queries. For a LIVENESS check — the full set is the only valid quality measurement.", ge=1, le=50)] = None,
 ) -> str:
     """Run the retrieval-quality evaluation against the gold question set.
 
     Use to confirm search is healthy after reindexing or large wiki changes.
     Reports top-1/top-3 accuracy and mean reciprocal rank. Read-only and safe.
     """
-    return tools.tool_zurvan_eval_search(hybrid, min_top3)
+    return tools.tool_zurvan_eval_search(hybrid, min_top3, max_queries)
 
 @mcp.tool(title="Validate gold set", annotations=READ_ONLY)
 def zurvan_validate_gold() -> str:

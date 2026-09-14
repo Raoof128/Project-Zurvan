@@ -58,13 +58,27 @@ def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
         print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
-def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0, as_json: bool = False):
+def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0,
+                          as_json: bool = False, max_queries: int | None = None):
+    """Score retrieval against the gold set.
+
+    ``max_queries`` runs only the first N queries. It exists for LIVENESS
+    checks, not for measurement: the MCP e2e smoke called this tool with the
+    full 50-query set, which at 199k chunks takes minutes and dominated the
+    smoke's runtime — a smoke test should assert the tool responds, not run an
+    evaluation. Quality numbers must always come from the whole set, so a
+    truncated run labels itself as one in its output.
+    """
     validate_gold_dataset(gold_file, quiet=as_json)
     dataset = load_gold_dataset(gold_file)
     if not dataset:
         print("Error: No valid queries found in gold dataset.")
         sys.exit(1)
-        
+
+    full_size = len(dataset)
+    if max_queries is not None:
+        dataset = dataset[:max(1, int(max_queries))]
+
     total_queries = len(dataset)
     top1_hits = 0
     top3_hits = 0
@@ -141,6 +155,8 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
         print(json.dumps(metrics, indent=2))
     else:
         print("\nSearch Evaluation Results")
+        if total_queries < full_size:
+            print(f"(LIVENESS RUN — first {total_queries} of {full_size} queries; not a quality measurement)")
         print("=========================")
         print(f"Queries: {total_queries}")
         print(f"Top-1 accuracy: {top1_accuracy * 100:.0f}%")
@@ -190,6 +206,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--gold", default=DEFAULT_GOLD)
     parser.add_argument("--hybrid", action="store_true")
+    parser.add_argument("--max-queries", type=int, default=None,
+                        help="Run only the first N queries (liveness check, not a measurement)")
     parser.add_argument("--min-top3", type=float, default=0.0)
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json",
@@ -199,4 +217,5 @@ if __name__ == "__main__":
     if args.validate:
         validate_gold_dataset(args.gold)
     else:
-        run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json)
+        run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json,
+                              max_queries=args.max_queries)

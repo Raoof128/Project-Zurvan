@@ -224,10 +224,16 @@ async def readonly_smoke() -> None:
                 {},
             )
 
+            # Liveness only. This used to run the whole 50-query gold set, which
+            # at 199k chunks takes minutes and dominated the smoke's runtime.
+            # A smoke test asserts the tool RESPONDS; measuring retrieval
+            # quality is eval_search's job, run against the full set by
+            # check.sh gate 6. min_top3=0 so a 2-query sample can never fail a
+            # threshold that only means something over 50.
             await expect_tool(
                 session,
                 "zurvan_eval_search",
-                {"hybrid": True, "min_top3": 0.6},
+                {"hybrid": True, "min_top3": 0.0, "max_queries": 2},
             )
 
             await expect_resource(session, "zurvan://wiki/index")
