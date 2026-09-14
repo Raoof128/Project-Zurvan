@@ -152,11 +152,18 @@ def project_digest(project: str, root: Path | None = None) -> str:
                 rel = path.relative_to(root)
                 claims.append(f"- {text[:120]} ({rel})")
 
-    oq = root / "wiki" / "open-questions.md"
-    if oq.exists():
+    # Both halves: the tracked file holds only questions that declare a public
+    # project, so reading it alone would hide most of a project's own questions
+    # from its own digest.
+    oq_text = ""
+    for name in ("open-questions.md", "open-questions.private.md"):
+        f = root / "wiki" / name
+        if f.exists():
+            oq_text += f.read_text(encoding="utf-8") + "\n"
+    if oq_text:
         block_q, block_tags = "", ""
         blocks = []
-        for line in oq.read_text(encoding="utf-8").splitlines() + ["## Q:"]:
+        for line in oq_text.splitlines() + ["## Q:"]:
             if line.startswith("## Q:"):
                 if block_q:
                     blocks.append((block_q, block_tags))
@@ -240,9 +247,10 @@ def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
     except Exception:
         lines.append("Search index: unavailable — run `zurvan index search`.")
 
-    open_q = get_open_questions()
-    question_count = open_q.count("## Q:")
-    lines.append(f"Open questions: {question_count} (wiki/open-questions.md).")
+    from scripts.question_routing import count_questions
+    question_count = count_questions()
+    lines.append(f"Open questions: {question_count} "
+                 "(wiki/open-questions.md + open-questions.private.md).")
 
     lines += ["", "## Recent activity", get_recent_logs(8)]
     lines += ["", "Orient with `zurvan search <topic> --hybrid --json`, then "

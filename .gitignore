@@ -72,6 +72,8 @@ wiki/[Nn]ote-*.md
 # source/claim/concept filenames, so they must never be tracked or pushed.
 # Regenerated locally by `zurvan index rebuild`; kept out of git entirely.
 wiki/index.md
+# Open questions that do not declare a public project (see scripts/question_routing.py)
+wiki/open-questions.private.md
 # Sharded source index — lists private wiki/sources/ page names
 wiki/index/
 wiki/log.md

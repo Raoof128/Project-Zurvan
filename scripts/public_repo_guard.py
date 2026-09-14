@@ -15,6 +15,9 @@ BLOCKED_PATTERNS = [
     # The sharded source index lists wiki/sources/ page NAMES — a directory
     # listing of private documents is a leak even without their text.
     "wiki/index/",
+    # Questions that did not declare a public project. The tracked
+    # open-questions.md is the publishable half; this is everything else.
+    "wiki/open-questions.private.md",
     "dist/snapshots/",
     "dist/backups/",
     "evidence-packs/",

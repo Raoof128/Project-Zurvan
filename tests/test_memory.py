@@ -87,14 +87,18 @@ def test_untagged_question_writes_no_trailing_whitespace(tmp_path, monkeypatch):
 
     # safe_write derives the allowed root from its own __file__, so redirect
     # that too or every tmp_path write is (correctly) refused.
+    import scripts.question_routing as qr
+
     monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(qr, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path.resolve())
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "open-questions.md").write_text("")
 
     memory.add_question("Is this tagged?", "no tags given", [])
 
-    content = (tmp_path / "wiki" / "open-questions.md").read_text()
+    # An untagged question declares no public project, so it routes to the
+    # PRIVATE file — publishability is declared, never inferred.
+    content = (tmp_path / "wiki" / "open-questions.private.md").read_text()
     assert "- **Tags**:\n" in content
     assert not any(line.rstrip() != line for line in content.splitlines())
 
@@ -105,11 +109,14 @@ def test_tagged_question_still_lists_its_tags(tmp_path, monkeypatch):
 
     # safe_write derives the allowed root from its own __file__, so redirect
     # that too or every tmp_path write is (correctly) refused.
+    import scripts.question_routing as qr
+
     monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(qr, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path.resolve())
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "open-questions.md").write_text("")
 
+    # "zurvan" is a public project, so this one DOES reach the tracked file.
     memory.add_question("Tagged?", "reason", ["zurvan", "tests"])
 
     content = (tmp_path / "wiki" / "open-questions.md").read_text()

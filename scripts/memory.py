@@ -145,7 +145,12 @@ tags:
 
 def add_question(question: str, reason: str, tags: List[str]):
     q_id = str(uuid.uuid4())[:8]
-    questions_path = str(PROJECT_ROOT / "wiki" / "open-questions.md")
+    # Routed, not fixed: wiki/open-questions.md is TRACKED on a public remote,
+    # so a question only lands there when its tags declare a public project.
+    # Everything else goes to the gitignored private file. See
+    # scripts/question_routing.py for why this fails closed.
+    from scripts.question_routing import questions_path as _route
+    questions_path = _route(tags)
     
     # rstrip so an untagged question writes "- **Tags**:" rather than a line
     # with a trailing space, which `git diff --check` reports as an error.
