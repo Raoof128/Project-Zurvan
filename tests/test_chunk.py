@@ -108,3 +108,69 @@ def test_single_line_longer_than_limit_is_hard_wrapped(tmp_path):
     md_file.write_text("# H\n" + "x" * (MAX_CHUNK_CHARS * 3))
     chunks = extract_chunks_from_markdown(str(md_file))
     assert all(len(c['text']) <= MAX_CHUNK_CHARS for c in chunks)
+
+
+# ── Phase 0A: root-document coverage ─────────────────────────────────────────
+
+def _repo(tmp_path):
+    for d in ("wiki", "docs", "raw", "wiki/traces"):
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "wiki" / "page.md").write_text("wiki page", encoding="utf-8")
+    (tmp_path / "docs" / "guide.md").write_text("docs page", encoding="utf-8")
+    (tmp_path / "raw" / "untrusted.md").write_text("raw", encoding="utf-8")
+    (tmp_path / "wiki" / "traces" / "t.md").write_text("trace", encoding="utf-8")
+    return tmp_path
+
+
+def test_root_knowledge_documents_are_indexed(tmp_path):
+    # Step 0 found README/AGENTS/CLAUDE with ZERO chunks: Zurvan's own rules,
+    # quickstart and overview had never been searchable, which accounted for 4
+    # of 14 gold failures. Those are absence failures - no reranker, fusion
+    # weight, embedding model or storage engine can fix them.
+    from scripts.chunk import scan_markdown_files, ROOT_INDEX_FILES
+
+    r = _repo(tmp_path)
+    for name in ROOT_INDEX_FILES:
+        (r / name).write_text(f"# {name}\n\ncontent", encoding="utf-8")
+
+    found = set(scan_markdown_files(root=r))
+    for name in ROOT_INDEX_FILES:
+        assert name in found, f"{name} must be indexed"
+
+
+def test_only_the_named_root_files_are_indexed(tmp_path):
+    # Deliberately an allowlist, NOT "every root .md". Recursive root indexing
+    # would sweep in temporary reports, generated files and future private
+    # notes that happen to land at the repo root.
+    from scripts.chunk import scan_markdown_files
+
+    r = _repo(tmp_path)
+    (r / "README.md").write_text("readme", encoding="utf-8")
+    (r / "SCRATCH_NOTES.md").write_text("private scratch", encoding="utf-8")
+    (r / "generated-report.md").write_text("generated", encoding="utf-8")
+
+    found = set(scan_markdown_files(root=r))
+    assert "README.md" in found
+    assert "SCRATCH_NOTES.md" not in found
+    assert "generated-report.md" not in found
+
+
+def test_a_missing_root_file_is_not_an_error(tmp_path):
+    from scripts.chunk import scan_markdown_files
+
+    found = set(scan_markdown_files(root=_repo(tmp_path)))   # no root docs written
+    assert "wiki/page.md" in found
+
+
+def test_coverage_change_does_not_weaken_the_exclusions(tmp_path):
+    # raw/ is untrusted; wiki/traces/ are self-referential replay mirrors that
+    # would pollute retrieval with the query's own terms.
+    from scripts.chunk import scan_markdown_files
+
+    r = _repo(tmp_path)
+    (r / "README.md").write_text("readme", encoding="utf-8")
+
+    found = set(scan_markdown_files(root=r))
+    assert not any(f.startswith("raw") for f in found)
+    assert not any("traces" in f.split(os.sep) for f in found)
+    assert {"wiki/page.md", "docs/guide.md"} <= {f.replace(os.sep, "/") for f in found}

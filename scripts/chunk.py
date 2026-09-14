@@ -101,11 +101,30 @@ def extract_chunks_from_markdown(filepath: str, base_dir: Path | str | None = No
     finalize_chunk()
     return chunks
 
+# Root-level documents that ARE knowledge and must be searchable.
+#
+# An explicit allowlist, never "every .md at the repo root". Step 0 of the
+# retrieval project found README.md, AGENTS.md and CLAUDE.md with ZERO chunks
+# each: Zurvan's own overview, rules and quickstart had never been searchable,
+# which accounted for 4 of the 14 failing gold queries. Those were ABSENCE
+# failures — unreachable by reranking, fusion weights, better embeddings,
+# contextual chunks, sqlite-vec or KNN, because none of them can rank a
+# document that is not in the index.
+#
+# Kept as a named tuple rather than a glob so a temporary report, a generated
+# file or a future private note dropped at the repo root is never swept in.
+ROOT_INDEX_FILES = (
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+)
+
+
 def scan_markdown_files(root: Path | str | None = None):
-    """Scans wiki/ and docs/ under the repo root, ignoring raw/ and derived
-    trace mirrors. Returns repo-relative paths so chunk IDs stay stable no
-    matter which working directory the process was launched from (previously
-    a foreign CWD silently produced an empty index).
+    """Scans wiki/, docs/ and the named root documents under the repo root,
+    ignoring raw/ and derived trace mirrors. Returns repo-relative paths so
+    chunk IDs stay stable no matter which working directory the process was
+    launched from (previously a foreign CWD silently produced an empty index).
 
     ``wiki/traces/`` holds replay mirrors of retrieval traces — derived,
     self-referential audit artifacts that would pollute retrieval with the
@@ -121,6 +140,9 @@ def scan_markdown_files(root: Path | str | None = None):
                 rel = os.path.relpath(filepath, base)
                 if not excluded_dirs.intersection(rel.split(os.sep)):
                     files.append(rel)
+    for name in ROOT_INDEX_FILES:
+        if (base / name).is_file():
+            files.append(name)
     return files
 
 def iter_all_markdown_chunks(root: Path | str | None = None):
