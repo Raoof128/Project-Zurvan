@@ -6,19 +6,48 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
+def _server_args(cwd: str) -> list:
+    """Absolute path to the server script.
+
+    A relative "scripts/mcp_server.py" only resolves when the client happens to
+    launch with the repo as its working directory, which no client guarantees.
+    """
+    return [str(Path(cwd) / "scripts" / "mcp_server.py")]
+
+
+def _interpreter() -> str:
+    """Absolute interpreter path, never a bare "python".
+
+    PATH resolution is not a safe way to pick the interpreter here: on this
+    machine `python3` is a Homebrew build with neither `mcp` nor PyYAML
+    installed, so a bare name can select an interpreter that cannot run the
+    server at all. sys.executable is the one we know imported this script.
+    """
+    return sys.executable
+
+
+def _env(cwd: str, readonly: bool) -> dict:
+    return {
+        "PYTHONPATH": cwd,
+        "ZURVAN_MCP_READONLY": "1" if readonly else "0",
+        "ZURVAN_MCP_TRANSPORT": "stdio",
+        "ZURVAN_MCP_ALLOW_RAW_READ": "0",
+        # NOT "mock". Query embeddings follow the index, so mock would not break
+        # search on its own — but any rebuild run under this environment writes
+        # deterministic-hash vectors over the real ones and silently destroys
+        # semantic retrieval (measured at 0% recall when that last happened).
+        # The generated config should never be the thing that poisons the index.
+        "ZURVAN_EMBED_PROVIDER": "sentence_transformers",
+    }
+
 def get_claude_code_config(cwd: str, readonly: bool):
     return {
         "mcpServers": {
             "zurvan": {
-                "command": "python",
-                "args": ["scripts/mcp_server.py"],
-                "env": {
-                    "PYTHONPATH": cwd,
-                    "ZURVAN_MCP_READONLY": "1" if readonly else "0",
-                    "ZURVAN_MCP_TRANSPORT": "stdio",
-                    "ZURVAN_MCP_ALLOW_RAW_READ": "0",
-                    "ZURVAN_EMBED_PROVIDER": "mock"
-                }
+                "command": _interpreter(),
+                "args": _server_args(cwd),
+                "env": _env(cwd, readonly)
             }
         }
     }
@@ -27,15 +56,9 @@ def get_cursor_config(cwd: str, readonly: bool):
     return {
         "mcpServers": {
             "zurvan": {
-                "command": "python",
-                "args": ["scripts/mcp_server.py"],
-                "env": {
-                    "PYTHONPATH": cwd,
-                    "ZURVAN_MCP_READONLY": "1" if readonly else "0",
-                    "ZURVAN_MCP_TRANSPORT": "stdio",
-                    "ZURVAN_MCP_ALLOW_RAW_READ": "0",
-                    "ZURVAN_EMBED_PROVIDER": "mock"
-                }
+                "command": _interpreter(),
+                "args": _server_args(cwd),
+                "env": _env(cwd, readonly)
             }
         }
     }
@@ -48,15 +71,9 @@ def get_codex_config(cwd: str, readonly: bool):
         "name": "zurvan",
         # Absolute interpreter path so the launch does not depend on Codex's PATH
         # resolving to an interpreter that has the `mcp` package installed.
-        "command": sys.executable,
-        "args": [str(Path(cwd) / "scripts" / "mcp_server.py")],
-        "env": {
-            "PYTHONPATH": cwd,
-            "ZURVAN_MCP_READONLY": "1" if readonly else "0",
-            "ZURVAN_MCP_TRANSPORT": "stdio",
-            "ZURVAN_MCP_ALLOW_RAW_READ": "0",
-            "ZURVAN_EMBED_PROVIDER": "mock",
-        },
+        "command": _interpreter(),
+        "args": _server_args(cwd),
+        "env": _env(cwd, readonly),
     }
 
 def render_codex_toml(config: dict) -> str:

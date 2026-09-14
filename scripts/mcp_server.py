@@ -2,23 +2,60 @@ from typing import Annotated, Literal, TypedDict
 
 from pydantic import Field
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer, ResourceSecurity
+from mcp.server.caching import CacheHint
+from mcp.types import ToolAnnotations
+
 import scripts.mcp_tools as tools
 import scripts.mcp_resources as resources
 import scripts.mcp_prompts as prompts
 
-mcp = FastMCP("Zurvan", dependencies=["mcp"])
+ZURVAN_MCP_VERSION = "2.0.0"
+
+# MCP Python SDK v2 (protocol revision 2026-07-28). v1.x is maintenance-only,
+# and the resource-template fix below is not expressible on v1 at all.
+#
+# `cache_hints` implements the spec's new CacheableResult (`ttlMs` +
+# `cacheScope`): Zurvan's tool/prompt/resource lists change only when the repo
+# is edited, so a client re-listing them on every turn is pure waste. The scope
+# is PRIVATE throughout — these listings describe a personal knowledge base and
+# must never be cached by a shared intermediary.
+_PRIVATE_5_MIN = CacheHint(ttl_ms=300_000, scope="private")
+
+mcp = MCPServer(
+    "Zurvan",
+    title="Zurvan knowledge engine",
+    description="Local-first knowledge base: hybrid search, a knowledge graph, and durable project memory.",
+    version=ZURVAN_MCP_VERSION,
+    dependencies=["mcp"],
+    cache_hints={
+        "tools/list": _PRIVATE_5_MIN,
+        "prompts/list": _PRIVATE_5_MIN,
+        "resources/list": _PRIVATE_5_MIN,
+        "resources/templates/list": _PRIVATE_5_MIN,
+    },
+)
+
+# Annotations are how a client decides whether a call needs confirmation.
+# None of these tools declared any, so a client had to treat a pure search the
+# same as a write. They are hints, not enforcement — the real write gate is
+# `enforce_read_only`, which fails closed on ZURVAN_MCP_READONLY.
+READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+# Additive writes: they append a new page, never overwrite or delete one.
+ADDITIVE_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False
+)
 
 # ---------------------------------------------------------------------------
 # Tools — Read Only
 #
-# FastMCP exposes each tool's *docstring* and type hints to the calling LLM as
+# MCPServer exposes each tool's *docstring* and type hints to the calling LLM as
 # the tool description and JSON schema. These docstrings are therefore written
 # for the model: what the tool does, when to reach for it, what the arguments
 # mean, and what comes back.
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(title="Search Zurvan memory", annotations=READ_ONLY)
 def zurvan_search(
     query: Annotated[str, Field(description="Natural-language or keyword query.")],
     hybrid: Annotated[bool, Field(description="Blend FTS5 keyword scoring with local embeddings (best for conceptual queries). False = pure keyword scan.")] = True,
@@ -33,7 +70,7 @@ def zurvan_search(
     """
     return tools.tool_zurvan_search(query, hybrid, limit)
 
-@mcp.tool()
+@mcp.tool(title="Build a context bundle", annotations=READ_ONLY)
 def zurvan_context(
     topic: Annotated[str, Field(description="The subject to assemble context for.")],
     hybrid: Annotated[bool, Field(description="Use hybrid (keyword + embedding) retrieval.")] = True,
@@ -49,25 +86,28 @@ def zurvan_context(
     """
     return tools.tool_zurvan_context(topic, hybrid, graph, limit)
 
-@mcp.tool()
+@mcp.tool(title="Read a knowledge-base page", annotations=READ_ONLY)
 def zurvan_read_page(
-    path: Annotated[str, Field(description='Repo-relative file path (e.g. "wiki/decisions/foo.md" or "docs/API.md"). No absolute paths, no "../"; raw/ is blocked unless ZURVAN_MCP_ALLOW_RAW_READ=1. Max 256 KB.')],
+    path: Annotated[str, Field(description='Repo-relative file path (e.g. "wiki/decisions/foo.md" or "docs/API.md"). No absolute paths, no "../"; raw/ is blocked unless ZURVAN_MCP_ALLOW_RAW_READ=1.')],
+    offset: Annotated[int, Field(description="Character offset to start reading from. Use the offset the previous call reported to continue a large file.", ge=0)] = 0,
+    limit: Annotated[int, Field(description="Maximum characters to return in this slice.", ge=1, le=24000)] = 24000,
 ) -> str:
-    """Read the full text of one knowledge-base file.
+    """Read one knowledge-base file, in slices when it is large.
 
     Use after zurvan_search to open only the page(s) you actually need instead
     of pulling a large context bundle. Returns the raw Markdown (including
-    frontmatter); on unsafe or missing paths it returns an error string rather
-    than raising. Read-only and safe.
+    frontmatter). A file bigger than one slice is NOT refused: the result names
+    the offset to pass back to read the next part. On unsafe or missing paths it
+    returns an actionable error string rather than raising.
     """
-    return tools.tool_zurvan_read_page(path)
+    return tools.tool_zurvan_read_page(path, offset, limit)
 
 class GraphStats(TypedDict):
     """Structured node/edge counts for the knowledge graph."""
     nodes: int
     edges: int
 
-@mcp.tool()
+@mcp.tool(title="Graph size", annotations=READ_ONLY)
 def zurvan_graph_stats() -> GraphStats:
     """Return the knowledge graph size as structured {nodes, edges} counts.
 
@@ -76,32 +116,54 @@ def zurvan_graph_stats() -> GraphStats:
     """
     return tools.tool_zurvan_graph_stats_struct()
 
-@mcp.tool()
+@mcp.tool(title="Graph neighbours", annotations=READ_ONLY)
 def zurvan_graph_neighbours(
     path_or_node_id: Annotated[str, Field(description='A wiki path (e.g. "wiki/decisions/foo.md") or a node id.')],
+    limit: Annotated[int, Field(description="Maximum neighbours to return in this page.", ge=1, le=200)] = 25,
+    cursor: Annotated[int, Field(description="Offset to resume from; the previous result names the next cursor when more remain.", ge=0)] = 0,
 ) -> str:
-    """List the direct (one-hop) graph neighbours of a node.
+    """List one page of a node's direct (one-hop) graph neighbours.
 
     Use after a search to see what a specific page links to or is linked from
     (decisions, claims, concepts, sources). For multi-hop expansion use
     zurvan_graph_expand instead.
-    """
-    return tools.tool_zurvan_graph_neighbours(path_or_node_id)
 
-@mcp.tool()
+    Results are PAGED: hub nodes in this graph have thousands of edges, and
+    returning them all is a single result larger than most context windows. The
+    first line reports the range and total, and names the cursor for the rest.
+    """
+    return tools.tool_zurvan_graph_neighbours(path_or_node_id, 1, limit, cursor)
+
+@mcp.tool(title="Expand graph neighbourhood", annotations=READ_ONLY)
 def zurvan_graph_expand(
     path_or_node_id: Annotated[str, Field(description="A wiki path or node id to expand from.")],
     depth: Annotated[int, Field(description="Number of hops to traverse outward.", ge=1, le=5)] = 2,
+    limit: Annotated[int, Field(description="Maximum entries to return in this page.", ge=1, le=200)] = 25,
+    cursor: Annotated[int, Field(description="Offset to resume from; the previous result names the next cursor when more remain.", ge=0)] = 0,
 ) -> str:
-    """Expand the graph around a node up to `depth` hops for broad context.
+    """Expand the graph around a node up to `depth` hops, one page at a time.
 
     Use to discover nearby concepts and notes when building a comprehensive
     picture. Each line is annotated with its hop distance, node type, and the
     relation that connected it.
-    """
-    return tools.tool_zurvan_graph_expand(path_or_node_id, depth)
 
-@mcp.tool()
+    Results are ordered NEAREST-FIRST and PAGED, so a first page is the most
+    relevant part of the neighbourhood rather than an arbitrary slice.
+    """
+    return tools.tool_zurvan_graph_expand(path_or_node_id, depth, limit, cursor)
+
+@mcp.tool(title="Zurvan status", annotations=READ_ONLY)
+def zurvan_status() -> str:
+    """Report corpus size, search-index freshness, and graph size.
+
+    Call this FIRST in a session. It answers the question every other tool
+    depends on: is the index current? A STALE index means search is answering
+    from out-of-date content, and a `mock` embedding provider means semantic
+    search is meaningless. Also reports whether write tools are enabled.
+    """
+    return tools.tool_zurvan_status()
+
+@mcp.tool(title="Evaluate retrieval", annotations=READ_ONLY)
 def zurvan_eval_search(
     hybrid: Annotated[bool, Field(description="Evaluate the hybrid retriever (vs. pure keyword).")] = True,
     min_top3: Annotated[float, Field(description="Minimum acceptable top-3 accuracy; the report flags a failure below this.", ge=0.0, le=1.0)] = 0.6,
@@ -113,7 +175,7 @@ def zurvan_eval_search(
     """
     return tools.tool_zurvan_eval_search(hybrid, min_top3)
 
-@mcp.tool()
+@mcp.tool(title="Validate gold set", annotations=READ_ONLY)
 def zurvan_validate_gold() -> str:
     """Validate that every path referenced by the gold question set still exists.
 
@@ -129,7 +191,7 @@ def zurvan_validate_gold() -> str:
 # ZURVAN_MCP_READONLY=0. When blocked they return a clear, non-fatal message.
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(title="Record a note", annotations=ADDITIVE_WRITE)
 def zurvan_remember(
     type: Annotated[Literal["note", "insight", "reference", "todo", "risk"], Field(description="Category label for the note; preserved as its first tag.")],
     title: Annotated[str, Field(description="Short, descriptive title.")],
@@ -145,7 +207,7 @@ def zurvan_remember(
     """
     return tools.tool_zurvan_remember(type, title, body, tags)
 
-@mcp.tool()
+@mcp.tool(title="Record a decision", annotations=ADDITIVE_WRITE)
 def zurvan_decision_add(
     title: Annotated[str, Field(description='The decision, stated as an outcome (e.g. "Use SQLite FTS5 for search").')],
     reason: Annotated[str, Field(description="The rationale and any considered alternatives.")],
@@ -159,7 +221,7 @@ def zurvan_decision_add(
     """
     return tools.tool_zurvan_decision_add(title, reason, status, tags)
 
-@mcp.tool()
+@mcp.tool(title="Record an evidenced claim", annotations=ADDITIVE_WRITE)
 def zurvan_claim_add(
     text: Annotated[str, Field(description="The claim being asserted.")],
     source: Annotated[str, Field(description='Repo-relative path to the supporting file (no absolute paths, no "../", no raw/ unless ZURVAN_MCP_ALLOW_RAW_READ=1).')],
@@ -175,7 +237,7 @@ def zurvan_claim_add(
     """
     return tools.tool_zurvan_claim_add(text, source, evidence, confidence, tags)
 
-@mcp.tool()
+@mcp.tool(title="Record an open question", annotations=ADDITIVE_WRITE)
 def zurvan_question_add(
     question: Annotated[str, Field(description="The open question.")],
     reason: Annotated[str, Field(description="Why it matters / what is blocked on it.")],
@@ -216,7 +278,21 @@ def resource_graph_stats() -> str:
 def resource_eval_baseline() -> str:
     return resources.resource_eval_baseline()
 
-@mcp.resource("zurvan://file/{path}", description="Read a single safe, repo-relative wiki/docs file (<=256 KB; raw/ blocked by default).")
+# `{+path}` is RFC 6570 *reserved* expansion: it matches "/" so nested paths
+# work. The old `{path}` used simple expansion, which does NOT match "/", so
+# zurvan://file/wiki/decisions/foo.md was an unknown-resource error — and every
+# path in this repo is nested, which made the template useful only for
+# root-level files. Reserved expansion cannot be registered on SDK v1 at all.
+#
+# exempt_params turns off the SDK's own traversal rejection for `path` (it
+# would otherwise reject the "/" we just enabled). The real gate is unchanged
+# and stricter: is_safe_path resolves against the repo root and rejects
+# absolute paths, "..", and raw/ (case-insensitively, for macOS).
+@mcp.resource(
+    "zurvan://file/{+path}",
+    description="Read a single safe, repo-relative wiki/docs file (raw/ blocked by default; large files are sliced).",
+    security=ResourceSecurity(exempt_params={"path"}),
+)
 def resource_file(path: str) -> str:
     return resources.resource_file(path)
 
