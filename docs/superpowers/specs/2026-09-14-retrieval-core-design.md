@@ -191,10 +191,14 @@ the 0.2/0.8 fusion weights, candidate policy, result budgeting.
 
 **If ranking differs, reject Phase 1 even if it is fast.**
 
-**Pin BOTH sqlite-vec identities.** They are not the same number — measured
-2026-09-14, the Python wheel reported `0.1.9` while the loaded extension's
-`vec_version()` reported `v0.1.6`. Pinning one leaves the other free to drift, so
-the gate asserts both:
+**Pin BOTH sqlite-vec identities.** *Correction (2026-09-14): an earlier draft
+claimed these were measured to differ. They were not. The `0.1.9` figure was the
+newest wheel available on PyPI; the INSTALLED package and the loaded extension
+both report `0.1.6` and match. Two unrelated numbers were read as one finding.*
+
+Pin both anyway, on prudence rather than incident: a Python package can in
+principle ship a differently-built native extension, the cost of asserting both
+is nothing, and recording them makes the experiment reproducible. The gate:
 
 ```
 sqlite_vec.__version__ == <pinned package version>
