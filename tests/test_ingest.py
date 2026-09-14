@@ -439,3 +439,59 @@ def test_pdf_extraction_falls_back_to_pypdf_without_pymupdf(tmp_path, monkeypatc
     monkeypatch.setattr(builtins, "__import__", _no_pymupdf)
 
     assert "fallback path works" in extract_text(str(pdf))
+
+
+def test_colliding_slugs_do_not_overwrite_each_other(tmp_path, monkeypatch):
+    # Two DIFFERENT documents that sanitise to the same slug (two README.md
+    # files from two repos; a paper's PDF and its web-article twin) each need
+    # their own page. A bare open(..., 'w') silently overwrote the first, so
+    # the registry kept claiming a document whose text on disk was another's —
+    # and re-ingesting the loser was refused as "already ingested".
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page
+
+    first = create_source_page("/repo-a/README.md", "hash-a", "alpha body")
+    second = create_source_page("/repo-b/README.md", "hash-b", "beta body")
+    third = create_source_page("/repo-c/README.md", "hash-c", "gamma body")
+
+    assert len({first, second, third}) == 3
+    assert second.endswith("-2.md") and third.endswith("-3.md")
+
+    sources = tmp_path / "wiki" / "sources"
+    assert "alpha body" in (sources / first).read_text()
+    assert "beta body" in (sources / second).read_text()
+    assert "gamma body" in (sources / third).read_text()
+
+
+def test_reingesting_same_content_reuses_its_own_page(tmp_path, monkeypatch):
+    # Idempotence: matching on the frontmatter hash means a re-ingest rewrites
+    # the document's own page instead of growing -2, -3, -4 on every run.
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page
+
+    create_source_page("/repo-a/README.md", "hash-a", "alpha")
+    collided = create_source_page("/repo-b/README.md", "hash-b", "beta")
+    again = create_source_page("/repo-b/README.md", "hash-b", "beta revised")
+
+    assert again == collided
+    assert len(list((tmp_path / "wiki" / "sources").glob("*.md"))) == 2
+    assert "beta revised" in (tmp_path / "wiki" / "sources" / again).read_text()
+
+
+def test_stub_concept_and_claim_follow_the_resolved_page_name(tmp_path, monkeypatch):
+    # The stubs link to ../sources/<stem>.md. On a collided page the bare slug
+    # points at the OTHER document's page, so the stubs must be named from the
+    # page that was actually written.
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page, create_stub_concept_and_claim
+
+    create_source_page("/repo-a/README.md", "hash-a", "alpha")
+    collided = create_source_page("/repo-b/README.md", "hash-b", "beta")
+    create_stub_concept_and_claim("/repo-b/README.md", collided)
+
+    stem = os.path.splitext(collided)[0]
+    concept = tmp_path / "wiki" / "concepts" / f"AutoConcept-{stem}.md"
+    claim = tmp_path / "wiki" / "claims" / f"Claim-{stem}.md"
+    assert concept.exists() and claim.exists()
+    assert f"../sources/{collided}" in concept.read_text()
+    assert f"../sources/{collided}" in claim.read_text()

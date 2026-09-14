@@ -6,6 +6,31 @@ from scripts.hybrid_search import cosine_similarity, search_hybrid
 from scripts.rebuild_search_index import rebuild_search_index
 
 
+def _write_fixture_corpus(root):
+    """A small, fixed wiki for index-building tests.
+
+    These tests used to index the LIVE wiki. That was seconds at 861 pages and
+    unusable at 3,823 (131 MB of ingested sources) — the suite stopped
+    finishing. Runtime must depend on the fixture, never on how much has been
+    ingested into the developer's store.
+    """
+    wiki = root / "wiki"
+    wiki.mkdir(parents=True, exist_ok=True)
+    (wiki / "citation.md").write_text(
+        "# Citation Rules\n\nEvery citation needs a source and a verbatim quote.\n",
+        encoding="utf-8",
+    )
+    (wiki / "graph.md").write_text(
+        "# Knowledge Graph\n\nNodes and edges are derived from wikilinks.\n",
+        encoding="utf-8",
+    )
+    (wiki / "retrieval.md").write_text(
+        "# Retrieval\n\nHybrid search fuses BM25 keyword scores with embeddings.\n",
+        encoding="utf-8",
+    )
+    return root
+
+
 @pytest.fixture(scope="module")
 def tmp_index(tmp_path_factory):
     """A search index built into a temp DB so tests never touch (or downgrade)
@@ -16,12 +41,14 @@ def tmp_index(tmp_path_factory):
     ``ZURVAN_EMBED_PROVIDER=sentence_transformers`` for agent sessions, which
     would otherwise make this fixture build a real (slow, non-deterministic)
     index and break the provider-follows-index assertion."""
-    db_path = str(tmp_path_factory.mktemp("index") / "search.sqlite")
+    base = tmp_path_factory.mktemp("index")
+    db_path = str(base / "search.sqlite")
+    corpus = _write_fixture_corpus(base / "corpus")
     saved = {k: os.environ.get(k) for k in ("ZURVAN_EMBED_PROVIDER", "ZURVAN_EMBED_MODEL")}
     os.environ["ZURVAN_EMBED_PROVIDER"] = "mock"
     os.environ["ZURVAN_EMBED_MODEL"] = "mock_model"
     try:
-        rebuild_search_index(db_path)
+        rebuild_search_index(db_path, root=corpus)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -99,7 +126,8 @@ def test_rebuild_reuses_embeddings_for_unchanged_chunks(tmp_path, monkeypatch):
     from scripts.embed import get_embedding as real_get_embedding
 
     db_path = str(tmp_path / "search.sqlite")
-    rebuild_search_index(db_path)  # warm index
+    corpus = _write_fixture_corpus(tmp_path / "corpus")
+    rebuild_search_index(db_path, root=corpus)  # warm index
 
     calls = {"n": 0}
     def counting_get_embedding(text):
@@ -107,7 +135,7 @@ def test_rebuild_reuses_embeddings_for_unchanged_chunks(tmp_path, monkeypatch):
         return real_get_embedding(text)
 
     monkeypatch.setattr(rsi, "get_embedding", counting_get_embedding)
-    rebuild_search_index(db_path)
+    rebuild_search_index(db_path, root=corpus)
 
     assert calls["n"] == 1  # the provider probe only — zero chunk re-embeds
 
@@ -158,3 +186,79 @@ def test_query_embedding_follows_index_provider(tmp_index, monkeypatch):
 
     assert captured["provider"] == "mock"              # from the index,
     assert captured["model"] == "deterministic_hash"   # not from the env
+
+
+def test_vectorised_scoring_matches_the_reference_cosine_fusion(tmp_path_factory):
+    # The semantic path was rewritten from "pull every row, cosine in Python"
+    # to a batched numpy matrix product reduced through a bounded heap, because
+    # the old shape marshalled the whole corpus (text included) on every query
+    # — ~2 GB at 199k chunks. The rewrite must be a pure performance change, so
+    # assert it against the reference implementation it replaced.
+    #
+    # Own index, not the module fixture: the reference below models the
+    # semantic half only, so the query must match nothing lexically for both
+    # sides to see keyword_score 0. A shared index carries other tests' chunks
+    # and cannot guarantee that.
+    import scripts.hybrid_search as hs
+
+    base = tmp_path_factory.mktemp("vec_equiv")
+    db_path = str(base / "search.sqlite")
+    corpus = _write_fixture_corpus(base / "corpus")
+    saved = {k: os.environ.get(k) for k in ("ZURVAN_EMBED_PROVIDER", "ZURVAN_EMBED_MODEL")}
+    os.environ["ZURVAN_EMBED_PROVIDER"] = "mock"
+    os.environ["ZURVAN_EMBED_MODEL"] = "mock_model"
+    try:
+        rebuild_search_index(db_path, root=corpus)
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+    for i in range(25):
+        _insert_chunk(db_path, f"vec_equiv_{i}", f"Heading {i}",
+                      f"retrieval fusion sample text number {i} about citations and graphs")
+
+    # No word in the corpus, so FTS matches nothing and keyword_score is 0 for
+    # every chunk on both paths — isolating the semantic arithmetic.
+    query = "zqxwv unmatchable token"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        provider, model = hs._index_embedding_config(conn.cursor())
+        assert conn.execute(
+            "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH ?", ('"zqxwv"',)
+        ).fetchone()[0] == 0
+        query_emb = hs.get_embedding(query, provider=provider, model=model)["vector"]
+        rows = conn.execute(
+            "SELECT c.chunk_id, c.source_path, c.heading, c.text, e.vector "
+            "FROM chunks c JOIN embeddings e ON c.chunk_id = e.chunk_id"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    # The reference: exactly the code that was replaced.
+    reference = []
+    for chunk_id, source_path, heading, text, vector_json in rows:
+        sem = hs.cosine_similarity(query_emb, json.loads(vector_json))
+        sem = max(0.0, (sem + 1.0) / 2.0)
+        reference.append({
+            "chunk_id": chunk_id, "source_path": source_path, "heading": heading,
+            "text": text, "keyword_score": 0.0, "semantic_score": sem,
+        })
+    expected = hs._fuse(reference)[:10]
+    assert expected, "reference should rank something"
+
+    actual = hs.search_hybrid(query, limit=10, db_path=db_path)
+
+    # Order is what ranking means, and it must be identical.
+    assert [r["chunk_id"] for r in actual] == [r["chunk_id"] for r in expected]
+
+    # Scores agree to float32 resolution, not to the bit: the sidecar stores
+    # vectors as float32 (halving its size and the per-query conversion) while
+    # the reference parses the JSON into float64, so scores differ around the
+    # 1e-9 mark. That is ~2 orders below the closest score gap seen on the real
+    # gold set; a pair separated by less than ~1e-7 could in principle order
+    # differently, which is why the ordering assertion above is the contract
+    # and this one is a sanity bound.
+    for a, e in zip(actual, expected):
+        assert a["semantic_score"] == pytest.approx(e["semantic_score"], abs=1e-6)
+        assert a["hybrid_score"] == pytest.approx(e["hybrid_score"], abs=1e-6)

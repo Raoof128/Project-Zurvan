@@ -123,10 +123,19 @@ def scan_markdown_files(root: Path | str | None = None):
                     files.append(rel)
     return files
 
-def chunk_all_markdown(root: Path | str | None = None):
+def iter_all_markdown_chunks(root: Path | str | None = None):
+    """Yield every chunk in the wiki one file at a time.
+
+    Materialising the whole corpus was fine at 861 pages and fatal at 3,823:
+    with 131 MB of source text the list alone ran to hundreds of megabytes and
+    the indexer was OOM-killed mid-rebuild. Streaming keeps only one file's
+    chunks live at a time; ``chunk_all_markdown`` stays as the list-returning
+    wrapper so existing callers are unaffected.
+    """
     base = Path(root) if root is not None else PROJECT_ROOT
-    files = scan_markdown_files(base)
-    all_chunks = []
-    for f in files:
-        all_chunks.extend(extract_chunks_from_markdown(f, base_dir=base))
-    return all_chunks
+    for f in scan_markdown_files(base):
+        yield from extract_chunks_from_markdown(f, base_dir=base)
+
+
+def chunk_all_markdown(root: Path | str | None = None):
+    return list(iter_all_markdown_chunks(root))

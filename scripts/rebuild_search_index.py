@@ -1,29 +1,83 @@
 import sqlite3
 import os
 import json
-from scripts.chunk import chunk_all_markdown
+from scripts.chunk import iter_all_markdown_chunks
 from scripts.embed import get_embedding
 from scripts.config import PROJECT_ROOT
 
-def _harvest_reusable_embeddings(db_path: str) -> dict:
-    """Return {chunk_id: (provider, model, dimension, vector_json)} from an
-    existing index, or {} when there is none. chunk_id is a hash of
-    path+heading+text, so an unchanged chunk_id implies identical content and
-    its stored embedding can be reused instead of recomputed."""
-    if not os.path.exists(db_path):
-        return {}
-    try:
-        conn = sqlite3.connect(db_path)
-        rows = conn.execute(
-            "SELECT chunk_id, provider, model, dimension, vector FROM embeddings"
-        ).fetchall()
-        conn.close()
-        return {row[0]: row[1:] for row in rows}
-    except sqlite3.Error:
-        return {}
+# Commit every this many chunks. Bounds the journal and SQLite's page cache,
+# and makes a killed run leave a consistent partial index instead of nothing.
+COMMIT_EVERY = 2000
 
 
-def rebuild_search_index(db_path: str | None = None):
+class _PriorIndex:
+    """Read-only lookup of previously stored embeddings, kept ON DISK.
+
+    chunk_id is a hash of path+heading+text, so an unchanged chunk_id implies
+    identical content and its stored vector can be reused instead of recomputed
+    — the expensive step under a real provider.
+
+    This used to load every vector into a dict. At 43k chunks that was
+    tolerable; at this corpus's size it is over a gigabyte of JSON strings
+    resident before the first row is written, and it was one of three reasons a
+    full rebuild got OOM-killed. Querying the old file per chunk is O(1) memory
+    and, on an indexed primary key, cheap.
+    """
+
+    def __init__(self, db_path: str):
+        self._conn = None
+        self._path = None
+        if not os.path.exists(db_path):
+            return
+        # Move aside rather than delete, so the vectors survive to be reused
+        # while the new index is built at the canonical path.
+        prev = db_path + ".prev"
+        try:
+            if os.path.exists(prev):
+                os.remove(prev)
+            os.replace(db_path, prev)
+            conn = sqlite3.connect(f"file:{prev}?mode=ro", uri=True)
+            conn.execute("SELECT 1 FROM embeddings LIMIT 1")
+        except (sqlite3.Error, OSError):
+            self._discard(prev)
+            return
+        self._conn, self._path = conn, prev
+
+    def get(self, chunk_id):
+        if self._conn is None:
+            return None
+        try:
+            return self._conn.execute(
+                "SELECT provider, model, dimension, vector FROM embeddings WHERE chunk_id = ?",
+                (chunk_id,),
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+
+    def close(self):
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+        self._discard(self._path)
+        self._path = None
+
+    @staticmethod
+    def _discard(path):
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def rebuild_search_index(db_path: str | None = None, root=None):
+    """Rebuild the chunk/FTS/embedding index.
+
+    ``root`` scopes which markdown tree is indexed. It exists for tests: a
+    fixture that indexes the LIVE wiki has a runtime proportional to however
+    much has been ingested, which at 3,823 pages meant the suite stopped
+    finishing at all. Production callers leave it None and index the repo.
+    """
     if db_path is None:
         # ZURVAN_SEARCH_DB lets a test build its index somewhere disposable.
         # Without it the smoke test, which runs under the mock embedding
@@ -39,12 +93,15 @@ def rebuild_search_index(db_path: str | None = None):
     # only reused when they match the current configuration.
     probe = get_embedding("zurvan embedding provider probe")
     current_provider_model = (probe["provider"], probe["model"])
-    reusable = _harvest_reusable_embeddings(db_path)
-
-    # Reset DB
+    # Moves any existing index aside; the canonical path is free afterwards, so
+    # the new index is built fresh without an explicit remove.
+    reusable = _PriorIndex(db_path)
     if os.path.exists(db_path):
         os.remove(db_path)
-        
+    # The sidecar describes the index being replaced; drop it before writing.
+    from scripts import vector_cache
+    vector_cache.discard(db_path)
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -83,12 +140,10 @@ def rebuild_search_index(db_path: str | None = None):
         )
     """)
     
-    chunks = chunk_all_markdown()
-    print(f"Found {len(chunks)} chunks to index.")
-
     reused = 0
     computed = 0
-    for c in chunks:
+    indexed = 0
+    for c in iter_all_markdown_chunks(root):
         # Insert chunk — OR IGNORE handles identical content in multiple wiki files
         cursor.execute("""
             INSERT OR IGNORE INTO chunks (chunk_id, source_path, heading, text, content_hash, indexed_at)
@@ -120,10 +175,23 @@ def rebuild_search_index(db_path: str | None = None):
             VALUES (?, ?, ?, ?, ?)
         """, (c['chunk_id'], provider, model, dimension, vector_json))
 
+        indexed += 1
+        if indexed % COMMIT_EVERY == 0:
+            conn.commit()
+            print(f"  indexed {indexed} chunks (reused {reused}, computed {computed})", flush=True)
+
     conn.commit()
     conn.close()
+    reusable.close()
 
-    print(f"Search index successfully rebuilt. Embeddings reused: {reused}, computed: {computed}.")
+    # Warm the float32 sidecar now, while the cost is one pass on the write
+    # path rather than 30-50 s on whichever query happens to run first.
+    vector_cache.build(db_path)
+
+    print(
+        f"Search index successfully rebuilt. Chunks indexed: {indexed}. "
+        f"Embeddings reused: {reused}, computed: {computed}."
+    )
 
 if __name__ == "__main__":
     rebuild_search_index()

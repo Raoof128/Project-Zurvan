@@ -21,6 +21,9 @@ raw/
 # Local databases may expose private knowledge
 data/*.sqlite
 data/*.db
+# Derived float32 vector sidecar for the search index (see scripts/vector_cache.py)
+data/*.vectors.npy
+data/*.vectors.json
 data/embeddings/
 !data/.gitkeep
 
@@ -69,6 +72,8 @@ wiki/[Nn]ote-*.md
 # source/claim/concept filenames, so they must never be tracked or pushed.
 # Regenerated locally by `zurvan index rebuild`; kept out of git entirely.
 wiki/index.md
+# Sharded source index — lists private wiki/sources/ page names
+wiki/index/
 wiki/log.md
 
 # Local private-project veto list for public_repo_guard (never publish these names)

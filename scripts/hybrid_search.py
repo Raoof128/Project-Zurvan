@@ -82,29 +82,125 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
     index_provider, index_model = _index_embedding_config(cursor)
     query_emb = get_embedding(query, provider=index_provider, model=index_model)['vector']
     
-    cursor.execute("SELECT c.chunk_id, c.source_path, c.heading, c.text, e.vector FROM chunks c JOIN embeddings e ON c.chunk_id = e.chunk_id")
-    all_chunks = cursor.fetchall()
-    
+    top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
+    scored = _hydrate(cursor, top)
     conn.close()
-    
-    scored = []
-    for chunk_id, source_path, heading, text, vector_json in all_chunks:
-        chunk_vec = json.loads(vector_json)
-        semantic_score = cosine_similarity(query_emb, chunk_vec)
+
+    return _fuse(scored)[:limit]
+
+
+# Vectors are scored in batches of this many. Bounds peak memory independently
+# of corpus size: 5000 x 384 float64 is ~15 MB.
+SCORE_BATCH = 5000
+
+
+def _score_semantic_top_k(cursor, query_emb, fts_scores, limit):
+    """Rank every chunk against the query, keeping only the best `limit`.
+
+    The previous implementation ran
+    ``SELECT ... c.text, e.vector FROM chunks JOIN embeddings`` with
+    ``fetchall()`` and then a pure-Python cosine per row — it pulled the ENTIRE
+    corpus, chunk text included, into memory on every query. At 43k chunks that
+    was merely wasteful; at 199k it is ~2 GB marshalled per search, which is
+    both unusably slow and a repeat of the allocation pattern that OOM-killed
+    the indexer.
+
+    Here only (chunk_id, vector) is read, streamed in batches, scored with a
+    single numpy matrix-vector product, and reduced through a bounded heap. The
+    arithmetic is identical to ``cosine_similarity`` followed by ``_fuse``, so
+    the ranking is unchanged; only the cost is.
+    """
+    import heapq
+    import numpy as np
+    from scripts import vector_cache
+
+    q = np.asarray(query_emb, dtype=np.float64)
+    q_norm = float(np.linalg.norm(q))
+
+    heap = []  # (hybrid_score, chunk_id, semantic_score, keyword_score)
+    for ids, mat in _vector_batches(cursor, vector_cache, np):
+        if q_norm == 0:
+            sims = np.zeros(len(ids))
+        else:
+            norms = np.linalg.norm(mat, axis=1)
+            # A zero-norm vector scores 0, matching cosine_similarity's guard.
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sims = np.where(norms == 0, 0.0, mat @ q / (norms * q_norm))
         # Cosine is [-1, 1]; map to [0, 1] for reporting only. Note this puts an
         # unrelated chunk at ~0.5, which is exactly why it must NOT be summed
         # against a keyword score — see the fusion comment below.
-        semantic_score = max(0.0, (semantic_score + 1.0) / 2.0)
+        sems = np.maximum(0.0, (sims + 1.0) / 2.0)
+        for chunk_id, semantic_score in zip(ids, sems.tolist()):
+            keyword_score = fts_scores.get(chunk_id, 0.0)
+            hybrid = KEYWORD_WEIGHT * keyword_score + (1.0 - KEYWORD_WEIGHT) * semantic_score
+            entry = (hybrid, chunk_id, semantic_score, keyword_score)
+            if len(heap) < limit:
+                heapq.heappush(heap, entry)
+            elif hybrid > heap[0][0]:
+                heapq.heapreplace(heap, entry)
+    return heap
+
+
+def _vector_batches(cursor, vector_cache, np):
+    """Yield (ids, matrix) batches — from the sidecar cache when it is valid.
+
+    The cache turns the per-query JSON parse of every stored vector (the actual
+    cost, ~30-50 s at 199k chunks) into a one-off on the write path. When it is
+    absent and cannot be built, fall back to streaming the DB so search still
+    works, just slowly.
+    """
+    db_path = _cursor_db_path(cursor)
+    cached = vector_cache.load_or_build(db_path) if db_path else None
+    if cached:
+        ids, matrix = cached
+        for start in range(0, len(ids), SCORE_BATCH):
+            stop = start + SCORE_BATCH
+            yield ids[start:stop], np.asarray(matrix[start:stop], dtype=np.float64)
+        return
+
+    cursor.execute("SELECT chunk_id, vector FROM embeddings")
+    while True:
+        rows = cursor.fetchmany(SCORE_BATCH)
+        if not rows:
+            break
+        yield [r[0] for r in rows], np.asarray(
+            [json.loads(r[1]) for r in rows], dtype=np.float64
+        )
+
+
+def _cursor_db_path(cursor):
+    """Filesystem path behind a cursor's connection, or None for in-memory."""
+    try:
+        for _, name, path in cursor.execute("PRAGMA database_list").fetchall():
+            if name == "main":
+                return path or None
+    except sqlite3.Error:
+        pass
+    return None
+
+
+def _hydrate(cursor, top):
+    """Fetch source_path/heading/text for the surviving chunk_ids only."""
+    if not top:
+        return []
+    by_id = {chunk_id: (sem, kw) for _, chunk_id, sem, kw in top}
+    placeholders = ",".join("?" * len(by_id))
+    cursor.execute(
+        f"SELECT chunk_id, source_path, heading, text FROM chunks WHERE chunk_id IN ({placeholders})",
+        list(by_id),
+    )
+    scored = []
+    for chunk_id, source_path, heading, text in cursor.fetchall():
+        semantic_score, keyword_score = by_id[chunk_id]
         scored.append({
             "chunk_id": chunk_id,
             "source_path": source_path,
             "heading": heading,
             "text": text,
-            "keyword_score": fts_scores.get(chunk_id, 0.0),
+            "keyword_score": keyword_score,
             "semantic_score": semantic_score,
         })
-
-    return _fuse(scored)[:limit]
+    return scored
 
 
 # Keyword's share of the hybrid score. The original value was 0.6 — backwards.

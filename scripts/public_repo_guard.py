@@ -12,6 +12,9 @@ BLOCKED_PATTERNS = [
     # Claims quote their source verbatim, so a claim page carries private
     # source text even though the source page itself is ignored.
     "wiki/claims/",
+    # The sharded source index lists wiki/sources/ page NAMES — a directory
+    # listing of private documents is a leak even without their text.
+    "wiki/index/",
     "dist/snapshots/",
     "dist/backups/",
     "evidence-packs/",

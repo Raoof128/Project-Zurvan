@@ -166,13 +166,52 @@ def source_page_stem(filepath):
     basename = os.path.basename(filepath)
     return sanitize_filename(os.path.splitext(basename)[0])
 
+
+def read_page_hash(page_path):
+    """The ``hash:`` recorded in a source page's frontmatter, or None."""
+    try:
+        with open(page_path, encoding="utf-8") as fh:
+            head = fh.read(1024)
+    except OSError:
+        return None
+    match = _re_ingest.search(r"^hash: (\S+)", head, _re_ingest.M)
+    return match.group(1) if match else None
+
+
+def resolve_source_page_path(source_dir, stem, file_hash):
+    """Collision-free page path for one source, suffixing -2, -3, ... as needed.
+
+    Two DIFFERENT documents routinely sanitise to the same slug — 24 separate
+    ``README.md`` files did in this store, along with 484 archive documents
+    whose PDF and web-article versions share a title. ``open(..., 'w')``
+    silently overwrote the earlier page, so the registry went on claiming a
+    document whose text on disk belonged to another one, and re-ingesting the
+    loser was refused as "already ingested". That is worse than a failed
+    ingest, because nothing anywhere says the content is gone.
+
+    A page whose frontmatter carries THIS file's hash is our own page from an
+    earlier run and is reused (so a re-ingest overwrites in place rather than
+    growing a new suffix every time). ``ingest_image_stub`` has used the same
+    loop for image stubs since it was written; this brings the text path in
+    line with it.
+    """
+    candidate = os.path.join(source_dir, f"{stem}.md")
+    counter = 2
+    while os.path.exists(candidate):
+        if read_page_hash(candidate) == file_hash:
+            return candidate
+        candidate = os.path.join(source_dir, f"{stem}-{counter}.md")
+        counter += 1
+    return candidate
+
+
 def create_source_page(filepath, file_hash, text):
     basename = os.path.basename(filepath)
     stem = source_page_stem(filepath)
-    filename = f"{stem}.md"
     source_dir = str(PROJECT_ROOT / "wiki" / "sources")
     os.makedirs(source_dir, exist_ok=True)
-    out_path = os.path.join(source_dir, filename)
+    out_path = resolve_source_page_path(source_dir, stem, file_hash)
+    filename = os.path.basename(out_path)
 
     figures = pdf_figure_inventory(filepath) if filepath.lower().endswith(".pdf") else []
     figure_count = sum(f["images"] for f in figures)
@@ -198,10 +237,18 @@ ingested_at: {datetime.datetime.now().isoformat()}
         f.write(content)
     return filename
 
-def create_stub_concept_and_claim(filepath):
+def create_stub_concept_and_claim(filepath, page_filename=None):
     # This is a stub for LLM extraction (no LLM output = no fabricated evidence)
     basename = os.path.basename(filepath)
-    stem = source_page_stem(filepath)
+    # Derive the stem from the page that was ACTUALLY written, so a collision
+    # resolved to `<slug>-2.md` gets `AutoConcept-<slug>-2` / `Claim-<slug>-2`
+    # pointing at it. Sharing the bare slug would both mislink the stubs and
+    # reintroduce the clobbering one level down.
+    stem = (
+        os.path.splitext(page_filename)[0]
+        if page_filename
+        else source_page_stem(filepath)
+    )
     # Create a dummy concept
     concept_dir = str(PROJECT_ROOT / "wiki" / "concepts")
     os.makedirs(concept_dir, exist_ok=True)
@@ -219,10 +266,15 @@ def append_log(filename):
     append_log_ingest(filename)
 
 def update_index(filename):
-    # Basic index update, rebuild_index.py handles more comprehensive rebuilds
-    index_path = str(PROJECT_ROOT / "wiki" / "index.md")
-    with open(index_path, 'a', encoding='utf-8') as f:
-        f.write(f"- [sources/{filename}](sources/{filename})\n")
+    """Record the page in the sharded wiki index (idempotent).
+
+    This used to append a line to wiki/index.md on every ingest with no
+    de-duplication. The file reached 501 KB over 3,713 lines (450 of them
+    duplicates) and blew past the 256 KB MCP read cap, so the index became
+    unreadable through the tool that exists to read pages.
+    """
+    from scripts.wiki_index import add_entry
+    add_entry(filename)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
@@ -346,7 +398,7 @@ def main():
     try:
         text = extract_text(args.filepath)
         filename = create_source_page(args.filepath, file_hash, text)
-        create_stub_concept_and_claim(args.filepath)
+        create_stub_concept_and_claim(args.filepath, filename)
         append_log(filename)
         update_index(filename)
     except BaseException:
