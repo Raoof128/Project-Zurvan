@@ -2,9 +2,10 @@
 
 **Date:** 2026-09-14 (Australia/Sydney)
 **Status:** Approved for planning
-**Scope:** Sub-project A of four. B (capture workflow), C (agent ergonomics) and
-D (provenance integrity, `2026-09-14-provenance-integrity-design.md`) get their
-own cycles; C depends on this landing first, D is independent of all three.
+**Scope:** Sub-project A of four. B (capture workflow) and C (agent ergonomics)
+get their own cycles; C depends on this landing first. For D (provenance
+integrity, `2026-09-14-provenance-integrity-design.md`): **D-P0 is a prerequisite
+to A's canonical baseline; D-P1 through P3 are independent of A.**
 
 ---
 
@@ -14,13 +15,20 @@ The corpus grew 4.6x on 2026-09-14 (43,528 -> 199,269 chunks). Retrieval quality
 held — a good result — but the measured baseline leaves real headroom, and the
 storage layer is hand-rolled:
 
-| Dimension | Today |
+**Canonical baseline — measured after D-P0 on 2026-09-14.** The 4.6x corpus
+growth earlier that day is the historical context; the numbers below are the
+current state and the only baseline A may measure against. The pre-P0 figures
+(199,269 chunks, 2.11 GB, 3.0 s) are retired — see
+`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`.
+
+| Dimension | Today (post-P0) |
 | --- | --- |
-| Top-1 / Top-3 / MRR | **68% / 72% / 0.71** (50-query gold set) |
-| Failing queries | **14 of 50** |
-| Search latency | **3.0 s** mean, warm |
-| Peak RSS per query | ~894 MB |
-| Index on disk | **2.11 GB** + a 306 MB `.vectors.npy` sidecar |
+| Corpus | **184,068 chunks** |
+| Top-1 / Top-3 / MRR | **0.68 / 0.72 / 0.7057** (50-query gold set) |
+| Failing queries | **14 of 50** (IDs frozen in the P0 report) |
+| Search latency | **1.96 s** mean, warm |
+| Peak RSS per query | ~893 MB |
+| Index on disk | **1.96 GB** + a 283 MB `.vectors.npy` sidecar |
 | Vector storage | JSON **text** in SQLite, parsed per query |
 | Reranking | none |
 
@@ -170,7 +178,9 @@ the 0.2/0.8 fusion weights, candidate policy, result budgeting.
 - Deterministic tie-break on `chunk_id`
 
 *Quality*
-- Top-1 68%, Top-3 72%, MRR 0.71 — unchanged
+- Top-1 0.68, Top-3 0.72, **MRR 0.7057 — unchanged within the evaluator's
+  numerical precision**. Rounded aggregates must not be the invariant after this
+  much work to remove measurement ambiguity.
 - **Failure set identical** (the same 14 query IDs)
 
 *Performance*
@@ -181,9 +191,19 @@ the 0.2/0.8 fusion weights, candidate policy, result budgeting.
 
 **If ranking differs, reject Phase 1 even if it is fast.**
 
-**Pin the dependency.** `sqlite-vec` is pre-v1 and its repository carries
-experimental ANN/IVF/DiskANN work; pin an exact version and use the `vec0` path
-deliberately rather than assuming future releases preserve today's behaviour.
+**Pin BOTH sqlite-vec identities.** They are not the same number — measured
+2026-09-14, the Python wheel reported `0.1.9` while the loaded extension's
+`vec_version()` reported `v0.1.6`. Pinning one leaves the other free to drift, so
+the gate asserts both:
+
+```
+sqlite_vec.__version__ == <pinned package version>
+vec_version()          == <pinned extension version>
+```
+
+`sqlite-vec` is pre-v1 and its repository carries experimental ANN/IVF/DiskANN
+work; use the `vec0` path deliberately rather than assuming future releases
+preserve today's behaviour.
 
 ---
 

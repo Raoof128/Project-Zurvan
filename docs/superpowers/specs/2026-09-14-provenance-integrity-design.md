@@ -2,8 +2,9 @@
 
 **Date:** 2026-09-14 (Australia/Sydney)
 **Status:** Draft — gap hunt complete, awaiting review
-**Scope:** Sub-project D. Independent of A (retrieval core), B (capture), C (agent
-ergonomics). Sequenced after A only because A is already specced.
+**Scope:** Sub-project D. **P0 interacts with A through the indexed corpus.
+After P0, P1-P3 are independent and read-only with respect to retrieval state.**
+B (capture) and C (agent ergonomics) are unaffected.
 
 ---
 
@@ -113,17 +114,26 @@ EVIDENCE DENSITY of the store
   unverified      31.4%  (164 notes)
 ```
 
-And the finding that matters most, found by auditing our own store:
+And the finding that mattered most, found by auditing our own store:
 
-**3,811 auto-generated stubs in `wiki/claims/` assert evidence they do not
-have.** `create_stub_concept_and_claim` writes one per ingest containing the
-literal text *"Evidence missing? No, cited from \<source\>"* — with no `type:
-claim`, no `confidence`, no `source:` field, and **no evidence section**. They
-outnumber real claims **15:1** in the same directory.
+**The pre-P0 self-audit found 3,811 claim stubs and 3,811 concept stubs that
+asserted evidence they did not have.** `create_stub_concept_and_claim` wrote one
+of each per ingest; the claim stub's body read *"Evidence missing? No, cited from
+\<source\>"* with no `type: claim`, no `confidence`, no `source:` field and **no
+evidence section**. They outnumbered real claims **15:1** in the same directory.
+That was the disease Zurvan exists to prevent, occurring inside Zurvan. Nothing
+leaked — the directories are gitignored and guard-blocked.
 
-This is the disease Zurvan exists to prevent, occurring inside Zurvan. Nothing
-leaked (the directory is gitignored and guard-blocked), but any consumer reading
-`wiki/claims/` is told 94% of the time that evidence exists when it does not.
+**This condition is now zero.** All 7,622 were removed on 2026-09-14 and the
+generator was deleted; a fresh ingest creates none. Measurements, the two gates,
+and the retracted retrieval hypothesis are frozen in
+[`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`](../../evaluation/retrieval-p0-stub-removal-2026-09-14.md).
+
+**Architectural reading, preserved as a P0 side-effect.** Removing the stubs cut
+the graph from 12,090 to 4,482 nodes and 11,455 to 3,917 edges — **the old graph
+represented ingestion mechanics almost as much as knowledge**. No quality claim
+is attached: a smaller graph is not a demonstrated better graph, and nothing here
+shows graph retrieval improved.
 
 ### Front 5 — Zurvan's own corpus (searched, not assumed)
 
@@ -149,7 +159,12 @@ passed on all four checks. The predicted retrieval improvement **did not occur**
 and the evidence behind that prediction was retracted as self-fulfilling; see
 the frozen report. Kept as ACCEPT on the correctness grounds it was approved on.
 
-### P0 (original statement) — Stop asserting evidence that does not exist
+### P0 — historical pre-execution specification (NOT an active requirement)
+
+*Retained for provenance only. Superseded by the DONE entry above; a future
+reader must not treat the text below as work still to do.*
+
+#### Stop asserting evidence that does not exist
 
 Rewrite or remove the 3,811 stubs. A placeholder must state its own emptiness:
 `status: unextracted`, no evidence section, no sentence claiming citation. An
@@ -187,7 +202,13 @@ Failure codes named after the incidents: `FABRICATED_CITATION`,
 `FABRICATED_QUOTATION`, plus `CONTAMINATED` from P1.
 
 **Gate:** running it twice on unchanged inputs produces byte-identical output;
-mutating one character of one source flips exactly one claim to `CONTAMINATED`.
+mutating the evidence supporting one **uniquely targeted fixture claim** flips
+that claim — and no unrelated claim — to `CONTAMINATED`.
+
+Stated that way deliberately: one source can support many claims, so "exactly one
+claim" would be wrong as a general property. The production verifier MUST
+invalidate **every** affected claim when a shared source changes; the fixture
+isolation exists only to make the test's assertion precise.
 
 **Disclaimer:** the receipt proves quote-to-source correspondence. It is not a
 statement that the claim is true, nor that the source is trustworthy.
