@@ -170,16 +170,11 @@ def test_source_page_name_is_guard_safe_for_pdf(tmp_path, monkeypatch):
     # derived wiki page (and its stub concept/claim) must not carry the source
     # extension or a double ".md.md" suffix.
     _patch_roots(monkeypatch, tmp_path)
-    from scripts.ingest import create_source_page, create_stub_concept_and_claim, source_page_stem
+    from scripts.ingest import create_source_page, source_page_stem
 
     filename = create_source_page("/raw/papers/report_v2.02a.pdf", "hash", "body")
     assert ".pdf" not in filename and ".md.md" not in filename
     assert filename == source_page_stem("/raw/papers/report_v2.02a.pdf") + ".md"
-
-    create_stub_concept_and_claim("/raw/papers/report_v2.02a.pdf")
-    for sub in ("concepts", "claims"):
-        for f in (tmp_path / "wiki" / sub).glob("*.md"):
-            assert ".pdf" not in f.name
 
 
 def test_is_image_file_detects_extensions():
@@ -478,20 +473,41 @@ def test_reingesting_same_content_reuses_its_own_page(tmp_path, monkeypatch):
     assert "beta revised" in (tmp_path / "wiki" / "sources" / again).read_text()
 
 
-def test_stub_concept_and_claim_follow_the_resolved_page_name(tmp_path, monkeypatch):
-    # The stubs link to ../sources/<stem>.md. On a collided page the bare slug
-    # points at the OTHER document's page, so the stubs must be named from the
-    # page that was actually written.
+def test_ingest_no_longer_has_a_stub_generator():
+    # Replaces test_stub_concept_and_claim_follow_the_resolved_page_name, which
+    # guarded the linkage of pages that must no longer be created at all.
+    import scripts.ingest as ing
+
+    assert not hasattr(ing, "create_stub_concept_and_claim"), \
+        "the stub generator was removed; nothing may pre-create a claim page"
+
+
+def test_ingest_creates_no_fake_claim_or_concept_objects(tmp_path, monkeypatch):
+    # An ingest used to write two placeholder pages per source: a claim stub
+    # reading "Evidence missing? No, cited from <source>" and an AutoConcept
+    # stub. The claim stub ASSERTS EVIDENCE IT DOES NOT HAVE, which is the exact
+    # fabrication this system exists to prevent; 3,811 of them accumulated,
+    # outnumbering real claims 15:1 and taking 7.65% of the search index.
+    #
+    # wiki/claims/ means "actual claims". Nothing may pre-create one.
     _patch_roots(monkeypatch, tmp_path)
-    from scripts.ingest import create_source_page, create_stub_concept_and_claim
+    from scripts.ingest import create_source_page
 
-    create_source_page("/repo-a/README.md", "hash-a", "alpha")
-    collided = create_source_page("/repo-b/README.md", "hash-b", "beta")
-    create_stub_concept_and_claim("/repo-b/README.md", collided)
+    create_source_page("/raw/papers/paper.pdf", "hash-x", "body text")
 
-    stem = os.path.splitext(collided)[0]
-    concept = tmp_path / "wiki" / "concepts" / f"AutoConcept-{stem}.md"
-    claim = tmp_path / "wiki" / "claims" / f"Claim-{stem}.md"
-    assert concept.exists() and claim.exists()
-    assert f"../sources/{collided}" in concept.read_text()
-    assert f"../sources/{collided}" in claim.read_text()
+    for sub in ("claims", "concepts"):
+        d = tmp_path / "wiki" / sub
+        assert not d.exists() or list(d.glob("*.md")) == [], \
+            f"ingest must not pre-create anything in wiki/{sub}/"
+
+
+def test_source_page_declares_that_nothing_was_extracted(tmp_path, monkeypatch):
+    # The honest replacement for the stubs: the SOURCE page states its own
+    # extraction status, so absence is recorded rather than faked elsewhere.
+    _patch_roots(monkeypatch, tmp_path)
+    from scripts.ingest import create_source_page
+
+    filename = create_source_page("/raw/papers/paper.pdf", "hash-x", "body text")
+    page = (tmp_path / "wiki" / "sources" / filename).read_text()
+
+    assert "extraction_status: unextracted" in page

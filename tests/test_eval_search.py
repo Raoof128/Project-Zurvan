@@ -161,3 +161,20 @@ def test_max_queries_is_clamped_to_at_least_one(tmp_path, monkeypatch, capsys):
 
     es.run_search_evaluation(gold, hybrid=True, max_queries=0)
     assert "Queries: 1" in capsys.readouterr().out
+
+
+def test_metrics_name_the_failing_queries(tmp_path, monkeypatch, capsys):
+    # A failure COUNT cannot support a before/after gate: "still 14" does not
+    # prove the same 14. Any comparison across a corpus change needs the IDs.
+    import json
+
+    from scripts import eval_search as es
+
+    monkeypatch.setattr(es, "search_hybrid", lambda *a, **k: [])
+    gold = _tiny_gold(tmp_path, n=3)
+
+    es.run_search_evaluation(gold, hybrid=True, as_json=True)
+    metrics = json.loads(capsys.readouterr().out)
+
+    assert metrics["failures"] == 3
+    assert metrics["failing_queries"] == ["q0", "q1", "q2"]

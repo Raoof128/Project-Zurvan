@@ -28,6 +28,33 @@ Vectors are stored as JSON and parsed on every search. `scripts/vector_cache.py`
 exists only to move that parse off the query path — it is a workaround for the
 storage format, not a feature. `sqlite-vec` removes the need for it entirely.
 
+## Orchestration (corrected 2026-09-14 — the specs' independence claim was false)
+
+Both documents originally asserted that A and D are independent. **They are
+not**: D's P0 mutates `wiki/` and therefore the corpus A measures. Measured
+proof — P0 removed 15,201 chunks (7.63%) and 63% of the graph's nodes.
+
+```
+D-P0  (correctness cleanup)
+  |
+full reindex
+  |
+NEW eval baseline          <- 68/72/0.7057 on 199,269 chunks is RETIRED
+  |
+A-Step 0  failure anatomy on the CLEAN corpus
+  |
+A-Phase 1 sqlite-vec invariant storage swap
+  |
+  +-- D-P1 / P2 / P3 may proceed independently (all read-only w.r.t. the index)
+```
+
+Phase 1 may only demand identical ranking and failure sets *after* this point,
+because only then is its baseline stable.
+
+**Canonical baseline as of 2026-09-14 (post-P0):** 184,068 chunks · Top-1 0.68 ·
+Top-3 0.72 · MRR 0.7057 · 14 failures. See
+`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`.
+
 ## 2. Constraints
 
 1. **Local-first is non-negotiable.** No network at query time, no API key.

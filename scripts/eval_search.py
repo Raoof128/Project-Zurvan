@@ -84,6 +84,9 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
     top3_hits = 0
     reciprocal_ranks = []
     failures = 0
+    # The IDs, not just the count: "still 14 failures" does not prove the SAME
+    # 14, and every before/after gate across a corpus change needs that proof.
+    failing_queries = []
 
     if not as_json:
         print(f"Running Evaluation on {total_queries} queries (Hybrid: {hybrid})...")
@@ -133,6 +136,7 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
             top3_hits += 1
         else:
             failures += 1
+            failing_queries.append(query)
             
         rr = calculate_reciprocal_rank(expected_paths, retrieved_paths)
         reciprocal_ranks.append(rr)
@@ -147,6 +151,7 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
         "top3_accuracy": top3_accuracy,
         "mrr": mrr,
         "failures": failures,
+        "failing_queries": failing_queries,
         "min_top3": min_top3,
         "passed": top3_accuracy >= min_top3,
     }

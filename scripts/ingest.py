@@ -221,6 +221,7 @@ title: {basename}
 hash: {file_hash}
 figures: {figure_count}
 figures_transcribed: false
+extraction_status: unextracted
 ingested_at: {datetime.datetime.now().isoformat()}
 ---
 
@@ -237,29 +238,20 @@ ingested_at: {datetime.datetime.now().isoformat()}
         f.write(content)
     return filename
 
-def create_stub_concept_and_claim(filepath, page_filename=None):
-    # This is a stub for LLM extraction (no LLM output = no fabricated evidence)
-    basename = os.path.basename(filepath)
-    # Derive the stem from the page that was ACTUALLY written, so a collision
-    # resolved to `<slug>-2.md` gets `AutoConcept-<slug>-2` / `Claim-<slug>-2`
-    # pointing at it. Sharing the bare slug would both mislink the stubs and
-    # reintroduce the clobbering one level down.
-    stem = (
-        os.path.splitext(page_filename)[0]
-        if page_filename
-        else source_page_stem(filepath)
-    )
-    # Create a dummy concept
-    concept_dir = str(PROJECT_ROOT / "wiki" / "concepts")
-    os.makedirs(concept_dir, exist_ok=True)
-    with open(os.path.join(concept_dir, f"AutoConcept-{stem}.md"), 'w') as f:
-        f.write(f"---\ntitle: AutoConcept-{stem}\n---\n# AutoConcept-{stem}\n\nGenerated from [{basename}](../sources/{stem}.md)")
+# `create_stub_concept_and_claim` was deleted on 2026-09-14.
+#
+# It wrote two placeholder pages per ingest. The claim stub's body read
+# "Evidence missing? No, cited from <source>" — a page ASSERTING EVIDENCE IT DID
+# NOT HAVE, which is precisely the fabrication this system exists to prevent.
+# 3,811 of them accumulated, outnumbering real claims 15:1 in the same
+# directory, and they were not inert: 15,244 stub chunks were 7.65% of the
+# search index, and a query for "evidence cited from source" returned ten stubs
+# in the top ten, displacing real evidence on Zurvan's core query class.
+#
+# wiki/claims/ means "actual claims" — nothing may pre-create one. Absence is
+# now recorded honestly where it belongs, as `extraction_status: unextracted`
+# on the source page itself, so the gap is stated rather than faked elsewhere.
 
-    # Create a dummy claim
-    claim_dir = str(PROJECT_ROOT / "wiki" / "claims")
-    os.makedirs(claim_dir, exist_ok=True)
-    with open(os.path.join(claim_dir, f"Claim-{stem}.md"), 'w') as f:
-        f.write(f"---\ntitle: Claim-{stem}\n---\n# Claim-{stem}\n\nEvidence missing? No, cited from [{basename}](../sources/{stem}.md)")
 
 def append_log(filename):
     from scripts.wiki_merge import append_log_ingest
@@ -398,7 +390,6 @@ def main():
     try:
         text = extract_text(args.filepath)
         filename = create_source_page(args.filepath, file_hash, text)
-        create_stub_concept_and_claim(args.filepath, filename)
         append_log(filename)
         update_index(filename)
     except BaseException:
