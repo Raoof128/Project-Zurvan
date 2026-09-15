@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +87,16 @@ def result_text(result: Any) -> str:
     return str(result)
 
 
-async def start_session(readonly: bool = True):
+async def start_session(readonly: bool = True, root: str | None = None):
+    """Start a server session. `root` sets ZURVAN_ROOT for the child process.
+
+    The write-mode session MUST pass a throwaway root. This smoke used to write
+    its notes and questions straight into the live `wiki/`, and by 2026-09-15 it
+    had left 28 notes, 4 decisions, 7 duplicate claims and 3 question blocks in
+    the searchable corpus — all indexed, so every retrieval baseline the project
+    measured had smoke output in it. Deleting afterwards is not a fix: a crash
+    between the write and the cleanup leaves the pages behind.
+    """
     env = os.environ.copy()
     env.update(
         {
@@ -98,6 +109,8 @@ async def start_session(readonly: bool = True):
             "ZURVAN_EMBED_PROVIDER": "mock",
         }
     )
+    if root:
+        env["ZURVAN_ROOT"] = root
 
     params = StdioServerParameters(
         command=sys.executable,
@@ -255,7 +268,15 @@ async def readonly_smoke() -> None:
 async def write_mode_smoke() -> None:
     print("\n[2/2] MCP write-mode smoke test")
 
-    async with await start_session(readonly=False) as (read, write):
+    # A throwaway store. This session only calls write tools, so it needs no
+    # corpus — just the directories those tools write into. The real wiki is
+    # not merely left alone, it is not a reachable target.
+    tmp_root = tempfile.mkdtemp(prefix="zurvan-smoke-")
+    for sub in ("wiki", "wiki/decisions", "wiki/claims", "data"):
+        Path(tmp_root, sub).mkdir(parents=True, exist_ok=True)
+    print(f"   write target: {tmp_root} (throwaway, NOT the live wiki)")
+
+    async with await start_session(readonly=False, root=tmp_root) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -284,6 +305,19 @@ async def write_mode_smoke() -> None:
             )
 
             print("✅ Write mode tools worked when explicitly enabled")
+
+    # Prove the isolation rather than assuming it: the pages must exist in the
+    # throwaway root, and the live wiki must not have grown.
+    written = list(Path(tmp_root, "wiki").glob("note-*.md"))
+    if not written:
+        raise AssertionError(f"write-mode session wrote nothing into {tmp_root}")
+    leaked = list(ROOT.glob("wiki/note-mcp-e2e-write-mode-smoke*.md"))
+    if leaked:
+        raise AssertionError(
+            f"smoke leaked {len(leaked)} note(s) into the LIVE wiki: {leaked[:3]}"
+        )
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    print("✅ Live wiki untouched by the write-mode smoke")
 
 
 async def main() -> None:
