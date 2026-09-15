@@ -32,31 +32,87 @@ def _unique_path(directory: str, slug: str, prefix: str = "") -> str:
             return candidate
         counter += 1
 
-def current_project_name() -> str:
-    """Name of the active workspace, or 'unknown'.
+def resolve_project(explicit: str | None = None, root=None) -> str:
+    """The SUBJECT project of a page being written — never merely the workspace
+    that happens to be selected in the global registry.
 
-    Written into every decision as `project:` because wiki/decisions/ is tracked
-    and this store holds every project's memory. public_repo_guard publishes a
-    page only if that field names an allowlisted public project, so an
-    undeclared or wrongly-declared page is blocked rather than leaked. Correct
-    the field by hand if the active workspace was not the decision's subject.
+    Written into every decision as `project:` because `wiki/decisions/` is
+    tracked and this store holds every project's memory. `public_repo_guard`
+    publishes a page only if that field names an allowlisted public project, so
+    this value is a publication control, not a label.
+
+    **The bug this exists to prevent.** It previously returned the registry's
+    `current` project unconditionally. On 2026-09-15 four decisions written from
+    inside the Zurvan repo were stamped `project: "REDACTED-PROJECT"`, because a session in
+    an unrelated repository had left that workspace selected. The subject was
+    Zurvan; the stamp said otherwise; and the guard would have made a publication
+    decision on it.
+
+    Resolution order, fail-closed:
+
+    1. `explicit` — the caller said so, and a caller who names a project means it.
+    2. The registered project containing `root` (default: the working directory
+       the command was invoked from). Deepest path wins, so a project nested
+       inside another resolves to the inner one. This is what makes write-back
+       from any repo correct: run it in REDACTED-PROJECT and you get `REDACTED-PROJECT`, run it in
+       Zurvan and you get `zurvan`.
+    3. The registry's `current` — **only** when its registered path also contains
+       `root`, i.e. when it agrees with (2) anyway.
+    4. `"unknown"`, which is not in `PUBLIC_PROJECTS`, so the page is blocked
+       from publication rather than published under a guess.
+
+    The invariant: a decision must never inherit a project merely because that
+    project is "current" somewhere else.
     """
+    from scripts.project_registry import is_safe_slug
+
+    if explicit:
+        return explicit if is_safe_slug(explicit) else "unknown"
+
     try:
-        from scripts.project_registry import get_current_project
-        name, _path = get_current_project()
-        return name or "unknown"
+        from pathlib import Path as _P
+        from scripts.project_registry import load_registry
+
+        here = _P(root).resolve() if root is not None else _P(os.getcwd()).resolve()
+        registry = load_registry()
+        current = registry.get("current")
+
+        containing = []
+        for name, meta in (registry.get("projects") or {}).items():
+            try:
+                base = _P(meta["path"]).resolve()
+            except (KeyError, TypeError, OSError):
+                continue
+            if here == base or base in here.parents:
+                containing.append((len(base.parts), name))
+        if not containing:
+            return "unknown"
+
+        deepest = max(d for d, _ in containing)
+        names = {n for d, n in containing if d == deepest}
+        # Rule 3: `current` breaks a tie only when it is itself a containing
+        # project. It can never override a project that actually contains root.
+        if current in names:
+            return current
+        return sorted(names)[0]
     except Exception:
         return "unknown"
 
 
-def add_decision(title: str, reason: str, status: str, tags: List[str]):
+def current_project_name() -> str:
+    """Backwards-compatible alias. Prefer `resolve_project`."""
+    return resolve_project()
+
+
+def add_decision(title: str, reason: str, status: str, tags: List[str],
+                 project: str | None = None):
     filepath = _unique_path("wiki/decisions", _make_note_slug(title))
 
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
 title: {escape_yaml_string(title)}
 type: decision
-project: {escape_yaml_string(current_project_name())}
+project: {escape_yaml_string(resolve_project(project))}
 status: {escape_yaml_string(status)}
 tags:
 {tags_yaml}

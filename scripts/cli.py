@@ -290,6 +290,12 @@ def main():
     dec_add.add_argument("--reason", required=True)
     dec_add.add_argument("--status", required=True)
     dec_add.add_argument("--tags", nargs="+", default=[])
+    dec_add.add_argument(
+        "--project",
+        help="Subject project for the `project:` field, which public_repo_guard "
+             "uses as a publication control. Defaults to the registered project "
+             "containing the working directory, NOT the globally selected one.",
+    )
     
     # zurvan claim add
     claim_parser = subparsers.add_parser("claim", help="Manage claims")
@@ -790,7 +796,8 @@ def main():
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
     elif args.command == "decision" and args.action == "add":
-        if add_decision(args.title, args.reason, args.status, args.tags) is False:
+        if add_decision(args.title, args.reason, args.status, args.tags,
+                        project=getattr(args, "project", None)) is False:
             sys.exit(1)
     elif args.command == "claim" and args.action == "add":
         if add_claim(args.text, args.source, args.evidence, args.confidence, args.tags) is False:

@@ -121,3 +121,87 @@ def test_tagged_question_still_lists_its_tags(tmp_path, monkeypatch):
 
     content = (tmp_path / "wiki" / "open-questions.md").read_text()
     assert "- **Tags**: zurvan, tests\n" in content
+
+
+# --- project attribution (publication control, not a label) -----------------
+# On 2026-09-15 four decisions written from inside the Zurvan repo were stamped
+# `project: "REDACTED-PROJECT"` because an unrelated session had left that workspace
+# selected in the global registry. public_repo_guard gates publication on that
+# field, so the stamp decides whether a page may be published. These tests pin
+# the invariant: a decision must never inherit a project merely because that
+# project is "current" somewhere else.
+
+def _registry(tmp_path, monkeypatch, projects, current):
+    import json
+    from scripts import project_registry
+    reg = tmp_path / "registry.json"
+    reg.write_text(json.dumps({"current": current, "projects": {
+        n: {"path": str(p)} for n, p in projects.items()}}), encoding="utf-8")
+    monkeypatch.setattr(project_registry, "get_registry_path", lambda: reg)
+    return reg
+
+
+def test_project_comes_from_the_working_root_not_the_selected_workspace(tmp_path, monkeypatch):
+    from scripts.memory import resolve_project
+
+    zurvan = tmp_path / "Zurvan"; zurvan.mkdir()
+    REDACTED-PROJECT = tmp_path / "REDACTED-PROJECT"; REDACTED-PROJECT.mkdir()
+    _registry(tmp_path, monkeypatch, {"zurvan": zurvan, "REDACTED-PROJECT": REDACTED-PROJECT}, current="REDACTED-PROJECT")
+
+    # THE bug: registry current is REDACTED-PROJECT, the work is happening in Zurvan.
+    assert resolve_project(root=str(zurvan)) == "zurvan"
+    # ...and a subdirectory of it resolves the same way.
+    (zurvan / "scripts").mkdir()
+    assert resolve_project(root=str(zurvan / "scripts")) == "zurvan"
+    # Working in REDACTED-PROJECT still resolves to REDACTED-PROJECT — cross-repo write-back works.
+    assert resolve_project(root=str(REDACTED-PROJECT)) == "REDACTED-PROJECT"
+
+
+def test_unrecognised_root_fails_closed_to_unknown(tmp_path, monkeypatch):
+    from scripts.memory import resolve_project
+    from scripts.public_repo_guard import PUBLIC_PROJECTS
+
+    known = tmp_path / "Zurvan"; known.mkdir()
+    outside = tmp_path / "somewhere-else"; outside.mkdir()
+    _registry(tmp_path, monkeypatch, {"zurvan": known}, current="zurvan")
+
+    # Not inside any registered project: guess nothing, and block publication.
+    assert resolve_project(root=str(outside)) == "unknown"
+    assert "unknown" not in PUBLIC_PROJECTS
+
+
+def test_explicit_project_wins_and_is_validated(tmp_path, monkeypatch):
+    from scripts.memory import resolve_project
+
+    zurvan = tmp_path / "Zurvan"; zurvan.mkdir()
+    _registry(tmp_path, monkeypatch, {"zurvan": zurvan}, current="zurvan")
+
+    assert resolve_project("simurgh", root=str(zurvan)) == "simurgh"
+    # An unsafe name must not reach a path or a frontmatter field.
+    assert resolve_project("../../etc", root=str(zurvan)) == "unknown"
+
+
+def test_nested_projects_resolve_to_the_innermost(tmp_path, monkeypatch):
+    from scripts.memory import resolve_project
+
+    outer = tmp_path / "outer"; outer.mkdir()
+    inner = outer / "inner"; inner.mkdir()
+    _registry(tmp_path, monkeypatch, {"outer": outer, "inner": inner}, current="outer")
+
+    # `current` may not override a project that actually contains the root.
+    assert resolve_project(root=str(inner)) == "inner"
+    assert resolve_project(root=str(outer)) == "outer"
+
+
+def test_decision_frontmatter_carries_the_resolved_project(tmp_path, monkeypatch):
+    from scripts import memory
+    import scripts.safe_write as safe_write
+
+    monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path)
+    (tmp_path / "wiki" / "decisions").mkdir(parents=True)
+    monkeypatch.setattr(memory, "append_to_log", lambda *a, **k: None)
+
+    assert memory.add_decision("T", "r", "accepted", ["x"], project="zurvan") is True
+    written = (tmp_path / "wiki" / "decisions" / "t.md").read_text(encoding="utf-8")
+    assert 'project: "zurvan"' in written

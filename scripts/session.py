@@ -7,7 +7,16 @@ import datetime
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# The STORE root, not this file's location. Deriving it from `__file__` meant
+# ZURVAN_ROOT could not redirect session writes, so `check.sh`'s agent-workflow
+# smoke wrote `wiki/sessions/<date>-phase-7-smoke-test.md` into the live corpus
+# on every run — six had accumulated, all indexed, all inside every retrieval
+# baseline the project had measured.
+from scripts.config import PROJECT_ROOT as ROOT
+
+# Where this checkout's templates live. Distinct from ROOT, which is the STORE
+# and may be redirected to a throwaway by ZURVAN_ROOT.
+CODE_ROOT = Path(__file__).resolve().parents[1]
 SESSIONS_DIR = ROOT / "wiki" / "sessions"
 LOG_FILE = ROOT / "wiki" / "log.md"
 
@@ -24,7 +33,7 @@ def session_start(topic: str) -> str:
     filename = get_safe_filename(topic)
     filepath = SESSIONS_DIR / filename
     
-    template_path = ROOT / "scripts" / "templates" / "session_start.md"
+    template_path = CODE_ROOT / "scripts" / "templates" / "session_start.md"
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
         
@@ -50,7 +59,7 @@ def session_close(topic: str, summary: str, checks: str) -> str:
     if not filepath.exists():
         raise FileNotFoundError(f"Session file not found for topic '{topic}': {filepath}")
         
-    template_path = ROOT / "scripts" / "templates" / "session_close.md"
+    template_path = CODE_ROOT / "scripts" / "templates" / "session_close.md"
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
         

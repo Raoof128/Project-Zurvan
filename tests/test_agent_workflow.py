@@ -6,6 +6,9 @@ def test_agent_preflight(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.agent_workflow.LOG_FILE", tmp_path / "log.md")
     monkeypatch.setattr("scripts.agent_workflow.OPEN_QUESTIONS_FILE", tmp_path / "open.md")
     monkeypatch.setattr("scripts.agent_workflow.ROOT", tmp_path)
+    # CODE_ROOT is where templates are read from; the store root no longer
+    # implies it, so a fixture template needs this redirected too.
+    monkeypatch.setattr("scripts.agent_workflow.CODE_ROOT", tmp_path)
     
     with open(tmp_path / "log.md", "w") as f:
         f.write("Log line 1\nLog line 2")
@@ -27,6 +30,9 @@ def test_agent_preflight(tmp_path, monkeypatch):
 def test_agent_postedit(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.agent_workflow.LOG_FILE", tmp_path / "log.md")
     monkeypatch.setattr("scripts.agent_workflow.ROOT", tmp_path)
+    # CODE_ROOT is where templates are read from; the store root no longer
+    # implies it, so a fixture template needs this redirected too.
+    monkeypatch.setattr("scripts.agent_workflow.CODE_ROOT", tmp_path)
     
     (tmp_path / "scripts" / "templates").mkdir(parents=True)
     with open(tmp_path / "scripts" / "templates" / "postedit.md", "w") as f:
@@ -163,6 +169,9 @@ from scripts.agent_workflow import agent_prime
 def test_agent_prime_project_routes_to_digest(tmp_path, monkeypatch):
     _make_corpus(tmp_path)
     monkeypatch.setattr("scripts.agent_workflow.ROOT", tmp_path)
+    # CODE_ROOT is where templates are read from; the store root no longer
+    # implies it, so a fixture template needs this redirected too.
+    monkeypatch.setattr("scripts.agent_workflow.CODE_ROOT", tmp_path)
     out = agent_prime(project="nexus-archive")
     assert out.startswith("# Zurvan recall — nexus-archive")
     assert "# Zurvan prime" not in out  # digest replaces the full card

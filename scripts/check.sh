@@ -77,17 +77,35 @@ ZURVAN_EMBED_PROVIDER=mock \
 python scripts/e2e_mcp_smoke.py
 echo "✅ MCP E2E smoke test passed."
 echo "[11/23] Agent Workflow Smoke Test..."
-PYTHONPATH=. python scripts/cli.py session start --topic "Phase 7 smoke test" > /dev/null
+# The WRITE half of this gate runs against a throwaway store. It used to write
+# `wiki/sessions/<date>-phase-7-smoke-test.md` plus log entries into the LIVE
+# wiki on every run — 6 such pages had accumulated by 2026-09-15, indexed and
+# therefore part of every retrieval baseline. `agent preflight` is a read and
+# deliberately stays on the real store, which is what makes the smoke meaningful.
+SMOKE_ROOT="$(mktemp -d -t zurvan-agent-smoke)"
+mkdir -p "$SMOKE_ROOT/wiki/sessions" "$SMOKE_ROOT/wiki/decisions" \
+         "$SMOKE_ROOT/wiki/claims" "$SMOKE_ROOT/data"
+trap 'rm -rf "$SMOKE_ROOT"' EXIT
+ZURVAN_ROOT="$SMOKE_ROOT" PYTHONPATH=. python scripts/cli.py session start --topic "Phase 7 smoke test" > /dev/null
 PYTHONPATH=. python scripts/cli.py agent preflight --topic "Zurvan roadmap" --hybrid --graph --limit 10 > /dev/null
-PYTHONPATH=. python scripts/cli.py agent postedit \
+ZURVAN_ROOT="$SMOKE_ROOT" PYTHONPATH=. python scripts/cli.py agent postedit \
   --summary "Ran Phase 7 smoke test." \
   --files scripts/agent_workflow.py scripts/session.py \
   --checks "pytest tests/ && bash scripts/check.sh" > /dev/null
-PYTHONPATH=. python scripts/cli.py session close \
+ZURVAN_ROOT="$SMOKE_ROOT" PYTHONPATH=. python scripts/cli.py session close \
   --topic "Phase 7 smoke test" \
   --summary "Phase 7 workflow smoke test passed." \
   --checks "pytest tests/ && bash scripts/check.sh" > /dev/null
-echo "✅ Agent Workflow smoke test passed."
+if ! ls "$SMOKE_ROOT"/wiki/sessions/*.md >/dev/null 2>&1; then
+  echo "❌ Agent workflow smoke wrote nothing into its throwaway root."
+  exit 1
+fi
+if ls wiki/sessions/*phase-7-smoke-test.md >/dev/null 2>&1; then
+  echo "❌ Agent workflow smoke leaked a session page into the LIVE wiki."
+  exit 1
+fi
+rm -rf "$SMOKE_ROOT"; trap - EXIT
+echo "✅ Agent Workflow smoke test passed (writes isolated)."
 echo ""
 
 echo "[12/23] Running Version Check..."

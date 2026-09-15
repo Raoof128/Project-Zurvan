@@ -6,6 +6,9 @@ def test_session_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr("scripts.session.SESSIONS_DIR", tmp_path / "sessions")
     monkeypatch.setattr("scripts.session.LOG_FILE", tmp_path / "wiki" / "log.md")
     monkeypatch.setattr("scripts.session.ROOT", tmp_path)
+    # CODE_ROOT is where templates are read from; the store root no longer
+    # implies it, so a fixture template needs this redirected too.
+    monkeypatch.setattr("scripts.session.CODE_ROOT", tmp_path)
     
     # Create templates for test
     (tmp_path / "scripts" / "templates").mkdir(parents=True)

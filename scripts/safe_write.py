@@ -3,8 +3,12 @@ import yaml
 from pathlib import Path
 
 def get_project_root() -> Path:
-    # Assuming this script is in scripts/, root is one level up
-    return Path(__file__).parent.parent.resolve()
+    # Assuming this script is in scripts/, root is one level up.
+    # `ZURVAN_ROOT` redirects the write boundary for tests and smokes — see the
+    # note on PROJECT_ROOT in scripts/config.py. It must be honoured HERE too:
+    # this function is the gate that decides whether a write is inside the
+    # store, so a redirected root that this ignored would simply refuse to write.
+    return Path(os.environ.get("ZURVAN_ROOT") or Path(__file__).parent.parent).resolve()
 
 def is_safe_path(target_path: Path) -> bool:
     root = get_project_root()

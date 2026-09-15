@@ -269,9 +269,15 @@ def tool_zurvan_remember(type: str, title: str, body: str, tags: List[str]) -> s
 
 @_protocol_safe
 @enforce_read_only
-def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[str]) -> str:
-    """Manages decisions."""
-    if add_decision(title, reason, status, tags):
+def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[str],
+                             project: str | None = None) -> str:
+    """Manages decisions.
+
+    `project` names the decision's SUBJECT and lands in the `project:` field that
+    `public_repo_guard` gates publication on. Left unset it is resolved from the
+    working directory, never from whichever workspace is globally selected.
+    """
+    if add_decision(title, reason, status, tags, project=project):
         return f"Decision added successfully: {title}"
     return "Failed to add decision."
 

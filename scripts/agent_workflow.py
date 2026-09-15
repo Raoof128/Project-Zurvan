@@ -6,7 +6,12 @@ Zurvan Agent Workflow Management
 import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+# Two different roots, deliberately. CODE_ROOT is where this checkout's
+# templates live and never moves; ROOT is the STORE being read and written, so
+# ZURVAN_ROOT can point it at a throwaway during a smoke. Collapsing them is what
+# let the agent-workflow smoke write into the live wiki.
+CODE_ROOT = Path(__file__).resolve().parents[1]
+from scripts.config import PROJECT_ROOT as ROOT
 LOG_FILE = ROOT / "wiki" / "log.md"
 OPEN_QUESTIONS_FILE = ROOT / "wiki" / "open-questions.md"
 
@@ -33,7 +38,7 @@ def agent_preflight(topic: str, hybrid: bool = True, graph: bool = True, limit: 
     from scripts.context_export import export_context
     context_bundle = export_context(topic=topic, limit=limit, hybrid=hybrid, graph=graph)
     
-    template_path = ROOT / "scripts" / "templates" / "preflight.md"
+    template_path = CODE_ROOT / "scripts" / "templates" / "preflight.md"
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
         
@@ -263,7 +268,7 @@ def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
 
 
 def agent_postedit(summary: str, files: list[str], checks: str) -> str:
-    template_path = ROOT / "scripts" / "templates" / "postedit.md"
+    template_path = CODE_ROOT / "scripts" / "templates" / "postedit.md"
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
         

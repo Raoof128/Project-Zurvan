@@ -23,16 +23,28 @@ def test_tool_zurvan_graph_stats_struct():
     assert isinstance(stats["nodes"], int)
     assert isinstance(stats["edges"], int)
 
-def test_tool_zurvan_remember(monkeypatch):
+def test_tool_zurvan_remember(monkeypatch, tmp_path):
+    # This test used to write the note into the LIVE wiki and `os.remove` it
+    # afterwards. The file count came back even, so a count-based guard saw
+    # nothing — but `wiki/log.md` kept the "Note Added - MCP test" append
+    # forever, altering a chunk of an indexed 4,000-chunk file on every run, and
+    # a failure between the write and the remove would have left the note in the
+    # corpus. Redirect the store instead; cleanup is not isolation.
+    import scripts.memory as memory
+    import scripts.safe_write as safe_write
+    monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path)
+    (tmp_path / "wiki").mkdir(parents=True, exist_ok=True)
+
     monkeypatch.setenv("ZURVAN_MCP_READONLY", "1")
     result = tool_zurvan_remember("note", "MCP test", "body", ["test"])
     assert "read-only mode" in result
-    
+
     monkeypatch.setenv("ZURVAN_MCP_READONLY", "0")
     result = tool_zurvan_remember("note", "MCP test", "body", ["test"])
     assert "successfully" in result
-    
-    os.remove("wiki/note-mcp-test.md")
+
+    assert (tmp_path / "wiki" / "note-mcp-test.md").is_file(), "must write to the throwaway store"
 
 # ── zurvan_read_page ──────────────────────────────────────────────────────────
 

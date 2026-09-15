@@ -4,7 +4,19 @@ from pathlib import Path
 # Absolute path to the Zurvan repo root (parent of scripts/).
 # Using __file__ means this is CWD-independent — safe when the MCP
 # server is launched from any working directory.
-PROJECT_ROOT: Path = Path(__file__).parent.parent.resolve()
+#
+# `ZURVAN_ROOT` overrides it, and exists for ONE reason: a test or smoke must be
+# able to run against a throwaway store. `tests/test_cli.py::test_cli_remember`
+# spawned the real CLI and wrote a note into the live `wiki/` on every run — 48
+# of them had accumulated by 2026-09-15, along with 28 notes and 4 decisions from
+# the MCP smoke. Those pages are indexed, so test execution was changing the
+# chunk count, the retrieval candidates, the graph and therefore every retrieval
+# baseline. Cleaning up afterwards is not a fix: a crash between write and
+# cleanup still contaminates the corpus. The override is read at import, so a
+# subprocess started with it set never touches the real store at all.
+PROJECT_ROOT: Path = Path(
+    os.environ.get("ZURVAN_ROOT") or Path(__file__).parent.parent
+).resolve()
 
 def get_config_dir() -> Path:
     env_dir = os.environ.get("ZURVAN_CONFIG_DIR")

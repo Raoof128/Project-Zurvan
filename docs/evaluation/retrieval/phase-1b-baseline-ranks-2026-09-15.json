@@ -1,0 +1,416 @@
+{
+ "corpus_chunks": 184002,
+ "top1": 0.7,
+ "top3": 0.74,
+ "per_query": [
+  {
+   "n": 1,
+   "rank": 1,
+   "expected": [
+    "wiki/decisions/delay-vector-search.md"
+   ],
+   "top1": "wiki/decisions/delay-vector-search.md"
+  },
+  {
+   "n": 2,
+   "rank": 1,
+   "expected": [
+    "wiki/note-raw-folder-protection.md",
+    "AGENTS.md"
+   ],
+   "top1": "wiki/note-raw-folder-protection.md"
+  },
+  {
+   "n": 3,
+   "rank": 3,
+   "expected": [
+    "docs/extraction_test_matrix.md"
+   ],
+   "top1": "docs/workflows_and_plans.md"
+  },
+  {
+   "n": 4,
+   "rank": null,
+   "expected": [
+    "docs/mcp/security.md"
+   ],
+   "top1": "wiki/decisions/mcp-write-mode-stays-disabled-by-default.md"
+  },
+  {
+   "n": 5,
+   "rank": null,
+   "expected": [
+    "docs/mcp/security.md"
+   ],
+   "top1": "wiki/sources/Mitigating_prompt_injections_in_browser_use.md"
+  },
+  {
+   "n": 6,
+   "rank": 1,
+   "expected": [
+    "docs/federation/privacy-model.md"
+   ],
+   "top1": "docs/federation/privacy-model.md"
+  },
+  {
+   "n": 7,
+   "rank": 5,
+   "expected": [
+    "docs/federation/privacy-model.md"
+   ],
+   "top1": "docs/federation/overview.md"
+  },
+  {
+   "n": 8,
+   "rank": 1,
+   "expected": [
+    "docs/federation/cross-project-search.md"
+   ],
+   "top1": "docs/federation/cross-project-search.md"
+  },
+  {
+   "n": 9,
+   "rank": null,
+   "expected": [
+    "docs/evidence/redaction.md"
+   ],
+   "top1": "wiki/sources/docs__superpowers__specs__2026-07-05-stage-4p-voca-design.md"
+  },
+  {
+   "n": 10,
+   "rank": null,
+   "expected": [
+    "docs/evidence/redaction.md"
+   ],
+   "top1": "wiki/sources/2026-04-10-unified-inbox-design.md"
+  },
+  {
+   "n": 11,
+   "rank": 1,
+   "expected": [
+    "docs/evidence/overview.md"
+   ],
+   "top1": "docs/evidence/overview.md"
+  },
+  {
+   "n": 12,
+   "rank": 1,
+   "expected": [
+    "docs/evidence/building-packs.md",
+    "docs/evidence/overview.md"
+   ],
+   "top1": "docs/evidence/overview.md"
+  },
+  {
+   "n": 13,
+   "rank": 1,
+   "expected": [
+    "docs/evidence/workflows.md",
+    "docs/review/citation-review.md"
+   ],
+   "top1": "docs/evidence/workflows.md"
+  },
+  {
+   "n": 14,
+   "rank": 1,
+   "expected": [
+    "docs/review/citation-review.md"
+   ],
+   "top1": "docs/review/citation-review.md"
+  },
+  {
+   "n": 15,
+   "rank": 1,
+   "expected": [
+    "docs/publication/safety.md"
+   ],
+   "top1": "docs/publication/safety.md"
+  },
+  {
+   "n": 16,
+   "rank": 4,
+   "expected": [
+    "docs/publication/export-formats.md"
+   ],
+   "top1": "docs/reports/cli.md"
+  },
+  {
+   "n": 17,
+   "rank": 1,
+   "expected": [
+    "docs/publication/citation-appendix.md"
+   ],
+   "top1": "docs/publication/citation-appendix.md"
+  },
+  {
+   "n": 18,
+   "rank": null,
+   "expected": [
+    "docs/decisions/stale-decisions.md"
+   ],
+   "top1": "wiki/sources/2026-07-08-stage-5a-vnc-narrative-workspace-conflict-design.md"
+  },
+  {
+   "n": 19,
+   "rank": 1,
+   "expected": [
+    "docs/decisions/stale-decisions.md"
+   ],
+   "top1": "docs/decisions/stale-decisions.md"
+  },
+  {
+   "n": 20,
+   "rank": 1,
+   "expected": [
+    "docs/decisions/contradiction-detection.md",
+    "docs/policy-radar/contradiction-radar.md"
+   ],
+   "top1": "docs/decisions/contradiction-detection.md"
+  },
+  {
+   "n": 21,
+   "rank": 1,
+   "expected": [
+    "docs/decisions/cross-project-decision-memory.md"
+   ],
+   "top1": "docs/decisions/cross-project-decision-memory.md"
+  },
+  {
+   "n": 22,
+   "rank": 1,
+   "expected": [
+    "docs/policy-radar/policy-drift.md"
+   ],
+   "top1": "docs/policy-radar/policy-drift.md"
+  },
+  {
+   "n": 23,
+   "rank": 1,
+   "expected": [
+    "docs/policy-radar/overview.md"
+   ],
+   "top1": "docs/policy-radar/overview.md"
+  },
+  {
+   "n": 24,
+   "rank": 1,
+   "expected": [
+    "docs/SETUP.md"
+   ],
+   "top1": "docs/SETUP.md"
+  },
+  {
+   "n": 25,
+   "rank": 1,
+   "expected": [
+    "docs/ENVIRONMENT.md"
+   ],
+   "top1": "docs/ENVIRONMENT.md"
+  },
+  {
+   "n": 26,
+   "rank": 1,
+   "expected": [
+    "docs/TROUBLESHOOTING.md"
+   ],
+   "top1": "docs/TROUBLESHOOTING.md"
+  },
+  {
+   "n": 27,
+   "rank": 1,
+   "expected": [
+    "docs/TROUBLESHOOTING.md"
+   ],
+   "top1": "docs/TROUBLESHOOTING.md"
+  },
+  {
+   "n": 28,
+   "rank": null,
+   "expected": [
+    "docs/TESTING.md"
+   ],
+   "top1": "wiki/sources/Papers__banking-shield__source__banking-shield-paper-v1_0.md"
+  },
+  {
+   "n": 29,
+   "rank": 1,
+   "expected": [
+    "docs/DEPLOYMENT.md"
+   ],
+   "top1": "docs/DEPLOYMENT.md"
+  },
+  {
+   "n": 30,
+   "rank": null,
+   "expected": [
+    "docs/ARCHITECTURE.md"
+   ],
+   "top1": "wiki/sources/AlphaFold_unlocks_one_of_the_greatest_puzzles_in_biology.md"
+  },
+  {
+   "n": 31,
+   "rank": 1,
+   "expected": [
+    "docs/API.md"
+   ],
+   "top1": "docs/API.md"
+  },
+  {
+   "n": 32,
+   "rank": null,
+   "expected": [
+    "docs/mcp/claude-code.md"
+   ],
+   "top1": "wiki/sources/How_Claude_Code_is_Used_in_Practice-2.md"
+  },
+  {
+   "n": 33,
+   "rank": 1,
+   "expected": [
+    "docs/mcp/codex.md"
+   ],
+   "top1": "docs/mcp/codex.md"
+  },
+  {
+   "n": 34,
+   "rank": 1,
+   "expected": [
+    "docs/mcp/troubleshooting.md"
+   ],
+   "top1": "docs/mcp/troubleshooting.md"
+  },
+  {
+   "n": 35,
+   "rank": 1,
+   "expected": [
+    "docs/mcp/cursor.md",
+    "docs/agent-workflows/cursor.md"
+   ],
+   "top1": "docs/mcp/cursor.md"
+  },
+  {
+   "n": 36,
+   "rank": 1,
+   "expected": [
+    "docs/agent-workflows/codex.md"
+   ],
+   "top1": "docs/agent-workflows/codex.md"
+  },
+  {
+   "n": 37,
+   "rank": 1,
+   "expected": [
+    "docs/agent-workflows/human.md"
+   ],
+   "top1": "docs/agent-workflows/human.md"
+  },
+  {
+   "n": 38,
+   "rank": 1,
+   "expected": [
+    "docs/obsidian/setup.md",
+    "docs/obsidian/graph-view.md"
+   ],
+   "top1": "docs/obsidian/graph-view.md"
+  },
+  {
+   "n": 39,
+   "rank": 1,
+   "expected": [
+    "docs/obsidian/recommended-plugins.md"
+   ],
+   "top1": "docs/obsidian/recommended-plugins.md"
+  },
+  {
+   "n": 40,
+   "rank": 2,
+   "expected": [
+    "docs/release/snapshots.md"
+   ],
+   "top1": "wiki/sources/Consistency_Models-2.md"
+  },
+  {
+   "n": 41,
+   "rank": 1,
+   "expected": [
+    "docs/release/restore.md"
+   ],
+   "top1": "docs/release/restore.md"
+  },
+  {
+   "n": 42,
+   "rank": 1,
+   "expected": [
+    "docs/release/versioning.md"
+   ],
+   "top1": "docs/release/versioning.md"
+  },
+  {
+   "n": 43,
+   "rank": 1,
+   "expected": [
+    "docs/release/packaging.md"
+   ],
+   "top1": "docs/release/packaging.md"
+  },
+  {
+   "n": 44,
+   "rank": 1,
+   "expected": [
+    "docs/evaluation/provenance.md"
+   ],
+   "top1": "docs/evaluation/provenance.md"
+  },
+  {
+   "n": 45,
+   "rank": 1,
+   "expected": [
+    "AGENTS.md",
+    "CLAUDE.md"
+   ],
+   "top1": "AGENTS.md"
+  },
+  {
+   "n": 46,
+   "rank": null,
+   "expected": [
+    "AGENTS.md",
+    "CLAUDE.md"
+   ],
+   "top1": "wiki/sources/docs__research__llm-shield__STAGE_5N_PRIOR_ART_MAP.md"
+  },
+  {
+   "n": 47,
+   "rank": 5,
+   "expected": [
+    "CLAUDE.md",
+    "AGENTS.md"
+   ],
+   "top1": "wiki/sources/mqr__mq_REDACTED-PROJECT_manuscript_source_export_notion_pages_md_17_google_maps_removal_spec.md"
+  },
+  {
+   "n": 48,
+   "rank": null,
+   "expected": [
+    "README.md"
+   ],
+   "top1": "wiki/sources/Kyrgyzstan_to_King_s_Cross_the_star_baker_cooking_up_code.md"
+  },
+  {
+   "n": 49,
+   "rank": 1,
+   "expected": [
+    "wiki/decisions/mcp-write-mode-stays-disabled-by-default.md"
+   ],
+   "top1": "wiki/decisions/mcp-write-mode-stays-disabled-by-default.md"
+  },
+  {
+   "n": 50,
+   "rank": 1,
+   "expected": [
+    "wiki/decisions/ingest-large-pdfs-as-full-text-with-size-bounded-c.md"
+   ],
+   "top1": "wiki/decisions/ingest-large-pdfs-as-full-text-with-size-bounded-c.md"
+  }
+ ]
+}

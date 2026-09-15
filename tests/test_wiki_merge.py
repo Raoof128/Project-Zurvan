@@ -90,6 +90,10 @@ def _make_extraction(source_id, concepts=None, entities=None):
 
 def test_merge_creates_new_concept_page(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -108,6 +112,10 @@ def test_merge_creates_new_concept_page(tmp_path, monkeypatch):
 
 def test_merge_additive_two_sources(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -126,6 +134,10 @@ def test_merge_additive_two_sources(tmp_path, monkeypatch):
 
 def test_merge_idempotent(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     (tmp_path / "wiki").mkdir()
     (tmp_path / "wiki" / "log.md").write_text("")
 
@@ -140,6 +152,10 @@ def test_merge_idempotent(tmp_path, monkeypatch):
 
 def test_merge_preserves_existing_content(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
@@ -161,6 +177,10 @@ def test_merge_preserves_existing_content(tmp_path, monkeypatch):
 
 def test_source_count_is_derived_not_incremented(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
@@ -183,6 +203,10 @@ def test_source_count_is_derived_not_incremented(tmp_path, monkeypatch):
 
 def test_existing_source_id_skips_cleanly(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
@@ -199,6 +223,10 @@ def test_existing_source_id_skips_cleanly(tmp_path, monkeypatch):
 def test_legacy_source_id_frontmatter_preserved(tmp_path, monkeypatch):
     """Old pages use source_id: not sources: — merge must not lose that history."""
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")
@@ -223,6 +251,10 @@ def test_legacy_source_id_frontmatter_preserved(tmp_path, monkeypatch):
 
 def test_merge_entity_page(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    # chdir + wiki_dir= redirects the PAGE, but append_log_merge writes
+    # through the module-level PROJECT_ROOT, so without this the log entry
+    # landed in the LIVE wiki/log.md on every run.
+    _patch_root(monkeypatch, tmp_path)
     wiki = tmp_path / "wiki"
     wiki.mkdir()
     (wiki / "log.md").write_text("")

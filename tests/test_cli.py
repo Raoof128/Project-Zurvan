@@ -9,13 +9,28 @@ def test_cli_help(capsys):
     assert "decision" in res.stdout
     assert "claim" in res.stdout
 
-def test_cli_remember():
-    # Test just calling it to ensure argparse is set up correctly (will write to wiki but that's safe in test)
-    res = subprocess.run(["python", "scripts/cli.py", "remember", "--title", "Test Note", "--body", "Test body"], capture_output=True, text=True)
-    assert res.returncode == 0
+def test_cli_remember(tmp_path):
+    # This test USED to write into the live wiki on every run — the comment said
+    # "that's safe in test". It was not: 48 `note-test-note-*.md` pages had
+    # accumulated in the searchable corpus, changing chunk counts, retrieval
+    # candidates and graph nodes, and therefore every retrieval baseline the
+    # project measures against. ZURVAN_ROOT points the whole store at a
+    # throwaway directory, so the real wiki is never a possible target — not
+    # "cleaned up afterwards", which a crash defeats.
+    import sys
+    for d in ("wiki/decisions", "wiki/claims", "data"):
+        (tmp_path / d).mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, ZURVAN_ROOT=str(tmp_path))
+    res = subprocess.run(
+        [sys.executable, "scripts/cli.py", "remember", "--title", "Test Note", "--body", "Test body"],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 0, res.stderr
     # Prefix (not exact "note-test-note.md"): add_note is collision-safe, so a
     # repeat run writes note-test-note-2.md etc. rather than overwriting.
     assert os.path.join("wiki", "note-test-note") in res.stdout
+    assert str(tmp_path) in res.stdout, "the note must land in the throwaway root"
+    assert (tmp_path / "wiki" / "note-test-note.md").is_file()
 
 def test_cli_eval_validate_gold_propagates_failure():
     # Regression: subprocess-backed commands ignored the child's exit code, so
