@@ -80,3 +80,17 @@ wiki/log.md
 
 # Local private-project veto list for public_repo_guard (never publish these names)
 .private-projects
+
+# ── The knowledge base is PRIVATE data. Nothing under wiki/ is tracked. ──────
+# Per Raouf (2026-09-15): the Zurvan CODE lives in git; the data inside Zurvan
+# does not "go anywhere". Every page, note, decision, claim, concept, summary,
+# digest, session and trace is private. The targeted rules above are kept as the
+# record of which directories leaked and why (sources, claims, the index, the
+# log); this is the blanket that makes a new directory private by default rather
+# than private only once someone remembers to add a rule.
+#
+# Only .gitkeep markers remain tracked, so a fresh clone still has the directory
+# skeleton the writers expect — they do not create their own parents.
+wiki/**
+!wiki/**/
+!wiki/**/.gitkeep
