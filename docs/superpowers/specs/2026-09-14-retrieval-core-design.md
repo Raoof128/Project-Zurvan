@@ -19,7 +19,7 @@ storage layer is hand-rolled:
 growth earlier that day is the historical context; the numbers below are the
 current state and the only baseline A may measure against. The pre-P0 figures
 (199,269 chunks, 2.11 GB, 3.0 s) are retired — see
-`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`.
+`docs/evaluation/retrieval/p0-stub-removal-2026-09-14.md`.
 
 | Dimension | Today (post-P0) |
 | --- | --- |
@@ -61,7 +61,7 @@ because only then is its baseline stable.
 
 **Canonical baseline as of 2026-09-14 (post-P0):** 184,068 chunks · Top-1 0.68 ·
 Top-3 0.72 · MRR 0.7057 · 14 failures. See
-`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`.
+`docs/evaluation/retrieval/p0-stub-removal-2026-09-14.md`.
 
 ## 2. Constraints
 
@@ -95,11 +95,15 @@ Two corollaries, both load-bearing:
 ## 4. The five experiments
 
 ```
-Step 0   failure anatomy            -> rerankability rate (decides 2B)
+Step 0   failure anatomy            -> rerankability rate (decides 2B)   [DONE]
   |
-Phase 1  sqlite-vec storage         -> Gate A: ranking INVARIANT + faster
+Phase 1  sqlite-vec storage         -> Gate A: ranking INVARIANT + faster  [NOT ACCEPTED]
+  |                                     correctness PASS, performance FAIL
   |
-Phase 1B KNN candidate policy       -> Gate A2: latency vs recall (may change ranking)
+Phase 1B-FTS bounded lexical cands  -> Gate A2-FTS: quality then latency
+  |                                     (2026-09-15-phase-1b-fts-design.md)
+  |
+Phase 1B-KNN bounded semantic cands -> Gate A2: only if still needed after 1B-FTS
   |
 Phase 2A contextual embedding input -> Gate B: Top-3 > 72%
   |
@@ -144,6 +148,21 @@ is installed.
 ---
 
 ### Phase 1 — `sqlite-vec` storage (ranking-invariant)
+
+> **Outcome (2026-09-15): GATE A NOT ACCEPTED.** Correctness and storage passed
+> — top-10 ordering 50/50, 0 real semantic inversions, max delta 3.398e-07,
+> 0.70 / 0.74 / 0.7297 with the same 13 failures, index 1.96 GB + 283 MB sidecar
+> -> 0.69 GB with none. Performance failed: p50 701.8 ms against a 300 ms gate,
+> p95 2531.6 ms against 500 ms. The implementation is kept; the gate is NOT
+> redefined to accommodate it. Full report:
+> `docs/evaluation/retrieval/sqlite-vec-2026-09-15.md`.
+>
+> Two parts of this section were shown by measurement to be wrong, and are
+> corrected below rather than quietly reinterpreted: the ordering contract and
+> the RSS criterion. The phase also established that **`sqlite-vec` was not the
+> remaining latency problem** — FTS matches a mean of 118,348 rows per query, so
+> corpus-wide candidate generation is, which is why Phase 1B-FTS now precedes
+> Phase 1B-KNN.
 
 Replace JSON-text vectors, `scripts/vector_cache.py`, and the `.npy` sidecar
 with a `vec0` table holding float32 vectors.
@@ -191,6 +210,23 @@ the 0.2/0.8 fusion weights, candidate policy, result budgeting.
 
 **If ranking differs, reject Phase 1 even if it is fast.**
 
+> **Correction (2026-09-15) — the ordering contract was self-contradictory.**
+> "Final ordering identical" and "deterministic tie-break on `chunk_id`" cannot
+> both hold, because the reference had no tie rule: equal scores were settled by
+> whichever row the scan reached first. Measured at 48/50, where both differing
+> queries were byte-identical chunks from duplicate wiki pages with exactly equal
+> scores. The contract for this and every later phase is: **unequal scores must
+> match the reference exactly; exact ties obey `score DESC, chunk_id ASC` in both
+> implementations.** Implemented once in `hybrid_search._Ranked`. Under it: 50/50.
+>
+> **Correction (2026-09-15) — `peak RSS below 400 MB` is an invalid attribution
+> metric.** Measured: 22 MB at import, 866 MB once the embedding model loads,
+> 866 MB after 50 searches. Retrieval adds nothing measurable; the threshold is
+> unreachable in-process whatever storage does, and the retired ~894 MB figure
+> measured the same model. Recorded as INVALID — not passed. Replaced
+> prospectively by retrieval-path **delta RSS** against a model-resident baseline,
+> measured for both paths under the same preloaded model.
+
 **Pin BOTH sqlite-vec identities.** *Correction (2026-09-14): an earlier draft
 claimed these were measured to differ. They were not. The `0.1.9` figure was the
 newest wheel available on PyPI; the INSTALLED package and the loaded extension
@@ -212,6 +248,14 @@ preserve today's behaviour.
 ---
 
 ### Phase 1B — KNN candidate policy (optional, separately gated)
+
+> **Deferred behind Phase 1B-FTS (2026-09-15).** Phase 1 measured the keyword
+> side at 309 ms mean against the semantic side's 392 ms, matching a mean of
+> 118,348 rows per query. Bounding the LEXICAL candidate set is both the larger
+> win and the safer trade — a chunk outside a bounded FTS set merely scores
+> `keyword_score = 0.0` and still competes on its full semantic score, whereas
+> KNN makes a chunk invisible even on a perfect keyword match. See
+> `2026-09-15-phase-1b-fts-design.md`. Never measure the two together.
 
 Only if Phase 1's full scan misses the latency target. Trades recall for speed
 by restricting the semantic candidate set.
@@ -265,12 +309,21 @@ the pool size is wrong — investigate before accepting.
 One frozen report per stage under `docs/evaluation/`:
 
 ```
-retrieval-step0-failure-analysis-<date>.md
-retrieval-sqlite-vec-<date>.md
-retrieval-knn-<date>.md
-retrieval-contextual-embedding-<date>.md
-retrieval-reranker-<date>.md
+docs/evaluation/retrieval/step0-failure-analysis-<date>.md
+docs/evaluation/retrieval/sqlite-vec-<date>.md
+docs/evaluation/retrieval/fts-candidates-<date>.md
+docs/evaluation/retrieval/knn-<date>.md
+docs/evaluation/retrieval/contextual-embedding-<date>.md
+docs/evaluation/retrieval/reranker-<date>.md
 ```
+
+**They live in `docs/evaluation/retrieval/` because that directory is excluded
+from indexing** (`chunk.EXCLUDED_PATH_PREFIXES`). A report about retrieval that
+enters the corpus retires the baseline it exists to freeze — measured: the Step 0
+report put 7 chunks into the index whose baseline it had just recorded. Note the
+exclusion is this directory ONLY, not all of `docs/evaluation/`: excluding the
+provenance reports as well was tried and reverted, because it removed a gold
+query's only expected answer.
 
 Each records: commit SHA · dependency versions · index size · query count ·
 latency p50/p95 · peak RSS · Top-1 / Top-3 / MRR · failing query IDs · changed

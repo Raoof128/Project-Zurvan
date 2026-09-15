@@ -43,7 +43,7 @@ because only then is its baseline stable.
 
 **Canonical baseline as of 2026-09-14 (post-P0):** 184,068 chunks · Top-1 0.68 ·
 Top-3 0.72 · MRR 0.7057 · 14 failures. See
-`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`.
+`docs/evaluation/retrieval/p0-stub-removal-2026-09-14.md`.
 
 ## 2. Gap hunt — four fronts, with receipts
 
@@ -127,7 +127,7 @@ leaked — the directories are gitignored and guard-blocked.
 **This condition is now zero.** All 7,622 were removed on 2026-09-14 and the
 generator was deleted; a fresh ingest creates none. Measurements, the two gates,
 and the retracted retrieval hypothesis are frozen in
-[`docs/evaluation/retrieval-p0-stub-removal-2026-09-14.md`](../../evaluation/retrieval-p0-stub-removal-2026-09-14.md).
+[`docs/evaluation/retrieval/p0-stub-removal-2026-09-14.md`](../../evaluation/retrieval/p0-stub-removal-2026-09-14.md).
 
 **Architectural reading, preserved as a P0 side-effect.** Removing the stubs cut
 the graph from 12,090 to 4,482 nodes and 11,455 to 3,917 edges — **the old graph
