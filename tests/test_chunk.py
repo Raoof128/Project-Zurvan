@@ -174,3 +174,35 @@ def test_coverage_change_does_not_weaken_the_exclusions(tmp_path):
     assert not any(f.startswith("raw") for f in found)
     assert not any("traces" in f.split(os.sep) for f in found)
     assert {"wiki/page.md", "docs/guide.md"} <= {f.replace(os.sep, "/") for f in found}
+
+
+def test_scan_excludes_evaluation_reports(tmp_path):
+    # An evaluation report describes the retriever's own measured behaviour.
+    # Indexing one closes a measurement loop: the report enters the corpus it
+    # just measured, so the baseline it exists to freeze is retired by the act
+    # of recording it. Measured during Phase 1 — the Step 0 report contributed
+    # 7 chunks to an unexplained +28 drift in the corpus it had frozen.
+    from scripts.chunk import scan_markdown_files
+
+    r = _repo(tmp_path)
+    (r / "docs" / "evaluation" / "retrieval").mkdir(parents=True)
+    (r / "docs" / "evaluation" / "retrieval" / "sqlite-vec-2026-09-15.md").write_text(
+        "# Gate A\nTop-3 0.74, MRR 0.7297, failing queries ...", encoding="utf-8"
+    )
+    # A report about a DIFFERENT subsystem is ordinary knowledge, and a gold
+    # query expects exactly this file. Excluding all of docs/evaluation/ was
+    # tried and measured: it cost a passing gold query.
+    (r / "docs" / "evaluation" / "provenance.md").write_text(
+        "# Provenance\nhow traces are scored against a gold set", encoding="utf-8"
+    )
+
+    found = {f.replace(os.sep, "/") for f in scan_markdown_files(root=r)}
+    assert not any(f.startswith("docs/evaluation/retrieval/") for f in found)
+    assert "docs/evaluation/provenance.md" in found
+    # The exclusion is a path prefix, not a banned word: a wiki page about an
+    # evaluation is ordinary knowledge and stays indexed.
+    (r / "wiki" / "evaluation").mkdir()
+    (r / "wiki" / "evaluation" / "note.md").write_text("# Note\nreal", encoding="utf-8")
+    found = {f.replace(os.sep, "/") for f in scan_markdown_files(root=r)}
+    assert "wiki/evaluation/note.md" in found
+    assert "docs/guide.md" in found

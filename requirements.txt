@@ -8,3 +8,11 @@ mcp>=2.0.0,<3
 fastapi>=0.133.0  # first release compatible with starlette>=1.0 (pulled in by mcp)
 uvicorn>=0.20.0
 jinja2>=3.0.0
+# Vector storage and scoring. Pinned EXACTLY, not floored: sqlite-vec is pre-v1
+# and its repository carries experimental ANN/IVF/DiskANN work, so a minor
+# release is free to change scan behaviour under a ranking-invariance gate that
+# assumes it does not. Phase 1 recorded both identities — the Python package and
+# the native extension it loads — because a package can in principle ship a
+# differently-built extension; `vec_storage.versions()` reports the pair and
+# `tests/test_vec_storage.py` asserts they match. Measured 2026-09-15: 0.1.6/0.1.6.
+sqlite-vec==0.1.6

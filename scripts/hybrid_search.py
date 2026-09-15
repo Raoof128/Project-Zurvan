@@ -42,6 +42,8 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
         return []
 
     conn = sqlite3.connect(db_path)
+    from scripts import vec_storage
+    vec_storage.load_extension(conn)
     cursor = conn.cursor()
     
     # Keyword search using FTS5 (BM25 rank)
@@ -89,101 +91,97 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
     return _fuse(scored)[:limit]
 
 
-# Vectors are scored in batches of this many. Bounds peak memory independently
-# of corpus size: 5000 x 384 float64 is ~15 MB.
-SCORE_BATCH = 5000
+class _Ranked:
+    """One scored chunk under the canonical retrieval order.
+
+    **Canonical order is `score DESC, chunk_id ASC`, and it is a POLICY.**
+    Before this, there was none. The bounded heap displaced only on
+    `hybrid > heap[0][0]`, so among chunks with exactly equal scores whichever
+    the scan reached FIRST won the last slot, and `_fuse`'s stable sort then
+    inherited whatever order SQLite's `WHERE chunk_id IN (...)` fetch returned.
+    Equal scores were resolved by iteration order — an implementation accident
+    standing in for a ranking rule.
+
+    Phase 1 exposed it. Measured on the 50-query gold set, 2 queries changed
+    their 10th result purely because sqlite-vec scans in a different order than
+    the old `SELECT chunk_id, vector FROM embeddings` did. In BOTH cases the two
+    contenders were byte-identical chunks from duplicate wiki pages
+    (`medium_article.md` / `medium_article.md.md`, and a Codex article held
+    under two slugs) carrying identical vectors and therefore identical scores.
+    Nothing was reranked; an unspecified behaviour merely became visible.
+
+    `__lt__` means "ranks AFTER" — worse — so a `heapq` min-heap holds the entry
+    to surrender at its root. `chunk_id` is compared as an opaque string:
+    nothing here assumes it is a hash, a hex digest, or of fixed width.
+    """
+
+    __slots__ = ("score", "chunk_id", "semantic", "keyword")
+
+    def __init__(self, score, chunk_id, semantic=0.0, keyword=0.0):
+        self.score = score
+        self.chunk_id = chunk_id
+        self.semantic = semantic
+        self.keyword = keyword
+
+    def __lt__(self, other):
+        if self.score != other.score:
+            return self.score < other.score
+        # Equal scores: the LARGER chunk_id ranks after, so it is the one a
+        # bounded heap gives up first.
+        return self.chunk_id > other.chunk_id
+
+    def outranks(self, other) -> bool:
+        """True when `self` belongs above `other`.
+
+        The single definition of the order. The heap and `_fuse` both defer to
+        it rather than restating `-score, chunk_id` in two places that can drift.
+        """
+        return other.__lt__(self)
 
 
 def _score_semantic_top_k(cursor, query_emb, fts_scores, limit):
     """Rank every chunk against the query, keeping only the best `limit`.
 
-    The previous implementation ran
-    ``SELECT ... c.text, e.vector FROM chunks JOIN embeddings`` with
-    ``fetchall()`` and then a pure-Python cosine per row — it pulled the ENTIRE
-    corpus, chunk text included, into memory on every query. At 43k chunks that
-    was merely wasteful; at 199k it is ~2 GB marshalled per search, which is
-    both unusably slow and a repeat of the allocation pattern that OOM-killed
-    the indexer.
+    Phase 1 (2026-09-14): scoring moved from Python to sqlite-vec. Vectors were
+    JSON text parsed on every query — `vector_cache.py` and a 283 MB `.npy`
+    sidecar existed only to move that parse off the query path. With float32
+    BLOBs and `vec_distance_cosine()` there is no parse to move.
 
-    Here only (chunk_id, vector) is read, streamed in batches, scored with a
-    single numpy matrix-vector product, and reduced through a bounded heap. The
-    arithmetic is identical to ``cosine_similarity`` followed by ``_fuse``, so
-    the ranking is unchanged; only the cost is.
+    **Full scan, never KNN.** Every chunk still receives a fused score, so a
+    chunk with a strong keyword score but mediocre semantics can still reach the
+    top-10. Semantic KNN would hide those — a candidate-policy change wearing a
+    storage migration's clothes, and the reason Gate A demands identical
+    per-query ordering rather than merely equal summary metrics.
+
+    The arithmetic is unchanged: cosine, then `(cos + 1) / 2`, then the same
+    fusion weights. Equal scores are resolved by `_Ranked`'s canonical order, so
+    the result cannot depend on the order the scan happens to deliver rows in.
     """
     import heapq
-    import numpy as np
-    from scripts import vector_cache
 
-    q = np.asarray(query_emb, dtype=np.float64)
-    q_norm = float(np.linalg.norm(q))
+    from scripts import vec_storage
 
-    heap = []  # (hybrid_score, chunk_id, semantic_score, keyword_score)
-    for ids, mat in _vector_batches(cursor, vector_cache, np):
-        if q_norm == 0:
-            sims = np.zeros(len(ids))
-        else:
-            norms = np.linalg.norm(mat, axis=1)
-            # A zero-norm vector scores 0, matching cosine_similarity's guard.
-            with np.errstate(divide="ignore", invalid="ignore"):
-                sims = np.where(norms == 0, 0.0, mat @ q / (norms * q_norm))
+    heap = []  # _Ranked, worst at the root
+    for chunk_id, similarity in vec_storage.scan_similarities(cursor.connection, query_emb):
         # Cosine is [-1, 1]; map to [0, 1] for reporting only. Note this puts an
         # unrelated chunk at ~0.5, which is exactly why it must NOT be summed
         # against a keyword score — see the fusion comment below.
-        sems = np.maximum(0.0, (sims + 1.0) / 2.0)
-        for chunk_id, semantic_score in zip(ids, sems.tolist()):
-            keyword_score = fts_scores.get(chunk_id, 0.0)
-            hybrid = KEYWORD_WEIGHT * keyword_score + (1.0 - KEYWORD_WEIGHT) * semantic_score
-            entry = (hybrid, chunk_id, semantic_score, keyword_score)
-            if len(heap) < limit:
-                heapq.heappush(heap, entry)
-            elif hybrid > heap[0][0]:
-                heapq.heapreplace(heap, entry)
+        semantic_score = vec_storage.similarity_to_fusion_scale(similarity)
+        keyword_score = fts_scores.get(chunk_id, 0.0)
+        hybrid = KEYWORD_WEIGHT * keyword_score + (1.0 - KEYWORD_WEIGHT) * semantic_score
+        entry = _Ranked(hybrid, chunk_id, semantic_score, keyword_score)
+        if len(heap) < limit:
+            heapq.heappush(heap, entry)
+        elif entry.outranks(heap[0]):
+            heapq.heapreplace(heap, entry)
     return heap
-
-
-def _vector_batches(cursor, vector_cache, np):
-    """Yield (ids, matrix) batches — from the sidecar cache when it is valid.
-
-    The cache turns the per-query JSON parse of every stored vector (the actual
-    cost, ~30-50 s at 199k chunks) into a one-off on the write path. When it is
-    absent and cannot be built, fall back to streaming the DB so search still
-    works, just slowly.
-    """
-    db_path = _cursor_db_path(cursor)
-    cached = vector_cache.load_or_build(db_path) if db_path else None
-    if cached:
-        ids, matrix = cached
-        for start in range(0, len(ids), SCORE_BATCH):
-            stop = start + SCORE_BATCH
-            yield ids[start:stop], np.asarray(matrix[start:stop], dtype=np.float64)
-        return
-
-    cursor.execute("SELECT chunk_id, vector FROM embeddings")
-    while True:
-        rows = cursor.fetchmany(SCORE_BATCH)
-        if not rows:
-            break
-        yield [r[0] for r in rows], np.asarray(
-            [json.loads(r[1]) for r in rows], dtype=np.float64
-        )
-
-
-def _cursor_db_path(cursor):
-    """Filesystem path behind a cursor's connection, or None for in-memory."""
-    try:
-        for _, name, path in cursor.execute("PRAGMA database_list").fetchall():
-            if name == "main":
-                return path or None
-    except sqlite3.Error:
-        pass
-    return None
 
 
 def _hydrate(cursor, top):
     """Fetch source_path/heading/text for the surviving chunk_ids only."""
     if not top:
         return []
-    by_id = {chunk_id: (sem, kw) for _, chunk_id, sem, kw in top}
+    by_id = {e.chunk_id: (e.semantic, e.keyword) for e in top}
     placeholders = ",".join("?" * len(by_id))
     cursor.execute(
         f"SELECT chunk_id, source_path, heading, text FROM chunks WHERE chunk_id IN ({placeholders})",
@@ -235,5 +233,8 @@ def _fuse(scored: List[Dict]) -> List[Dict]:
         )
         if hybrid_score > MIN_HYBRID_SCORE:
             results.append({**chunk, "hybrid_score": hybrid_score})
-    results.sort(key=lambda c: c["hybrid_score"], reverse=True)
+    # `reverse=True` with `_Ranked.__lt__` ("ranks after") sorts best-first. A
+    # plain stable sort on the score alone left tied chunks in `_hydrate`'s
+    # SQLite fetch order, which is the same unspecified-tie defect the heap had.
+    results.sort(key=lambda c: _Ranked(c["hybrid_score"], c["chunk_id"]), reverse=True)
     return results

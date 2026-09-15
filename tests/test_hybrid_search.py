@@ -2,6 +2,8 @@ import pytest
 import sqlite3
 import os
 import json
+
+from scripts import vec_storage as _vs
 from scripts.hybrid_search import cosine_similarity, search_hybrid
 from scripts.rebuild_search_index import rebuild_search_index
 
@@ -80,7 +82,8 @@ def _insert_chunk(db_path, chunk_id, heading, text):
     vec = get_embedding(text, provider="mock", model="deterministic_hash")["vector"]
     cursor.execute(
         "INSERT INTO embeddings (chunk_id, provider, model, dimension, vector) VALUES (?, ?, ?, ?, ?)",
-        (chunk_id, "mock", "deterministic_hash", len(vec), json.dumps(vec)),
+        # Phase 1: vectors are float32 BLOBs, not JSON text.
+        (chunk_id, "mock", "deterministic_hash", len(vec), _vs.encode(vec)),
     )
     conn.commit()
     conn.close()
@@ -238,7 +241,7 @@ def test_vectorised_scoring_matches_the_reference_cosine_fusion(tmp_path_factory
     # The reference: exactly the code that was replaced.
     reference = []
     for chunk_id, source_path, heading, text, vector_json in rows:
-        sem = hs.cosine_similarity(query_emb, json.loads(vector_json))
+        sem = hs.cosine_similarity(query_emb, _vs.decode(vector_json))
         sem = max(0.0, (sem + 1.0) / 2.0)
         reference.append({
             "chunk_id": chunk_id, "source_path": source_path, "heading": heading,
@@ -262,3 +265,72 @@ def test_vectorised_scoring_matches_the_reference_cosine_fusion(tmp_path_factory
     for a, e in zip(actual, expected):
         assert a["semantic_score"] == pytest.approx(e["semantic_score"], abs=1e-6)
         assert a["hybrid_score"] == pytest.approx(e["hybrid_score"], abs=1e-6)
+
+
+# --- canonical ordering policy (Phase 1 Gate A contract) --------------------
+# Gate A originally demanded "ordering identical to the reference". That is
+# unachievable for tied chunks, because the reference had no tie rule: equal
+# scores were resolved by whichever row the scan reached first. The contract is
+# therefore: unequal scores must match the reference exactly, and exact ties
+# must obey ONE canonical rule in BOTH implementations — score DESC, chunk_id
+# ASC. These tests are that rule's only guarantee.
+
+def test_canonical_order_is_score_desc_then_chunk_id_asc():
+    from scripts.hybrid_search import _Ranked
+
+    assert _Ranked(0.9, "b").outranks(_Ranked(0.8, "a"))       # score wins
+    assert _Ranked(0.5, "a").outranks(_Ranked(0.5, "b"))       # tie -> lower id
+    assert not _Ranked(0.5, "b").outranks(_Ranked(0.5, "a"))
+    assert not _Ranked(0.5, "a").outranks(_Ranked(0.5, "a"))   # irreflexive
+
+
+def test_chunk_id_is_compared_as_an_opaque_string():
+    # chunk_ids are sha256 hex today, but retrieval must not encode that: an
+    # int(cid, 16) tie-break would raise on any other id format.
+    from scripts.hybrid_search import _Ranked
+
+    assert _Ranked(1.0, "alpha").outranks(_Ranked(1.0, "beta"))
+    # Lexical, NOT numeric: "chunk-10" sorts before "chunk-2". Asserted in the
+    # surprising direction on purpose — the rule is only required to be total
+    # and stable, and pretending it is numeric would be the start of a
+    # format assumption.
+    assert _Ranked(1.0, "chunk-10").outranks(_Ranked(1.0, "chunk-2"))
+
+
+def test_bounded_heap_resolves_exact_ties_independently_of_scan_order():
+    # THE regression this suite exists for. Two byte-identical chunks from
+    # duplicate wiki pages score exactly equal; only one fits in the result
+    # budget. Which one must not depend on the order the scan delivers them in
+    # — that is what changed when vectors moved to sqlite-vec.
+    import heapq
+    from scripts.hybrid_search import _Ranked
+
+    def keep_best(ids, limit=1):
+        heap = []
+        for cid in ids:
+            e = _Ranked(0.75, cid)          # exactly equal scores
+            if len(heap) < limit:
+                heapq.heappush(heap, e)
+            elif e.outranks(heap[0]):
+                heapq.heapreplace(heap, e)
+        # heapq guarantees only that heap[0] is the root; sort for comparison.
+        return sorted(x.chunk_id for x in heap)
+
+    assert keep_best(["bbb", "aaa"]) == ["aaa"]
+    assert keep_best(["aaa", "bbb"]) == ["aaa"]
+    assert keep_best(["ccc", "aaa", "bbb"], limit=2) == ["aaa", "bbb"]
+    assert keep_best(["aaa", "bbb", "ccc"], limit=2) == ["aaa", "bbb"]
+
+
+def test_fuse_breaks_tied_scores_on_chunk_id_not_on_input_order():
+    # The heap is not the only place ties were unspecified: _fuse's stable sort
+    # inherited _hydrate's SQLite fetch order for equal hybrid scores.
+    from scripts.hybrid_search import _fuse
+
+    def chunk(cid):
+        return {"chunk_id": cid, "source_path": f"{cid}.md", "heading": "h",
+                "text": "t", "keyword_score": 0.0, "semantic_score": 0.9}
+
+    forward = [r["chunk_id"] for r in _fuse([chunk("a"), chunk("b"), chunk("c")])]
+    reverse = [r["chunk_id"] for r in _fuse([chunk("c"), chunk("b"), chunk("a")])]
+    assert forward == reverse == ["a", "b", "c"]

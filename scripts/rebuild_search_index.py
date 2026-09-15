@@ -37,6 +37,8 @@ class _PriorIndex:
                 os.remove(prev)
             os.replace(db_path, prev)
             conn = sqlite3.connect(f"file:{prev}?mode=ro", uri=True)
+            from scripts.vec_storage import load_extension
+            load_extension(conn)
             conn.execute("SELECT 1 FROM embeddings LIMIT 1")
         except (sqlite3.Error, OSError):
             self._discard(prev)
@@ -47,12 +49,29 @@ class _PriorIndex:
         if self._conn is None:
             return None
         try:
-            return self._conn.execute(
+            row = self._conn.execute(
                 "SELECT provider, model, dimension, vector FROM embeddings WHERE chunk_id = ?",
                 (chunk_id,),
             ).fetchone()
         except sqlite3.Error:
             return None
+        if row is None:
+            return None
+        provider, model, dimension, vector = row
+        if isinstance(vector, str):
+            # A pre-Phase-1 index stores vectors as JSON TEXT. The VALUES are
+            # unchanged by the format migration, so convert rather than
+            # re-embed — that is the difference between a minutes-long rebuild
+            # and a ~50-minute one. Reusing the string verbatim would put an
+            # 8kB JSON blob in a BLOB column and make vec_distance_cosine
+            # return garbage; the dimension guard on the write path caught
+            # exactly that on the first real run.
+            from scripts.vec_storage import encode
+            try:
+                vector = encode(json.loads(vector))
+            except (ValueError, TypeError):
+                return None
+        return provider, model, dimension, vector
 
     def close(self):
         if self._conn is not None:
@@ -103,6 +122,10 @@ def rebuild_search_index(db_path: str | None = None, root=None):
     vector_cache.discard(db_path)
 
     conn = sqlite3.connect(db_path)
+    # sqlite-vec provides vec_distance_cosine() at query time; loading it here
+    # keeps the write and read paths on one extension contract.
+    from scripts import vec_storage
+    vec_storage.load_extension(conn)
     cursor = conn.cursor()
     
     # Create chunks table
@@ -135,7 +158,7 @@ def rebuild_search_index(db_path: str | None = None, root=None):
             provider TEXT,
             model TEXT,
             dimension INTEGER,
-            vector TEXT,
+            vector BLOB,
             FOREIGN KEY(chunk_id) REFERENCES chunks(chunk_id)
         )
     """)
@@ -162,18 +185,25 @@ def rebuild_search_index(db_path: str | None = None, root=None):
         # (embedding is the expensive step with real providers).
         prior = reusable.get(c['chunk_id'])
         if prior is not None and (prior[0], prior[1]) == current_provider_model:
-            provider, model, dimension, vector_json = prior
+            provider, model, dimension, vector_blob = prior
             reused += 1
         else:
             emb = get_embedding(c['text'])
-            provider, model, dimension, vector_json = (
-                emb['provider'], emb['model'], emb['dimension'], json.dumps(emb['vector'])
-            )
+            provider, model, dimension = emb['provider'], emb['model'], emb['dimension']
+            vector_blob = vec_storage.encode(emb['vector'])
             computed += 1
+        # Reject a wrong-width vector rather than storing it: a silently
+        # mismatched dimension makes vec_distance_cosine return garbage for
+        # that row, which would surface as an unexplainable ranking change.
+        if len(vector_blob) != dimension * 4:
+            raise ValueError(
+                f"chunk {c['chunk_id']}: {len(vector_blob)} bytes for "
+                f"{dimension} float32 dimensions (expected {dimension * 4})"
+            )
         cursor.execute("""
             INSERT INTO embeddings (chunk_id, provider, model, dimension, vector)
             VALUES (?, ?, ?, ?, ?)
-        """, (c['chunk_id'], provider, model, dimension, vector_json))
+        """, (c['chunk_id'], provider, model, dimension, vector_blob))
 
         indexed += 1
         if indexed % COMMIT_EVERY == 0:
@@ -184,9 +214,9 @@ def rebuild_search_index(db_path: str | None = None, root=None):
     conn.close()
     reusable.close()
 
-    # Warm the float32 sidecar now, while the cost is one pass on the write
-    # path rather than 30-50 s on whichever query happens to run first.
-    vector_cache.build(db_path)
+    # No sidecar is built any more. It existed solely to move the per-query
+    # JSON parse off the query path; with vectors stored as float32 BLOBs and
+    # scored by sqlite-vec there is no parse to move.
 
     print(
         f"Search index successfully rebuilt. Chunks indexed: {indexed}. "

@@ -119,6 +119,30 @@ ROOT_INDEX_FILES = (
     "CLAUDE.md",
 )
 
+# Directories excluded by PREFIX rather than by segment name, so the rule states
+# exactly one location instead of banning a common word everywhere it appears.
+#
+# `docs/evaluation/retrieval/` holds the frozen retrieval experiment reports —
+# documents ABOUT the retriever's own measured behaviour. Indexing them closes a
+# measurement loop: the Step 0 report added 7 chunks to the very index whose
+# baseline it froze, and turned up again as part of an unexplained +28 chunk
+# drift when Phase 1 tried to reconcile its corpus. Every future report would
+# retire the baseline it exists to record. Same defect `wiki/traces/` was
+# excluded for: a derived artifact about retrieval must not become material for
+# retrieval.
+#
+# The rule is deliberately NOT all of `docs/evaluation/`. That was tried and
+# measured: it also removed `docs/evaluation/provenance.md`, which a gold query
+# ("how are saved trace files scored against a gold set") legitimately expects,
+# turning a passing query into an `index_coverage_miss` — the very class Step 0
+# was created to find. A provenance report documents a different subsystem and
+# is ordinary knowledge. Only reports about RETRIEVAL feed back into retrieval,
+# so only those are excluded, and they live in one directory to make the rule
+# structural rather than a naming convention.
+EXCLUDED_PATH_PREFIXES = (
+    "docs/evaluation/retrieval",
+)
+
 
 def scan_markdown_files(root: Path | str | None = None):
     """Scans wiki/, docs/ and the named root documents under the repo root,
@@ -128,7 +152,8 @@ def scan_markdown_files(root: Path | str | None = None):
 
     ``wiki/traces/`` holds replay mirrors of retrieval traces — derived,
     self-referential audit artifacts that would pollute retrieval with the
-    query's own terms, so they are never indexed.
+    query's own terms, so they are never indexed. ``docs/evaluation/`` is
+    excluded for the same reason: see ``EXCLUDED_PATH_PREFIXES``.
     """
     base = Path(root) if root is not None else PROJECT_ROOT
     excluded_dirs = {"raw", "traces"}
@@ -138,8 +163,13 @@ def scan_markdown_files(root: Path | str | None = None):
         if dir_path.exists():
             for filepath in glob.glob(str(dir_path / "**" / "*.md"), recursive=True):
                 rel = os.path.relpath(filepath, base)
-                if not excluded_dirs.intersection(rel.split(os.sep)):
-                    files.append(rel)
+                if excluded_dirs.intersection(rel.split(os.sep)):
+                    continue
+                posix = rel.replace(os.sep, "/")
+                if any(posix == p or posix.startswith(p + "/")
+                       for p in EXCLUDED_PATH_PREFIXES):
+                    continue
+                files.append(rel)
     for name in ROOT_INDEX_FILES:
         if (base / name).is_file():
             files.append(name)
