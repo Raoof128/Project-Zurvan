@@ -42,6 +42,78 @@ rather than around "public".
 
 ## 2. Prior art, and the seam it concedes
 
+> **REVISION 2026-09-15b — gap hunt across four fronts + this project's own
+> archive. Three findings below change the design's standing: Boundary does not
+> invent its core primitive (§2.1), the instrument problem has a world-first
+> solution that structurally cannot apply here (§2.2), and the leak count is
+> seven, not six (§2.3).**
+
+### 2.1 This family already shipped the residue primitive — Boundary must bridge, not reinvent
+
+Project Simurgh's **Stage 4X/4Y — VDR: Verifiable Document Residue** already
+builds residue detection over a corpus: *"4X = residue over an authored corpus,
+4Y = residue over submitted bytes."* That is D1's mechanism, shipped and proven.
+
+Its signed limitation is the seam, in its own words:
+
+> **"Coverage geometry, not leakage detection."** · **"The Map Is Not a Verdict"**
+
+VDR maps where a gate's coverage reaches over a submitted document and
+explicitly declines to render a verdict. Boundary needs precisely the verdict
+VDR signs away, and points the same primitive the other way: VDR asks *does this
+submission contain residue of our corpus?*; Boundary asks *does this outgoing
+artefact contain residue of the protected corpus, and may it leave?*
+
+**Consequence for this spec:** D1 is a REUSE with an inverted sink, not a new
+invention. Claiming otherwise would be wrapping. Two VDR IOUs —
+`irreducible_semantic_residue_deferred` and `cross_gate_residue_benchmark_deferred`
+— are candidates for Boundary to pay rather than re-mint.
+
+### 2.2 The instrument problem has a world-first solution that cannot apply here
+
+*Double Blind Evals: Resolving the Dual Confidentiality Dilemma in AI Safety
+Auditing* (Trask, Messing, Maham, Brundage, Isaac et al.; Google / Singapore AISI
+/ OpenMined / ML Commons / AVERI) states the INSTRUMENT motive exactly:
+evaluators keep prompts secret *"to prevent purposeful or incidental data
+leakage, ensuring longer usefulness of their benchmark."* Their mechanism is
+hardware secure enclaves — H100 confidential compute, PySyft — giving mutual
+secrecy between a model owner and an evaluator.
+
+**The seam: that architecture requires two mutually distrustful parties.** When
+the evaluator IS the corpus owner — every local agent system, every RAG product
+measuring its own retrieval, Zurvan — there is no second party to put on the
+other side of the enclave. Self-evaluation contamination is structurally outside
+their design, and it is the only kind Zurvan can suffer.
+
+Adjacent work confirms the shape of the gap rather than closing it: DyePack
+proves contamination by planting backdoors *in the benchmark*; Oren/Ni give
+provable false-positive control via canonical-ordering tests; MemAudit audits
+poisoned agent memory *post-hoc*; OWASP's Agent Memory Guard screens memory
+reads and writes with *heuristic detectors* and no byte-exact provenance. All
+detect after the fact, in the model or the memory. None prevents the instrument
+from entering the corpus, and none can be checked by a third party who is not
+given the corpus.
+
+Positioning sentence, scoped and falsifiable: **no matching prior pattern in this
+project's current source map prevents self-evaluation contamination at the corpus
+boundary, or proves its absence without disclosing the corpus.**
+
+### 2.3 Leak #7: the log asserting merges that never happened
+
+`tests/test_wiki_merge.py` seeds an entity named after a real researcher. Before
+the 2026-09-15 isolation fix it wrote five `merge | <entity> | 1 sources` entries
+into the live `wiki/log.md` while the page itself went to a temp directory, so
+`wiki/entities/` is empty. The audit log therefore asserts five ingests whose
+content was never in the store.
+
+This is a distinct failure class from the other six. Those put protected content
+where it did not belong; this one made the provenance record **state something
+false**. A store whose log can assert a merge that never happened cannot be the
+evidence base for any attestation built on it — which makes it a prerequisite,
+not a footnote.
+
+### 2.4 Prior art at rest and in flight (unchanged)
+
 Encrypted agent-memory vaults (Perseus Vault, AgentVault, CtxVault) and
 capability-sealed secret mediation (CapSeal) protect data **at rest** and gate
 **credentials**. Information-flow work for agents — APPA's permissions algebra,
@@ -289,6 +361,43 @@ V5  hostile-agent containment (capabilities, runtime IFC, isolated sinks)
 | Coverage of leak kinds | 4/10 | V2 normalisation; paraphrase is out of reach by construction |
 | FP discipline | 6/10 | A real public-origin registry, not a hand-maintained list |
 | Novelty vs prior art | 7/10 | Egress-time content lineage; the INSTRUMENT class is unclaimed |
+
+## 15b. Sub-project F — Instrument Seal (proposed, not specced)
+
+Boundary prevents the flow; it cannot prove to anyone else that the flow did not
+happen. Simurgh's doctrine supplies the missing half — **VCA: machine-checkable,
+offline-reproducible, "without trusting any vendor, model, or lab."**
+
+> **Instrument Seal.** A signed, offline-recomputable attestation that corpus C
+> at digest `D_c` contained ZERO verbatim echoes of instrument I at digest `D_i`
+> at time T under parameters `(T_bytes, normalisation)` — checkable by a third
+> party given neither the corpus nor the instrument.
+
+An honest evaluator satisfies it for free by running the check; a contaminated
+one cannot forge it, because the verifier recomputes the intersection over keyed
+k-gram fingerprints. Once the seal is cheap, publishing retrieval metrics
+*without* one becomes the signal (make the absence auditable).
+
+**The number it publishes — Instrument Exposure.** Fraction of eval items with a
+verbatim echo in the corpus under test. Measured on this project:
+
+| | |
+| --- | --- |
+| Exposure now | **0/50** over 184,002 chunks |
+| Exposure on the morning of 2026-09-15 | **1/50** (gold #44, in two indexed documents) |
+| Measured cost of that one item | Top-1 **0.70 → 0.68**; expected answer rank 1 → 3 |
+
+**Anti-gaming disclaimer, stated in the same breath.** A seal proves *verbatim*
+separation only. It says nothing about paraphrase, about semantic leakage, or
+about whether a model saw the instrument in pretraining. "Blind" is bounded: keyed
+k-gram fingerprints resist casual recovery but leak under dictionary attack on
+short, low-entropy spans, so a seal discloses no more than a hashed k-gram set
+discloses — which is not nothing. Exposure is a corpus property, never a claim
+about a model.
+
+**Dependency:** shares D1's fingerprint index with Boundary, and depends on §2.3
+being fixed first — an attestation over a store whose log can assert a merge that
+never happened is an attestation over a lie.
 
 ## 16. Open questions (IOUs)
 
