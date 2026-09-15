@@ -125,7 +125,7 @@ def test_tagged_question_still_lists_its_tags(tmp_path, monkeypatch):
 
 # --- project attribution (publication control, not a label) -----------------
 # On 2026-09-15 four decisions written from inside the Zurvan repo were stamped
-# `project: "REDACTED-PROJECT"` because an unrelated session had left that workspace
+# with an UNRELATED project, because another session had left that workspace
 # selected in the global registry. public_repo_guard gates publication on that
 # field, so the stamp decides whether a page may be published. These tests pin
 # the invariant: a decision must never inherit a project merely because that
@@ -145,16 +145,16 @@ def test_project_comes_from_the_working_root_not_the_selected_workspace(tmp_path
     from scripts.memory import resolve_project
 
     zurvan = tmp_path / "Zurvan"; zurvan.mkdir()
-    REDACTED-PROJECT = tmp_path / "REDACTED-PROJECT"; REDACTED-PROJECT.mkdir()
-    _registry(tmp_path, monkeypatch, {"zurvan": zurvan, "REDACTED-PROJECT": REDACTED-PROJECT}, current="REDACTED-PROJECT")
+    otherproj = tmp_path / "OTHERPROJ"; otherproj.mkdir()
+    _registry(tmp_path, monkeypatch, {"zurvan": zurvan, "otherproj": otherproj}, current="otherproj")
 
-    # THE bug: registry current is REDACTED-PROJECT, the work is happening in Zurvan.
+    # THE bug: registry current is otherproj, the work is happening in Zurvan.
     assert resolve_project(root=str(zurvan)) == "zurvan"
     # ...and a subdirectory of it resolves the same way.
     (zurvan / "scripts").mkdir()
     assert resolve_project(root=str(zurvan / "scripts")) == "zurvan"
-    # Working in REDACTED-PROJECT still resolves to REDACTED-PROJECT — cross-repo write-back works.
-    assert resolve_project(root=str(REDACTED-PROJECT)) == "REDACTED-PROJECT"
+    # Working in OTHERPROJ still resolves to otherproj — cross-repo write-back works.
+    assert resolve_project(root=str(otherproj)) == "otherproj"
 
 
 def test_unrecognised_root_fails_closed_to_unknown(tmp_path, monkeypatch):

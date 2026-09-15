@@ -43,7 +43,7 @@ def resolve_project(explicit: str | None = None, root=None) -> str:
 
     **The bug this exists to prevent.** It previously returned the registry's
     `current` project unconditionally. On 2026-09-15 four decisions written from
-    inside the Zurvan repo were stamped `project: "REDACTED-PROJECT"`, because a session in
+    inside the Zurvan repo were stamped with an UNRELATED project, because a session in
     an unrelated repository had left that workspace selected. The subject was
     Zurvan; the stamp said otherwise; and the guard would have made a publication
     decision on it.
@@ -54,7 +54,8 @@ def resolve_project(explicit: str | None = None, root=None) -> str:
     2. The registered project containing `root` (default: the working directory
        the command was invoked from). Deepest path wins, so a project nested
        inside another resolves to the inner one. This is what makes write-back
-       from any repo correct: run it in REDACTED-PROJECT and you get `REDACTED-PROJECT`, run it in
+       from any repo correct: run it in another registered repo and you get that
+       project, run it in
        Zurvan and you get `zurvan`.
     3. The registry's `current` — **only** when its registered path also contains
        `root`, i.e. when it agrees with (2) anyway.
