@@ -371,6 +371,103 @@ index size                  MB
 | Added scan latency, p95 | **≤ 400 ms** on the clean corpus |
 | Index build | completes and validates on the full protected corpus |
 
+### First measurement against real material — 2026-09-16
+
+Run: 300 real `wiki/` pages as the protected corpus (10.1 MB, 591,191
+fingerprints), 200 real tracked files as the scan set. The two sets are disjoint
+by construction — `wiki/` is gitignored, the scan set is tracked.
+
+| Gate | Result | |
+| --- | --- | --- |
+| Added scan latency, p95 | **234 ms** and **344 ms** over two runs (p50 186/238, max 376/646) | **MET, thin margin** |
+| Index build | 8.7 s, validates | **MET** |
+| Recall on the 7 transfer leaks | not yet run — the leak corpus does not exist | **NOT MEASURED** |
+| False-positive artefact rate | 11/200 | **INVALID AS MEASURED — not failed, not passed** |
+
+The latency figure is the fix, not the starting point: the first run measured
+p50 14,957 ms / p95 34,501 ms. The cause is closed below (§D1 degenerate
+content): one file produced **63,975 candidate anchors** from a horizontal rule
+it shared with a protected page.
+
+Both runs are reported because the margin is thin and the spread is real. The
+profile explains why — **every scan pays a ~200 ms constant floor**, whatever
+the artefact:
+
+```
+open_db + validate            179 ms   <- constant, independent of input
+  orphan LEFT JOIN             74 ms
+  count(*) fingerprints        11 ms
+  stat_digest (300 files)      10 ms
+winnow + candidate SQL       0-212 ms  <- scales with the artefact
+blob fetch + confirm          0-17 ms
+```
+
+A 548 ms scan of a 200-byte `.claude/settings.json` is 208 ms of validation and
+almost nothing else. The 74 ms orphan join could move to `deep=True` and would
+buy back most of the floor — **it was deliberately left alone.** The budget is
+already met, and moving a live integrity check out of the per-scan path to
+improve a number that passes is loosening a checker, which this project does not
+do. It is recorded here so the option is visible rather than rediscovered.
+
+**Known cost, not a breach:** the commit gate scans every staged blob
+separately, so a 50-file commit pays ~10 s of revalidation. A scan session that
+validates once and holds the connection for a batch would remove it, at the
+price of a TOCTOU window across the batch that the current design closes on
+purpose. That trade is a design change, not an optimisation, and is not made
+here.
+
+**Why the FP number is invalid as a measurement, rather than a failure.** Every
+one of the 11 was read. None is a coincidental collision:
+
+| Class | Example | What it is |
+| --- | --- | --- |
+| Ingestion round-trip | `docs/superpowers/plans/*.md` ↔ `wiki/sources/docs__superpowers__plans__*.md` | the tracked file's own ingested copy |
+| Generator boilerplate | `scripts/ingest.py`'s template ↔ the pages it wrote | flow is code → wiki, never wiki → code |
+| Code idiom | `parser = argparse.ArgumentParser()\n    parser.add_argument("--` (65–68 B) | shared idiom just over T=64 |
+
+The detector is right in each case: that text really is in the protected corpus.
+The corpus is what is wrong. **`ingest.py` records `title`, `hash` and
+`ingested_at` — and no source class.** A public document ingested into
+`wiki/sources/` becomes PRIVATE by location alone, after which the original
+public file can never be committed. That is a **provenance inversion**, and it
+makes "false positive" unmeasurable on this corpus: the metric cannot separate a
+coincidence from a document that was public before Zurvan ever saw it.
+
+Per the project's measurement rule, this is recorded as *invalid as a metric,
+not passed*, and replaced **prospectively**:
+
+> **v2 criterion.** ≤ 1 blocked artefact per 200, measured on a scan set with no
+> ingestion relationship to the protected corpus — i.e. after ingestion records
+> a source class and D3 exempts material acceded as public.
+
+**Open item (blocks the FP gate, design-gated — not implemented here).** Wire
+provenance into ingestion: a page ingested from a tracked repo file or a public
+URL is recorded with a PUBLIC origin class and acceded to D3 at ingest time.
+Seeding D3 from "everything currently tracked" remains forbidden (Global
+Constraint 7) — that is the laundering hole, and this is the opposite: recording
+what was already public *at the moment it entered*, with its provenance.
+
+### D1 degenerate content — added 2026-09-16
+
+T counts **content**, not bytes. A 270-byte rule of box-drawing characters is
+three bytes repeated ninety times; it identifies no origin.
+
+- k-grams that are one unit of period ≤ 8 repeated are not fingerprinted, on
+  both the index and the query side. Peak anchors for one file: 63,975 → 809;
+  2.4% of fingerprints dropped.
+- A confirmed span is accepted only if its **informative length** — length with
+  every run of ≥ 16 bytes at period ≤ 8 collapsed to one unit — reaches T.
+
+Stated bound: a "secret" that is itself a short unit repeated (`AAAA…`) is not
+protected by D1. It carries at most 8 bytes of information and cannot identify
+an origin; D2 literal registration covers such a string if it matters.
+
+The rule must cut both ways, and gauntlet rows 18–20 pin both directions:
+padding cannot **manufacture** a match, padding cannot **conceal** one, and
+protected prose buried between two long runs stays reachable. `D1_VERSION` is
+bumped to `d1-winnow-v2-informative`, so a store or a release from before this
+change fails closed instead of being silently reinterpreted.
+
 **`scan-diff` semantics.** Scanning diff hunks alone is unsafe: a protected span
 can be assembled across a changed/unchanged boundary, across two hunks, or moved
 by a rename with no textual diff. Commit gating therefore scans the **complete

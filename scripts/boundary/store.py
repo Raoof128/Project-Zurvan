@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-D1_VERSION = "d1-winnow-v1"
+# Bumped v1 -> v2 on 2026-09-16 when D1 stopped fingerprinting degenerate
+# k-grams and started measuring T against informative length. Both change what
+# a stored fingerprint MEANS and what a recorded release covers, so a v1 store
+# must fail closed rather than be reused: `open_db` refuses it, and `_released`
+# scopes every declassification to the normalisation it was granted under.
+D1_VERSION = "d1-winnow-v2-informative"
 # Unicode data ships with CPython, so casefold results are version-bound. A DB
 # built under a different Unicode version must not be trusted silently.
 D2_VERSION = f"d2-casefold-v1+py{sys.version_info.major}.{sys.version_info.minor}"

@@ -27,6 +27,18 @@
   verbatim), and gitignore globs for generated pages are case-folded because
   gitignore matching is case-sensitive while the CLI writes lowercase names.
 - Quality gate before claiming done: `pytest` (0 failed), `public_repo_guard.py`, `git diff --check`.
+- **Boundary's FP acceptance criterion is INVALID AS MEASURED, not passed.**
+  Measured 11/200 against a ≤1/200 ceiling on 2026-09-16, and every match was
+  read: all are ingestion round-trips, generator boilerplate or code idiom, not
+  coincidences. `ingest.py` records no source class, so a public document
+  becomes PRIVATE by landing in `wiki/sources/` — a provenance inversion that
+  makes the metric unmeasurable on this corpus. Do not report the gate as met,
+  and do not "fix" it by seeding D3 from tracked files (Global Constraint 7 —
+  that is the laundering hole). The v2 criterion is in the spec.
+- **D1 measures informative length, not bytes.** A run of a repeated unit is not
+  protected content. Changing `MAX_PERIOD`, `MIN_RUN` or the acceptance rule
+  changes what every stored fingerprint means: bump `D1_VERSION` with it, or
+  existing stores and releases are silently reinterpreted.
 
 See `CLAUDE.md` for the agent quickstart (commands, layout).
 
@@ -34,6 +46,18 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
+
+### 2026-09-16d (Australia/Sydney) — the first measurement against real material broke the FP gate, and the cause was not the detector
+**Raouf:**
+- **Scope:** `scripts/boundary/{d1,scan,store}.py`, `scripts/boundary_redteam.py` (+section F), `scripts/check.sh` (concurrency guard + named gate-0 suites), `tests/test_boundary_gauntlet.py` (rows 18-21), `tests/test_boundary_store.py`, Boundary spec.
+- **Correcting 2026-09-16c.** Its "scan p95 **379 ms**" was `validate()` alone presented as end-to-end. The real full-scan result on the same corpus was **p95 34,501 ms / p50 14,957 ms**, with **FP 32/200** against a ≤1/200 ceiling.
+- **One defect produced both numbers.** A tracked file yielded **63,975 candidate anchors** from a horizontal rule (`─` × 90) it shared with a protected page: D1 treated 270 bytes of a three-byte unit as 270 bytes of protected content. T now counts **informative length**; degenerate k-grams are not fingerprinted on either side. Anchors **63,975 → 809**, p95 **34,501 ms → 344 ms** (budget 400).
+- **Both directions pinned** (gauntlet rows 18-20): padding cannot manufacture a match, padding cannot conceal one, and prose buried between two long runs stays reachable. Row 17 could not fail — its clean corpus shared no vocabulary with the protected doc — so row 21 rebuilds it from the protected document's own words.
+- **FP recorded as invalid as measured** (see standing invariants). All 11 survivors read; none is a coincidence. Provenance-at-ingestion is a **design-gated open item, not implemented here**.
+- **`D1_VERSION` → `d1-winnow-v2-informative`**, so pre-change stores and releases fail closed. A 73 ms optimisation (orphan join → `deep=True`) was found and **refused**: the budget already passes, and loosening a live integrity check to improve a passing number is not done here.
+- **Index corruption caused and repaired.** A concurrent `check.sh` + rebuild left the live index at **8,000 of 185,303 chunks** — valid-looking, 96% missing. Rebuilt to **184,198**, disk == index == embeddings, VERDICT faithful. `check.sh` now refuses to start while a rebuild is in flight.
+- **Verification:** `pytest` **792 passed, 4 skipped, 0 failed**; `boundary_redteam` **27/27**; `check.sh` **23/23, exit 0**; `public_repo_guard` passed; `git diff --check` clean. Committed locally; **not pushed**.
+- **Follow-ups:** (1) provenance at ingestion — blocks the FP gate; (2) the commit gate pays ~200 ms revalidation **per staged blob** (~10 s for a 50-file commit); a batch scan session would remove it at the cost of a TOCTOU window — design change, not an optimisation; (3) the 7-leak recall corpus still does not exist, so recall is **NOT MEASURED**; (4) a 400-byte true positive still reports one match per anchor.
 
 ### 2026-09-16c (Australia/Sydney) — Boundary Plans 2 and 3 shipped, then red-teamed: four instrument leaks found in this repository, including one in the report that states the rule
 **Raouf:**

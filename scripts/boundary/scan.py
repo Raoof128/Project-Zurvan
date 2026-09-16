@@ -259,9 +259,19 @@ def scan_bytes(root, data: bytes, sink) -> Verdict:
                 # bytes whose integrity has been proven this scan.
                 blob_cache[blob_digest] = store.get_blob(root, blob_digest)
             start, length = d1.confirm(blob_cache[blob_digest], src_off, data, cand_off)
-            if length < cfg.threshold_bytes:
-                continue
             span = data[start:start + length]
+            # T counts CONTENT, not bytes. A 270-byte rule of box-drawing
+            # characters is three bytes repeated; measured against real material
+            # it blocked `scripts/check.sh` for sharing a horizontal rule with a
+            # protected page. `d1.informative_length` collapses repeating runs,
+            # and rows 18-20 of the gauntlet pin that the rule cannot be used to
+            # manufacture a match OR to conceal one.
+            # `informative_length(span) <= len(span)` always, so the raw
+            # length is a free exact short-circuit: it rejects the great
+            # majority of anchors without the collapse scan.
+            if (length < cfg.threshold_bytes
+                    or d1.informative_length(span) < cfg.threshold_bytes):
+                continue
             span_digest = hashlib.sha256(span).hexdigest()
             mid = _match_id(conn, span_digest, src_class, origin_id, "D1")
             for s in sinks:

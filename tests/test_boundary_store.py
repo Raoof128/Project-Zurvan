@@ -9,6 +9,7 @@ import sqlite3
 import pytest
 
 from scripts.boundary import store
+import scripts.boundary as boundary
 
 K, W = 8, 9
 PROT = b"PROTECTED-SENTENCE-DEFINITELY-LONGER-THAN-THE-THRESHOLD-HERE-OK"
@@ -225,3 +226,32 @@ def test_a_missing_committed_total_fails_closed(tmp_path):
     conn.commit()
     with pytest.raises(store.StateIntegrityError):
         store.validate(conn, root)
+
+
+def test_a_release_granted_under_an_older_detector_does_not_carry_over(tmp_path):
+    """Declassification is scoped to the detector semantics it was granted under.
+
+    D1 changed on 2026-09-16 (degenerate k-grams dropped, T measured against
+    informative length). A release recorded before that decided a DIFFERENT
+    question, so it must not silently authorise the same match afterwards.
+    """
+    root = tmp_path / "b"
+    (root / "sources").mkdir(parents=True)
+    secret = ("The quarterly containment review concluded that the residue "
+              "threshold must be recalibrated before the next audit cycle.")
+    (root / "sources" / "a.md").write_text(secret, encoding="utf-8")
+    boundary.build(root)
+
+    v = boundary.scan(root, secret, sink="PUBLIC_ARTIFACT")
+    assert v.blocked
+    boundary.release(root, v.matches[0].match_id, ["PUBLIC_ARTIFACT"],
+                     reason="approved for publication")
+    assert not boundary.scan(root, secret, sink="PUBLIC_ARTIFACT").blocked
+
+    # Rewrite the grant as if it had been issued by the previous detector.
+    conn = sqlite3.connect(root / boundary.store.DB_NAME)
+    conn.execute("UPDATE releases SET normalisation='d1-winnow-v1'")
+    conn.commit()
+    conn.close()
+    assert boundary.scan(root, secret, sink="PUBLIC_ARTIFACT").blocked, (
+        "a release from an older detector version must not still declassify")

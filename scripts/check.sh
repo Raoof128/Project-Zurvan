@@ -7,6 +7,23 @@ echo "========================================="
 echo "  Zurvan Comprehensive Quality Gate"
 echo "========================================="
 
+# ── concurrency guard ────────────────────────────────────────────────────────
+# Gate 5 rebuilds the search index. On 2026-09-16 this script ran while another
+# rebuild was already in flight; both wrote data/search.sqlite, and the live
+# index was left holding 8,000 of 185,303 chunks — structurally valid, and
+# silently missing 96% of the corpus. A partial index answers exactly like a
+# complete one, so nothing looks wrong until a measurement is quietly false.
+if pgrep -f "cli.py index search" > /dev/null 2>&1 || pgrep -f "rebuild_search_index" > /dev/null 2>&1; then
+  echo "❌ An index rebuild is already running. check.sh rebuilds the index too;"
+  echo "   running both corrupts it. Wait for the other rebuild to finish."
+  exit 1
+fi
+if [ -f data/search.sqlite-journal ]; then
+  echo "❌ Stale SQLite journal at data/search.sqlite-journal — a previous rebuild"
+  echo "   was interrupted. Inspect the index before running the gate."
+  exit 1
+fi
+
 echo "[0/23] Running Boundary egress gate..."
 # Opt-in: reports NOT CONFIGURED and exits 0 when no store exists, so the gate
 # never blocks a machine that has not set Boundary up. When a store IS present,
@@ -18,6 +35,19 @@ PYTHONPATH=. python scripts/boundary_guard.py
 # a sweep for protected content in tracked files. A gate nobody attacks is a
 # gate nobody has tested.
 PYTHONPATH=. python scripts/boundary_redteam.py | tail -3
+
+# Named explicitly so a failure points at the subsystem rather than at "pytest".
+# These also run inside gate 2's full sweep; the duplication is deliberate.
+echo "        Boundary + instrument suites:"
+PYTHONPATH=. python -m pytest -q \
+  tests/test_boundary_store.py \
+  tests/test_boundary_gauntlet.py \
+  tests/test_boundary_gitscan.py \
+  tests/test_boundary_guard.py \
+  tests/test_instruments.py \
+  tests/test_gauntlet_completeness.py \
+  tests/test_fts_candidates_gauntlet.py \
+  tests/test_plan_integrity.py | tail -2
 echo ""
 
 echo "[1/23] Running Public Repo Guard..."

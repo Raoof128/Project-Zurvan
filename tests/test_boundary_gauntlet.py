@@ -288,3 +288,86 @@ def test_a_verdict_never_carries_protected_cleartext(store):
     blob = repr(v) + "".join(repr(m) for m in v.matches)
     assert PRIVATE_DOC[:64] not in blob, "verdict echoed protected cleartext"
     assert all(len(m.span_digest) == 64 for m in v.matches)
+
+
+# ── row 18 ────────────────────────────────────────────────────────────────────
+# Rows 18-21 were added on 2026-09-16 after the FIRST measurement against real
+# material. Row 17 above reports 0/200 because its "clean" corpus shares no
+# vocabulary with the protected document — it cannot fail, so it proved nothing.
+# Run against 300 real pages and 200 real tracked files, the same detector
+# flagged 15/200, and every flagged span was one of the classes pinned below.
+RULE = "─" * 90                      # 270 bytes of one repeated 3-byte unit
+COMMENT_RULE = "# " + "-" * 120
+
+
+@pytest.mark.parametrize("filler", [RULE, COMMENT_RULE, "=" * 200, "\n" * 200])
+def test_a_run_of_one_repeated_unit_is_not_protected_content(tmp_path, filler):
+    """A 270-byte rule carries three bytes of information, not 270.
+
+    Measured: `scripts/check.sh` was blocked for sharing a box-drawing rule with
+    a protected page, and one such file produced 63,975 candidate anchors — the
+    same defect is both the false positive and the latency bomb.
+    """
+    root = tmp_path / "b"
+    (root / "sources").mkdir(parents=True)
+    (root / "sources" / "a.md").write_text(
+        f"Preamble.\n{filler}\nMore preamble.\n", encoding="utf-8")
+    boundary.build(root)
+    v = boundary.scan(root, f"unrelated file\n{filler}\nunrelated tail\n",
+                      sink="PUBLIC_ARTIFACT")
+    assert not v.blocked, "a repeated-unit run must not identify an origin"
+
+
+# ── row 19 ────────────────────────────────────────────────────────────────────
+def test_padding_a_short_secret_to_over_T_does_not_hide_it_or_invent_it(tmp_path):
+    """The run rule must cut exactly one way.
+
+    Padding must not MANUFACTURE a match (a run plus three real bytes is not a
+    match), and it must not CONCEAL one (real protected prose stays blocked no
+    matter how much filler surrounds it).
+    """
+    root = tmp_path / "b"
+    (root / "sources").mkdir(parents=True)
+    (root / "sources" / "a.md").write_text(RULE + "\n# " + PRIVATE_DOC,
+                                           encoding="utf-8")
+    boundary.build(root)
+    assert not boundary.scan(root, RULE + "\n# ", sink="PUBLIC_ARTIFACT").blocked
+    assert boundary.scan(root, RULE + "\n# " + PRIVATE_DOC,
+                         sink="PUBLIC_ARTIFACT").blocked
+
+
+# ── row 20 ────────────────────────────────────────────────────────────────────
+def test_protected_prose_between_two_long_runs_is_still_reachable(tmp_path):
+    """The blind spot the run rule could open, pinned.
+
+    Dropping degenerate fingerprints removes anchors. If a protected span sits
+    between two long runs, its own fingerprints must still be selected or the
+    rule would have created a hiding place instead of closing one.
+    """
+    root = tmp_path / "b"
+    (root / "sources").mkdir(parents=True)
+    buried = RULE + PRIVATE_DOC + RULE
+    (root / "sources" / "a.md").write_text(buried, encoding="utf-8")
+    boundary.build(root)
+    assert boundary.scan(root, "intro\n" + buried + "\noutro",
+                         sink="PUBLIC_ARTIFACT").blocked
+
+
+# ── row 21 ────────────────────────────────────────────────────────────────────
+def test_the_false_positive_corpus_shares_vocabulary_with_the_protected_one(store):
+    """Row 17, made capable of failing.
+
+    Every clean document here reuses the protected document's own words and
+    sentence shapes while containing no T-byte verbatim span. That is what a
+    false positive actually looks like; 200 strings about nothing is not a test.
+    """
+    words = PRIVATE_DOC.split()
+    clean = []
+    for i in range(200):
+        # Deterministic reshuffle: same vocabulary, different order, so no
+        # window of T bytes can coincide with the source.
+        rot = words[i % len(words):] + words[: i % len(words)]
+        clean.append(f"Note {i}: " + " ".join(rot[::-1]))
+    blocked = sum(boundary.scan(store, c, sink="PUBLIC_ARTIFACT").blocked
+                  for c in clean)
+    assert blocked <= 1, f"{blocked}/200 false positives exceeds the ceiling"

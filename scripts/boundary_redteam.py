@@ -80,6 +80,46 @@ for label, fn in (("typo source class", lambda: policy.is_blocked("PRVATE", ["PU
     except policy.PolicyError:
         check(label, True)
 
+print("\n== F. degenerate content is not protected content ==")
+# Added 2026-09-16 after the first measurement against real material: a shared
+# horizontal rule made `scripts/check.sh` unreleasable, and one such file
+# produced 63,975 candidate anchors. Rows 18-20 of the gauntlet pin the rule on
+# synthetic input; these run it against the real store.
+RULE = ("\u2500" * 90).encode("utf-8")
+check("a shared 270 B rule does not block",
+      not boundary.scan_blob(root, "x.md", RULE, sink=["PUBLIC_ARTIFACT"]).blocked)
+check("a rule plus three real bytes does not block",
+      not boundary.scan_blob(root, "x.md", RULE + b"\n# ", sink=["PUBLIC_ARTIFACT"]).blocked)
+check("padding cannot conceal real protected prose",
+      boundary.scan_blob(root, "x.md", RULE + PROT[:500] + RULE,
+                         sink=["PUBLIC_ARTIFACT"]).blocked)
+
+# REPORTED, NOT GATED. Scanning real tracked files against a store built from
+# real wiki/sources pages flags files that quote the repository's own ingested
+# documents — a provenance inversion, not a coincidence: ingest.py writes a
+# public file into wiki/sources/ and it becomes PRIVATE by location alone.
+# Until ingestion records a source class (see the spec's open item), this number
+# measures ingestion overlap, so gating on it would gate on the wrong thing.
+# It is printed every run so the number cannot drift unnoticed.
+import time as _t
+_all = [f for f in subprocess.run(["git","ls-files"],capture_output=True,text=True)
+        .stdout.split() if f.endswith((".py",".sh",".md"))]
+# Spread across the whole tracked list rather than the first N alphabetically,
+# so the sample is not all of scripts/.
+_sample = _all[::max(1, len(_all)//25)][:25]
+_fp, _lat = 0, []
+for f in _sample:
+    try: _b = pathlib.Path(f).read_bytes()
+    except OSError: continue
+    _s0 = _t.time()
+    _fp += boundary.scan_blob(root, f, _b, sink=["PUBLIC_ARTIFACT"]).blocked
+    _lat.append((_t.time() - _s0) * 1000)
+_lat.sort()
+print(f"  [INFO] tracked-file overlap {_fp}/{len(_sample)}  "
+      f"(ingestion round-trips; not gated — see spec open item)")
+print(f"  [INFO] scan latency p50 {_lat[len(_lat)//2]:.0f} ms  "
+      f"p95 {_lat[int(len(_lat)*0.95)]:.0f} ms  (budget p95 <= 400)")
+
 print("\n== E. nothing protected reaches git ==")
 tracked = subprocess.run(["git","ls-files"],capture_output=True,text=True).stdout.split()
 check("instrument cleartext untracked", "eval/search_gold.jsonl" not in tracked)
