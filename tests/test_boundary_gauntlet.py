@@ -12,8 +12,8 @@ Spec: `docs/superpowers/specs/2026-09-15-zurvan-boundary-design.md`
 the reverse):
 
     boundary.build(root)                     -> BuildResult(digest, n_sources, n_fingerprints)
-    boundary.scan(text, sink) -> Verdict
-    boundary.scan_blob(path, blob, sink)     -> Verdict
+    boundary.scan(store, text, sink) -> Verdict
+    boundary.scan_blob(store, path, blob, sink)     -> Verdict
     Verdict.blocked                          -> bool
     Verdict.matches                          -> list[Match]
     Match.source_class                       -> "PRIVATE" | "INSTRUMENT"
@@ -69,7 +69,7 @@ def test_threshold_edges_T_minus_1_T_and_T_plus_1(store, delta, expect_block):
     """
     T = boundary.config(store).threshold_bytes
     span = PRIVATE_DOC[: T + delta]
-    v = boundary.scan(f"prefix {span} suffix", sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, f"prefix {span} suffix", sink="PUBLIC_ARTIFACT")
     assert v.blocked is expect_block, f"span of {len(span)}B vs T={T}"
 
 
@@ -85,7 +85,7 @@ def test_one_fingerprint_with_many_origins_cannot_hide_a_protected_match(store):
     (store / "public" / "benign.md").write_text(PRIVATE_DOC, encoding="utf-8")
     (store / "sources" / "private-b.md").write_text(PRIVATE_DOC, encoding="utf-8")
     boundary.build(store)
-    v = boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
     origins = {m.source_id for m in v.matches}
     assert len(origins) >= 2, "all postings must resolve, not just the first"
 
@@ -104,7 +104,7 @@ def test_d2_literals_match_under_every_declared_casefold(store, form):
                               forbidden_sinks=["PUBLIC_ARTIFACT"])
     variants = {"lower": lit.lower(), "upper": lit.upper(),
                 "title": lit.title(), "mixed": "vAnTaBlAcK"}
-    v = boundary.scan(f"note about {variants[form]} here", sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, f"note about {variants[form]} here", sink="PUBLIC_ARTIFACT")
     assert v.blocked, f"{form} form escaped D2"
 
 
@@ -120,7 +120,7 @@ def test_protected_text_in_an_unapproved_public_file_stays_blocked(store):
     stray.parent.mkdir(exist_ok=True)
     stray.write_text(PRIVATE_DOC, encoding="utf-8")
     boundary.build(store)  # must NOT accede unapproved files
-    v = boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
     assert v.blocked, "an unapproved file must never confer public origin"
 
 
@@ -134,7 +134,7 @@ def test_a_public_subspan_does_not_exempt_the_longer_protected_residual(store):
     public_part = "The quarterly containment review concluded that"
     boundary.accede_public(store, public_part, reason="reviewed release")
     boundary.build(store)
-    v = boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
     assert v.blocked, "the residual beyond the public subspan must still block"
 
 
@@ -146,7 +146,7 @@ def test_multi_label_sink_uses_deny_overrides_allow(store):
     matrix says block for one and allow for the other; without precedence the
     verdict is undefined and an implementation may pick either.
     """
-    v = boundary.scan(PRIVATE_DOC, sink=["RETRIEVAL_CORPUS", "PUBLIC_ARTIFACT"])
+    v = boundary.scan(store, PRIVATE_DOC, sink=["RETRIEVAL_CORPUS", "PUBLIC_ARTIFACT"])
     assert v.blocked, "any applicable BLOCK must win"
 
 
@@ -161,7 +161,7 @@ def test_stale_index_fails_closed_and_never_reports_clean(store):
         "Newly protected sentence added after the index was built.", encoding="utf-8"
     )
     with pytest.raises(boundary.StaleStateError):
-        boundary.scan("Newly protected sentence added after the index was built.",
+        boundary.scan(store, "Newly protected sentence added after the index was built.",
                       sink="PUBLIC_ARTIFACT")
 
 
@@ -174,7 +174,7 @@ def test_span_assembled_across_two_changed_hunks_still_blocks(store):
     """
     half = len(PRIVATE_DOC) // 2
     blob = PRIVATE_DOC[:half] + ("\nfiller\n" * 40) + PRIVATE_DOC[half:]
-    v = boundary.scan_blob("docs/note.md", blob, sink="PUBLIC_ARTIFACT")
+    v = boundary.scan_blob(store, "docs/note.md", blob, sink="PUBLIC_ARTIFACT")
     assert v.blocked, "hunk-local scanning misses cross-hunk assembly"
 
 
@@ -185,7 +185,7 @@ def test_protected_blob_renamed_without_textual_diff_still_blocks(store):
     A pure rename produces no textual diff, so a diff-driven scanner sees nothing
     while the protected bytes move into a tracked path.
     """
-    v = boundary.scan_blob("docs/renamed.md", PRIVATE_DOC,
+    v = boundary.scan_blob(store, "docs/renamed.md", PRIVATE_DOC,
                            sink="PUBLIC_ARTIFACT", change_type="rename")
     assert v.blocked, "a rename still places protected bytes in a public sink"
 
@@ -199,8 +199,8 @@ def test_a_release_for_one_sink_does_not_declassify_another(store):
     """
     boundary.release(store, span=PRIVATE_DOC, sink="EVAL_OUTPUT",
                      reason="author-approved quotation")
-    assert not boundary.scan(PRIVATE_DOC, sink="EVAL_OUTPUT").blocked
-    assert boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT").blocked, \
+    assert not boundary.scan(store, PRIVATE_DOC, sink="EVAL_OUTPUT").blocked
+    assert boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT").blocked, \
         "release leaked across sinks"
 
 
@@ -213,7 +213,7 @@ def test_instrument_text_can_never_reach_an_indexed_or_public_artefact(store):
     Contamination with zero publication.
     """
     for sink in ("RETRIEVAL_CORPUS", "PUBLIC_ARTIFACT"):
-        v = boundary.scan(f"as discussed, {INSTRUMENT_ITEM} remains open", sink=sink)
+        v = boundary.scan(store, f"as discussed, {INSTRUMENT_ITEM} remains open", sink=sink)
         assert v.blocked, f"instrument text reached {sink}"
         assert all(m.source_class == "INSTRUMENT" for m in v.matches)
 
@@ -229,7 +229,7 @@ def test_corrupt_boundary_state_fails_closed_not_clean(store, victim):
     target = store / f"{victim}.sqlite"
     target.write_bytes(b"\x00\x01corrupt")
     with pytest.raises(boundary.StateIntegrityError):
-        boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
+        boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
 
 
 # ── row 17 ────────────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ def test_clean_corpus_stays_under_the_predeclared_false_positive_ceiling(store):
     """
     clean = [f"Ordinary engineering prose number {i}, nothing protected here."
              for i in range(200)]
-    blocked = sum(boundary.scan(c, sink="PUBLIC_ARTIFACT").blocked for c in clean)
+    blocked = sum(boundary.scan(store, c, sink="PUBLIC_ARTIFACT").blocked for c in clean)
     assert blocked <= 1, f"{blocked}/200 false positives exceeds the ceiling"
 
 
@@ -253,7 +253,7 @@ def test_a_verdict_never_carries_protected_cleartext(store):
     A Verdict is printed into CI logs and error messages. If it echoes the
     matched span, the scanner leaks exactly what it exists to contain.
     """
-    v = boundary.scan(PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
+    v = boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
     blob = repr(v) + "".join(repr(m) for m in v.matches)
     assert PRIVATE_DOC[:64] not in blob, "verdict echoed protected cleartext"
     assert all(len(m.span_digest) == 64 for m in v.matches)

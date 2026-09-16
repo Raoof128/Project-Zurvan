@@ -92,12 +92,19 @@ class Config:
     w: int            # winnowing window, in k-grams
     threshold_bytes: int   # == k + w - 1, derived, never set directly
 
+DB_NAME = "boundary.sqlite"
+
+def init(root: Path, k: int, w: int) -> None       # threshold_bytes is NOT a parameter
 def open_db(root: Path) -> sqlite3.Connection
 def config(root: Path) -> Config
-def content_digest(root: Path) -> str      # digest of protected sources + policy
+def content_digest(root: Path) -> str              # digest of protected sources + policy
 def stored_digest(root: Path) -> str | None
-def validate(root: Path) -> None           # raises StaleStateError / StateIntegrityError
-def atomic_replace(root: Path, build_fn) -> None
+def record_digest(root: Path) -> None              # build path writes what validate() reads
+def validate(root: Path) -> None                   # raises StaleStateError / StateIntegrityError
+def atomic_replace(root: Path, build_fn: Callable[[Path], None]) -> None
+    # build_fn receives the path of a TEMP database and must populate it fully;
+    # atomic_replace then os.replace()s it over the live one. Used by Task 6's
+    # build(); listed here because a declared-but-unused interface is a trap.
 ```
 
 **Deviation from the spec, stated plainly.** §7 of the spec draws five separate
@@ -263,6 +270,20 @@ def stored_digest(root):
     return row[0] if row else None
 
 
+def record_digest(root) -> None:
+    """Store the digest that `validate` will later compare against.
+
+    Without this on the BUILD path, `validate` raises StaleStateError forever:
+    the first draft of this plan wrote `content_digest` only inside a test, so
+    production code could never have produced a clean scan.
+    """
+    conn = open_db(root)
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('content_digest', ?)",
+                 (content_digest(root),))
+    conn.commit()
+    conn.close()
+
+
 def validate(root) -> None:
     """Fail closed. Raises rather than returning a verdict."""
     stored = stored_digest(root)
@@ -341,8 +362,12 @@ def winnow(hashes: list[int], w: int) -> list[tuple[int, int]]   # (hash, offset
 def index_source(conn, source_id: str, data: bytes, cfg) -> int  # rows written
 def candidates(conn, data: bytes, cfg) -> list[tuple[str, int, int]]
                                           # (source_id, src_offset, cand_offset)
-def confirm(root, source_id, src_offset, data, cand_offset, cfg) -> int
-                                          # confirmed match length, 0 if none
+def confirm(source_bytes, src_offset, data, cand_offset, cfg) -> tuple[int, int]
+                                          # (match_start_in_data, match_length)
+                                          # takes the SOURCE BYTES, not a root+id:
+                                          # the caller already loaded them, and a
+                                          # second read here would be a second
+                                          # chance to read the wrong source
 ```
 
 ### Steps
@@ -733,8 +758,13 @@ already calls, and they must match exactly:**
 ```python
 # scripts/boundary/__init__.py re-exports:
 build(root) -> BuildResult
-scan(text: str, sink: str | list[str]) -> Verdict
-scan_blob(path: str, blob: str, sink, change_type: str = "modify") -> Verdict
+scan(root, text: str, sink: str | list[str]) -> Verdict
+scan_blob(root, path: str, blob: str, sink, change_type: str = "modify") -> Verdict
+    # `root` is EXPLICIT on every entry point. The first draft omitted it from
+    # scan/scan_blob while every other function took it, which forces an implicit
+    # process-global store set by build(). For a gate that is a correctness
+    # hazard, not a style one: a scan against the wrong store reports a false
+    # "clean", which is the single worst output this system can produce.
 config(root) -> Config
 register_literal(root, literal, source_class, forbidden_sinks) -> None
 accede_public(root, span, reason) -> None
@@ -865,30 +895,207 @@ class Verdict:
 
 ---
 
-## Task 6 — Wire the pipeline and turn the gauntlet green
+## Task 6 — The scan pipeline
+
+Turns the remaining gauntlet rows green. **This task shows its code**; an earlier
+draft said "implement until the gauntlet is green", which is a placeholder
+wearing a task's clothes.
 
 **Files**
-- Modify: `scripts/boundary/__init__.py` (re-export the public API)
-- Modify: `scripts/boundary/scan.py` (add `build`, `scan`, `scan_blob`)
-- Test: `tests/test_boundary_gauntlet.py` (already written — do not edit it)
+- Modify: `scripts/boundary/scan.py`
+- Modify: `scripts/boundary/__init__.py`
+- Test: `tests/test_boundary_gauntlet.py` — **already written; do not edit it**
 
-**6.1** Run `PYTHONPATH=. python -m pytest -q tests/test_boundary_gauntlet.py -rs`
-and read which contracts fail. They are the specification.
+**Interfaces CONSUMED:** everything from Tasks 1–5.
 
-**6.2** Implement `build`/`scan`/`scan_blob` against the interfaces above until
-the gauntlet is green. **Do not modify `tests/test_boundary_gauntlet.py`.** If a
-contract seems wrong, stop and raise it — changing a gauntlet test to make an
-implementation pass is the cardinal sin (loosening a check to make evidence
-pass).
+### Steps
 
-**6.3** Run the FP-ceiling contract specifically and record the number:
-`≤ 1 blocked artefact per 200 clean`. If it fails, the fix is D3 accession
-coverage, never raising the ceiling.
+**6.1 — Failing test.** Run `PYTHONPATH=. python -m pytest -q
+tests/test_boundary_gauntlet.py -rs`. It skips on `importorskip` until
+`scripts/boundary` exists with the full API; after Task 5 it will fail on
+`AttributeError: module 'scripts.boundary' has no attribute 'build'`. That is the
+right failure.
 
-**6.4** Full suite: `PYTHONPATH=. python -m pytest -q` — 719 passed, 5 skipped
-before this plan; expect the 13 boundary skips to convert to passes.
+**6.2 — Code.**
 
-**6.5** Commit. `zurvan: boundary detection core — gauntlet green`
+```python
+# scripts/boundary/scan.py  (append below Match/Verdict from Task 5)
+import hashlib
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+
+from scripts.boundary import d1, d2, d3, policy, store
+
+
+@dataclass(frozen=True)
+class BuildResult:
+    digest: str
+    n_sources: int
+    n_fingerprints: int
+
+
+def _protected_sources(root: Path):
+    """(path, source_class) for everything under the store's protected trees.
+
+    Directory decides CLASS only. Whether a span is protected is decided by
+    provenance at scan time — Global Constraint 6 — never by location alone.
+    """
+    for sub, cls in (("sources", "PRIVATE"), ("instruments", "INSTRUMENT")):
+        d = root / sub
+        if d.is_dir():
+            for p in sorted(d.rglob("*")):
+                if p.is_file():
+                    yield p, cls
+
+
+def build(root) -> BuildResult:
+    root = Path(root)
+    cfg = store.config(root)
+    counts = {"sources": 0, "fingerprints": 0}
+
+    def populate(tmp_db: Path) -> None:
+        live = store.open_db(root)
+        live.execute("VACUUM INTO ?", (str(tmp_db),))   # exact copy, sqlite >= 3.27
+        live.close()
+        conn = sqlite3.connect(tmp_db)
+        conn.execute("DELETE FROM fingerprints")
+        conn.execute("DELETE FROM sources")
+        for path, cls in _protected_sources(root):
+            data = path.read_bytes()
+            sid = str(path.relative_to(root))
+            conn.execute("INSERT OR REPLACE INTO sources VALUES (?,?,?)",
+                         (sid, cls, hashlib.sha256(data).hexdigest()))
+            counts["fingerprints"] += d1.index_source(conn, sid, data, cfg)
+            counts["sources"] += 1
+        conn.commit()
+        conn.close()
+
+    store.atomic_replace(root, populate)
+    store.record_digest(root)          # what validate() will read; see Task 1
+    return BuildResult(digest=store.content_digest(root),
+                       n_sources=counts["sources"],
+                       n_fingerprints=counts["fingerprints"])
+
+
+def _source_bytes(root: Path, source_id: str) -> bytes:
+    return (root / source_id).read_bytes()
+
+
+def _released(conn, span_digest: str, source_class: str, origin_id: str, sink: str) -> bool:
+    """Global Constraint 10: a release binds span + class + origin + sink + norm."""
+    row = conn.execute(
+        "SELECT 1 FROM releases WHERE span_digest=? AND source_class=? "
+        "AND origin_id=? AND permitted_sinks LIKE '%'||?||'%' AND normalisation=?",
+        (span_digest, source_class, origin_id, sink, store.NORMALISATION_VERSION),
+    ).fetchone()
+    return row is not None
+
+
+def scan(root, text: str, sink) -> Verdict:
+    """Render a verdict for `text` against every applicable sink label.
+
+    Order matters: validate FIRST. A scan against stale or corrupt state must
+    raise, never return a clean Verdict (Global Constraint 8).
+    """
+    root = Path(root)
+    store.validate(root)                       # StaleStateError / StateIntegrityError
+    cfg = store.config(root)
+    conn = store.open_db(root)
+    sinks = [sink] if isinstance(sink, str) else list(sink)
+    data = text.encode("utf-8")
+    classes = dict(conn.execute("SELECT source_id, source_class FROM sources"))
+    seen, matches = set(), []
+
+    # ── D1: long-span verbatim ────────────────────────────────────────────────
+    for src_id, src_off, cand_off in d1.candidates(conn, data, cfg):
+        src_class = classes.get(src_id)
+        if src_class is None:
+            continue
+        start, length = d1.confirm(_source_bytes(root, src_id), src_off,
+                                   data, cand_off, cfg)
+        if length < cfg.threshold_bytes:       # candidate did not survive confirmation
+            continue
+        span = data[start:start + length]
+        digest = hashlib.sha256(span).hexdigest()
+        for s in sinks:
+            if not policy.is_blocked(src_class, [s]):
+                continue
+            if d3.is_exempt(conn, span, src_class, s):
+                continue
+            if _released(conn, digest, src_class, src_id, s):
+                continue
+            key = (digest, src_id, s)
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(Match(source_id=src_id, source_class=src_class,
+                                 detector="D1", span_digest=digest, sink=s))
+
+    # ── D2: salient literals ──────────────────────────────────────────────────
+    for value_hash, src_class, forbidden in d2.match(conn, text):
+        for s in sinks:
+            if s not in forbidden and not policy.is_blocked(src_class, [s]):
+                continue
+            key = (value_hash, "D2", s)
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(Match(source_id="literal", source_class=src_class,
+                                 detector="D2", span_digest=value_hash, sink=s))
+
+    conn.close()
+    return Verdict(blocked=bool(matches), matches=matches)
+
+
+def scan_blob(root, path: str, blob: str, sink, change_type: str = "modify") -> Verdict:
+    """Scan a complete post-image blob.
+
+    `path` and `change_type` are recorded for reporting; the scan itself covers
+    the WHOLE blob, never diff hunks, because a protected span can be assembled
+    across two hunks or moved by a rename that produces no textual diff at all.
+    """
+    return scan(root, blob, sink)
+```
+
+```python
+# scripts/boundary/__init__.py  (replace)
+"""Zurvan Boundary — provenance-aware egress and contamination control."""
+from scripts.boundary.store import (                       # noqa: F401
+    Config, StaleStateError, StateIntegrityError, config, init,
+)
+from scripts.boundary.scan import (                        # noqa: F401
+    BuildResult, Match, Verdict, build, scan, scan_blob,
+)
+from scripts.boundary.d2 import register as _register_literal
+from scripts.boundary.d3 import accede as _accede
+
+
+def register_literal(root, literal, source_class, forbidden_sinks):
+    conn = store.open_db(root)
+    _register_literal(conn, literal, source_class, forbidden_sinks)
+    conn.close()
+
+
+def accede_public(root, span, reason):
+    conn = store.open_db(root)
+    _accede(conn, span, accession=reason)
+    conn.close()
+```
+
+**6.3 — Run, watch the rows turn green one at a time.** **Do not modify
+`tests/test_boundary_gauntlet.py`.** If a contract looks wrong, stop and raise it:
+editing a gauntlet test so an implementation passes is loosening a check to make
+evidence pass, which is the cardinal sin this whole subsystem exists to prevent.
+
+**6.4 — Record the FP number** from the row-17 contract. If it exceeds
+≤ 1 per 200, the fix is D3 accession coverage — never raising the ceiling.
+
+**6.5 — Full suite.** `PYTHONPATH=. python -m pytest -q`. Before this plan:
+719 passed, 5 skipped. Expect the boundary skips to convert to passes; the 4
+bounded-FTS rows stay skipped until Plan 2.
+
+**6.6 — Commit.** `zurvan: boundary detection core — gauntlet green`
 
 ---
 
