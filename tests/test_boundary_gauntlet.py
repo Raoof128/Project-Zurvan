@@ -86,7 +86,11 @@ def test_one_fingerprint_with_many_origins_cannot_hide_a_protected_match(store):
     (store / "sources" / "private-b.md").write_text(PRIVATE_DOC, encoding="utf-8")
     boundary.build(store)
     v = boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
-    origins = {m.source_id for m in v.matches}
+    # AMENDED 2026-09-16: `source_id` -> `origin_id`. Review finding: a Verdict
+    # is printed into CI logs, and `source_id` was `path.relative_to(root)`, so a
+    # Verdict disclosed the protected store's directory layout. The field is now
+    # an opaque HMAC. This is a tightening of the contract, not an accommodation.
+    origins = {m.origin_id for m in v.matches}
     assert len(origins) >= 2, "all postings must resolve, not just the first"
 
 
@@ -173,7 +177,9 @@ def test_span_assembled_across_two_changed_hunks_still_blocks(store):
     it; only the whole resulting blob does.
     """
     half = len(PRIVATE_DOC) // 2
-    blob = PRIVATE_DOC[:half] + ("\nfiller\n" * 40) + PRIVATE_DOC[half:]
+    # AMENDED 2026-09-16: blob passed as BYTES. Review finding: a git blob is not
+    # necessarily valid UTF-8, so a `str` signature cannot represent one.
+    blob = (PRIVATE_DOC[:half] + ("\nfiller\n" * 40) + PRIVATE_DOC[half:]).encode("utf-8")
     v = boundary.scan_blob(store, "docs/note.md", blob, sink="PUBLIC_ARTIFACT")
     assert v.blocked, "hunk-local scanning misses cross-hunk assembly"
 
@@ -185,7 +191,8 @@ def test_protected_blob_renamed_without_textual_diff_still_blocks(store):
     A pure rename produces no textual diff, so a diff-driven scanner sees nothing
     while the protected bytes move into a tracked path.
     """
-    v = boundary.scan_blob(store, "docs/renamed.md", PRIVATE_DOC,
+    # AMENDED 2026-09-16: bytes, as above.
+    v = boundary.scan_blob(store, "docs/renamed.md", PRIVATE_DOC.encode("utf-8"),
                            sink="PUBLIC_ARTIFACT", change_type="rename")
     assert v.blocked, "a rename still places protected bytes in a public sink"
 
@@ -227,15 +234,31 @@ def test_instrument_text_can_never_reach_an_indexed_or_public_artefact(store):
 
 
 # ── row 16 ────────────────────────────────────────────────────────────────────
-@pytest.mark.parametrize("victim", ["fingerprints", "policy", "literals"])
+@pytest.mark.parametrize("victim", ["database", "blob", "index_counts"])
 def test_corrupt_boundary_state_fails_closed_not_clean(store, victim):
     """Proves the gate protects itself.
 
-    A scanner that answers "clean" when its own index is truncated is worse than
-    no scanner: it produces confident false assurance.
+    A scanner that answers "clean" when its own state is damaged is worse than no
+    scanner: it produces confident false assurance.
+
+    AMENDED 2026-09-16, and STRENGTHENED. The original corrupted three separate
+    SQLite files; the reviewed design uses one database plus a content-addressed
+    blob store, because atomic replacement of five files is not achievable with
+    `os.replace`. Corrupting files that do not exist tested nothing. These three
+    victims are the real corruption surfaces, and `index_counts` is the LOGICAL
+    corruption that the first draft of the store could not detect at all.
     """
-    target = store / f"{victim}.sqlite"
-    target.write_bytes(b"\x00\x01corrupt")
+    import sqlite3
+    if victim == "database":
+        (store / "boundary.sqlite").write_bytes(b"\x00\x01corrupt")
+    elif victim == "blob":
+        blob = next(p for p in (store / "blobs").rglob("*") if p.is_file())
+        blob.write_bytes(b"tampered")
+    else:
+        conn = sqlite3.connect(store / "boundary.sqlite")
+        conn.execute("UPDATE origins SET n_fingerprints = n_fingerprints + 999")
+        conn.commit()
+        conn.close()
     with pytest.raises(boundary.StateIntegrityError):
         boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT")
 
