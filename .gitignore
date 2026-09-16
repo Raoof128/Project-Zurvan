@@ -100,3 +100,12 @@ wiki/**
 # scanner could not be enabled against this repo. eval/*.manifest.json carries
 # the count and digest so integrity survives a clone.
 eval/search_gold.jsonl
+
+# Root-level sources/ holds ingested private documents (legal, personal,
+# client). Untracked is not enough — `git add -A` would stage it. Same rule as
+# wiki/sources/: private by default, never by remembering.
+sources/
+
+# Derived SQLite state and rebuild leftovers.
+data/*.sqlite-journal
+data/*.sqlite.prev
