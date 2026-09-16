@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS fingerprints (
     origin_id   TEXT NOT NULL REFERENCES origins(origin_id),
     offset      INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS fp_idx ON fingerprints(fingerprint);
+-- validate() aggregates per origin on every scan; without this it degrades to
+-- one full table scan PER ORIGIN (301 scans of 796k rows = ~17 s, measured).
+CREATE INDEX IF NOT EXISTS fp_origin_idx ON fingerprints(origin_id);
 -- one-to-many: two origins may register the same casefolded literal
 CREATE TABLE IF NOT EXISTS literals (
     literal_id       TEXT PRIMARY KEY,
@@ -232,6 +235,31 @@ def _protected_entries(root):
                     yield f"{cls}:{p.relative_to(root)}", p.read_bytes()
 
 
+def stat_digest(root) -> str:
+    """Cheap staleness probe: path + size + mtime, never file contents.
+
+    Re-hashing the protected tree on every scan was measured at ~14.6 s on a
+    13 MB corpus — flat regardless of the artefact being scanned, and 36x the
+    400 ms budget. This walks the same files but reads no bytes.
+
+    It is an OPTIMISATION, not the authority: it assumes an edit changes size or
+    mtime, which holds for the careless authorised agent v1 defends against and
+    NOT for a hostile one. `validate(deep=True)` always does the full content
+    comparison, and any stat change escalates to it automatically.
+    """
+    h = hashlib.sha256()
+    root = Path(root)
+    for sub, cls in PROTECTED_TREES:
+        d = root / sub
+        if not d.is_dir():
+            continue
+        for p in sorted(x for x in d.rglob("*") if x.is_file()):
+            st = p.stat()
+            rec = f"{cls}:{p.relative_to(root)}\x00{st.st_size}\x00{st.st_mtime_ns}".encode()
+            h.update(len(rec).to_bytes(8, "big") + rec)
+    return h.hexdigest()
+
+
 def manifest_digest(conn, root) -> str:
     """Covers protected material, configuration, versions AND index shape."""
     meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
@@ -244,7 +272,7 @@ def manifest_digest(conn, root) -> str:
     return hashlib.sha256(canonical_manifest_bytes(entries)).hexdigest()
 
 
-def validate(conn, root) -> None:
+def validate(conn, root, deep: bool = False) -> None:
     """Fail closed. Raises; never returns a verdict.
 
     Two distinct failures, deliberately distinguished:
@@ -258,19 +286,57 @@ def validate(conn, root) -> None:
 
     # Logical index integrity: the count the manifest committed must still be
     # there. Deleting every fingerprint row previously validated CLEAN.
-    for origin_id, expected in conn.execute("SELECT origin_id, n_fingerprints FROM origins"):
-        actual = conn.execute(
-            "SELECT count(*) FROM fingerprints WHERE origin_id = ?", (origin_id,)).fetchone()[0]
-        if actual != expected:
-            raise StateIntegrityError(
-                f"fingerprint count for origin {origin_id[:12]}: {actual} present, "
-                f"{expected} committed")
-    orphans = conn.execute(
-        "SELECT count(*) FROM fingerprints f LEFT JOIN origins o USING(origin_id) "
-        "WHERE o.origin_id IS NULL").fetchone()[0]
-    if orphans:
-        raise StateIntegrityError(f"{orphans} fingerprint rows reference no origin")
+    # Per-scan: ONE total count against the committed total. Any deletion of any
+    # fingerprint changes it, which is the false-clean this guards against.
+    #
+    # Profiled 2026-09-16 on 301 origins / 796k fingerprints: one COUNT per
+    # origin cost ~17 s, a GROUP BY ~400 ms, a single total count ~1 ms. The
+    # per-origin breakdown moved to deep=True and `boundary status`.
+    #
+    # Stated bound: a total-preserving delete-and-insert would pass this and be
+    # caught only by deep verification. That is a HOSTILE agent, which v1
+    # explicitly does not defend against.
+    committed_total = meta.get("total_fingerprints")
+    if committed_total is None:
+        # Fail CLOSED. Skipping the check when the key is absent would make
+        # `DELETE FROM meta WHERE key='total_fingerprints'` a one-row bypass of
+        # the whole integrity guarantee. A store with a manifest must have a
+        # committed total.
+        raise StateIntegrityError(
+            "store has a manifest but no committed fingerprint total; rebuild")
+    # TWO cheap aggregates, because one alone is escapable:
+    #   count(fingerprints) catches rows deleted from the index
+    #   sum(origins.n_fingerprints) catches the ORIGINS table being tampered with
+    # The gauntlet found this: bumping n_fingerprints changed no fingerprint row,
+    # so a total-only check passed while the store contradicted itself.
+    actual_total = conn.execute("SELECT count(*) FROM fingerprints").fetchone()[0]
+    claimed_total = conn.execute(
+        "SELECT coalesce(sum(n_fingerprints), 0) FROM origins").fetchone()[0]
+    if actual_total != int(committed_total) or claimed_total != int(committed_total):
+        raise StateIntegrityError(
+            f"fingerprint index disagrees with its manifest: {actual_total} rows "
+            f"present, origins claim {claimed_total}, {committed_total} committed")
+    if deep:
+        actual_counts = dict(conn.execute(
+            "SELECT origin_id, count(*) FROM fingerprints GROUP BY origin_id"))
+        for origin_id, expected in conn.execute(
+                "SELECT origin_id, n_fingerprints FROM origins"):
+            if actual_counts.get(origin_id, 0) != expected:
+                raise StateIntegrityError(
+                    f"fingerprint count for origin {origin_id[:12]}: "
+                    f"{actual_counts.get(origin_id, 0)} present, {expected} committed")
+    # EXISTS, not COUNT: one orphan is enough to fail, and stopping at the first
+    # avoids a full join on every scan.
+    if conn.execute(
+        "SELECT 1 FROM fingerprints f LEFT JOIN origins o USING(origin_id) "
+        "WHERE o.origin_id IS NULL LIMIT 1").fetchone():
+        raise StateIntegrityError("fingerprint rows reference an unknown origin")
 
+    # Cheap probe first. Only when it disagrees — or when deep=True — do we pay
+    # for reading every protected byte.
+    committed_stat = meta.get("stat_digest")
+    if not deep and committed_stat is not None and stat_digest(root) == committed_stat:
+        return
     if manifest_digest(conn, root) != committed:
         raise StaleStateError(
             "protected material or configuration changed since the last build; "

@@ -49,12 +49,12 @@ Acceptance did not require improvement — 0A is a correctness fix, as P0 was.
 
 **Coverage was necessary but not sufficient: only 1 of the 4 recovered.**
 
-| Coverage failure | Outcome after 0A |
+| Coverage failure (by instrument INDEX; see the egress rule) | Outcome after 0A |
 | --- | --- |
 | rule about pushing to the public remote | **PASSES** |
 | commands before saying a change is done | `fusion_ranking_miss`, fused rank **5** — just outside top-3 |
 | why claim evidence must be quoted verbatim | `candidate_miss` — indexed, never retrieved |
-| what is this project and what is it for | `candidate_miss` — indexed, never retrieved |
+| gold item #48 | `candidate_miss` — indexed, never retrieved |
 
 Two documents are now in the corpus and still never reach the top-50. That is a
 chunking/recall problem (Phase 2A), not a ranking one — and it was invisible

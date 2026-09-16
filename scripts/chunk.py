@@ -132,8 +132,9 @@ ROOT_INDEX_FILES = (
 # retrieval.
 #
 # The rule is deliberately NOT all of `docs/evaluation/`. That was tried and
-# measured: it also removed `docs/evaluation/provenance.md`, which a gold query
-# ("how are saved trace files scored against a gold set") legitimately expects,
+# measured: it also removed `docs/evaluation/provenance.md`, which gold item #44
+# legitimately expects (referenced by INDEX: a tracked file reproducing the
+# measuring instrument is itself the leak this project blocks),
 # turning a passing query into an `index_coverage_miss` — the very class Step 0
 # was created to find. A provenance report documents a different subsystem and
 # is ordinary knowledge. Only reports about RETRIEVAL feed back into retrieval,

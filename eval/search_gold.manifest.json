@@ -1,0 +1,6 @@
+{
+  "instrument": "search_gold.jsonl",
+  "n_items": 50,
+  "sha256": "34a533f2d74fc3994d4cf0a80e21a558986609bb5ce09d5224d2e781d5571018",
+  "note": "Cleartext is local-only. No per-item digest is recorded: a per-item hash of a short natural-language query is a confirmation oracle. Reference items by index."
+}

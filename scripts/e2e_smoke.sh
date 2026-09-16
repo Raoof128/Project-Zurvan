@@ -89,7 +89,10 @@ python scripts/rebuild_search_index.py
 
 echo "[10/12] Testing search and context..."
 python scripts/cli.py search "raw folder immutable"
-python scripts/cli.py search "why was vector search delayed" --hybrid
+# Probe text deliberately NOT drawn from the evaluation instrument: a
+# tracked smoke script reproducing a gold item is an
+# INSTRUMENT -> PUBLIC_ARTIFACT transfer.
+python scripts/cli.py search "markdown chunking and index rebuild" --hybrid
 python scripts/cli.py context --topic "vector search reliability" --hybrid --limit 10
 
 echo "[11/12] Validating retrieval evaluation..."

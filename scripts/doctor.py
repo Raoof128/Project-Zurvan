@@ -18,16 +18,20 @@ def check_path(path: Path, name: str, is_dir=False) -> bool:
     return False
 
 def check_eval_gold() -> bool:
-    gold_path = ROOT / "eval" / "search_gold.jsonl"
+    from scripts.instruments import gold_path as _gp, InstrumentMissing
+    try:
+        gold_path = _gp()          # local-only cleartext; see scripts/instruments.py
+    except InstrumentMissing:
+        gold_path = ROOT / "eval" / "search_gold.jsonl"
     if not gold_path.exists():
-        print(f"❌ Gold dataset missing: {gold_path.relative_to(ROOT)}")
+        print(f"❌ Gold dataset missing: {gold_path.name}")
         return False
     
     try:
         with open(gold_path, 'r', encoding='utf-8') as f:
             for line in f:
                 json.loads(line)
-        print(f"✅ Gold dataset valid: {gold_path.relative_to(ROOT)}")
+        print(f"✅ Gold dataset valid: {gold_path.name}")
         return True
     except Exception as e:
         print(f"❌ Gold dataset invalid: {e}")

@@ -19,6 +19,18 @@ def _run_script(script_name: str, extra_args: list[str] | None = None) -> None:
     if result.returncode != 0:
         sys.exit(result.returncode)
 
+def _resolved_gold(value):
+    """`--gold` defaults to None: the instrument cleartext is local-only.
+
+    Resolving here rather than in the parser keeps the repo-relative path out of
+    argparse defaults, where it would have been baked in at import time.
+    """
+    if value:
+        return value
+    from scripts.instruments import gold_path
+    return str(gold_path())
+
+
 def main():
     args_list = sys.argv[1:]
     project_name = None
@@ -297,6 +309,22 @@ def main():
              "containing the working directory, NOT the globally selected one.",
     )
     
+    # zurvan boundary <...>
+    boundary_parser = subparsers.add_parser("boundary", help="Provenance-aware egress control")
+    boundary_sub = boundary_parser.add_subparsers(dest="action")
+    for _n, _h in (("build", "index protected sources"),
+                   ("status", "store health and counts"),
+                   ("scan-diff", "scan staged changes (the commit gate)"),
+                   ("audit", "re-scan every tracked file")):
+        boundary_sub.add_parser(_n, help=_h)
+    b_scan = boundary_sub.add_parser("scan", help="scan one file")
+    b_scan.add_argument("path")
+    b_scan.add_argument("--sink", nargs="+", default=["PUBLIC_ARTIFACT"])
+    b_rel = boundary_sub.add_parser("release", help="declassify one match for named sinks")
+    b_rel.add_argument("--match-id", required=True)
+    b_rel.add_argument("--sink", nargs="+", required=True)
+    b_rel.add_argument("--reason", required=True)
+
     # zurvan claim add
     claim_parser = subparsers.add_parser("claim", help="Manage claims")
     claim_sub = claim_parser.add_subparsers(dest="action")
@@ -359,7 +387,7 @@ def main():
     eval_sub = eval_parser.add_subparsers(dest="action")
     
     eval_search_parser = eval_sub.add_parser("search", help="Evaluate search retrieval")
-    eval_search_parser.add_argument("--gold", default="eval/search_gold.jsonl")
+    eval_search_parser.add_argument("--gold", default=None)  # resolved by scripts.instruments
     eval_search_parser.add_argument("--hybrid", action="store_true")
     eval_search_parser.add_argument("--min-top3", type=float, default=0.0)
     eval_search_parser.add_argument("--json", action="store_true", dest="as_json")
@@ -373,7 +401,7 @@ def main():
     eval_provenance_parser.add_argument("--json", action="store_true", dest="as_json")
     
     eval_validate_parser = eval_sub.add_parser("validate-gold", help="Validate gold dataset")
-    eval_validate_parser.add_argument("--gold", default="eval/search_gold.jsonl")
+    eval_validate_parser.add_argument("--gold", default=None)  # resolved by scripts.instruments
     
     # zurvan graph
     graph_parser = subparsers.add_parser("graph", help="Knowledge graph commands")
@@ -792,6 +820,64 @@ def main():
             trace_parser.print_help()
 
                 
+    elif args.command == "boundary":
+        import scripts.boundary as _b
+        from contextlib import closing
+        from scripts.boundary import store as _st, gitscan as _gs
+        from scripts.boundary_guard import default_root as _broot
+        root = _broot()
+        act = getattr(args, "action", None)
+        if act == "build":
+            r = _b.build(root)
+            print(f"Built {r.n_origins} origin(s), {r.n_fingerprints} fingerprints.")
+            print(f"Manifest {r.manifest_digest[:16]}")
+        elif act == "status":
+            if not (root / "boundary.sqlite").is_file():
+                print(f"NOT CONFIGURED (no store at {root})")
+            else:
+                with closing(_st.open_db(root)) as conn:
+                    cfg = _st.read_config(conn)
+                    n_o = conn.execute("SELECT count(*) FROM origins").fetchone()[0]
+                    n_f = conn.execute("SELECT count(*) FROM fingerprints").fetchone()[0]
+                    n_l = conn.execute("SELECT count(*) FROM literals").fetchone()[0]
+                    try:
+                        _st.validate(conn, root); health = "healthy"
+                    except Exception as exc:                      # noqa: BLE001
+                        health = f"{type(exc).__name__}: {exc}"
+                print(f"store   {root}")
+                print(f"config  k={cfg.k} w={cfg.w} T={cfg.threshold_bytes}")
+                print(f"index   {n_o} origins, {n_f} fingerprints, {n_l} literals")
+                print(f"health  {health}")
+        elif act == "scan-diff":
+            from scripts.boundary_guard import main as _guard
+            sys.exit(_guard(boundary_root=root))
+        elif act == "scan":
+            data = open(args.path, "rb").read()
+            v = _b.scan_blob(root, args.path, data, sink=args.sink)
+            print(f"{args.path}: {'BLOCKED' if v.blocked else 'clean'}")
+            for m in v.matches:
+                print(f"  {m.detector} class={m.source_class} sink={m.sink} "
+                      f"span={m.span_digest[:12]} match={m.match_id[:12]}")
+        elif act == "release":
+            rid = _b.release(root, match_id=args.match_id, sinks=args.sink,
+                             reason=args.reason)
+            print(f"released {rid[:12]} for {', '.join(args.sink)}")
+        elif act == "audit":
+            import subprocess as _sp
+            tracked = _sp.run(["git", "ls-files"], capture_output=True, text=True).stdout.split()
+            bad = 0
+            for f in tracked:
+                try:
+                    data = open(f, "rb").read()
+                except OSError:
+                    continue
+                if _b.scan_blob(root, f, data, sink=_gs.sinks_for(f)).blocked:
+                    bad += 1
+                    print(f"  BLOCKED {f}")
+            print(f"audit: {bad} of {len(tracked)} tracked files blocked")
+        else:
+            boundary_parser.print_help()
+
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
@@ -841,19 +927,19 @@ def main():
         _run_script("rebuild_search_index.py")
     elif args.command == "eval" and args.action == "search":
         _run_script("eval_search.py", [
-            "--gold", args.gold,
+            "--gold", _resolved_gold(args.gold),
             "--min-top3", str(args.min_top3),
         ] + (["--hybrid"] if args.hybrid else [])
           + (["--json"] if getattr(args, "as_json", False) else []))
     elif args.command == "eval" and args.action == "validate-gold":
-        _run_script("eval_search.py", ["--gold", args.gold, "--validate"])
+        _run_script("eval_search.py", ["--gold", _resolved_gold(args.gold), "--validate"])
     elif args.command == "eval" and args.action == "provenance":
         from scripts.eval_provenance import run_provenance_evaluation, validate_gold_dataset
         if args.validate:
-            validate_gold_dataset(args.gold)
+            validate_gold_dataset(_resolved_gold(args.gold))
         else:
             run_provenance_evaluation(
-                args.gold,
+                _resolved_gold(args.gold),
                 min_source_recall=args.min_source_recall,
                 min_provenance_completeness=args.min_provenance_completeness,
                 min_graph_context_presence=args.min_graph_context_presence,

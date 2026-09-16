@@ -32,19 +32,36 @@ def kgram_hashes(data: bytes, k: int) -> list[int]:
 def winnow(hashes: list[int], w: int) -> list[tuple[int, int]]:
     """Schleimer winnowing: in each window of w hashes select the minimum.
 
-    Ties break on the RIGHTMOST occurrence, consistently, so two identical texts
-    always select identical fingerprints regardless of surrounding context.
+    Ties break on the RIGHTMOST occurrence, consistently, so the same text
+    selects the same fingerprints wherever it appears.
+
+    O(n) via a monotonic deque. The first implementation sliced, min'd and
+    reversed every window — O(n*w) — which took over four minutes on 300 real
+    source pages and would have made `build` unusable at corpus scale.
+    `test_deque_winnow_matches_the_naive_definition` pins the output to the naive
+    definition, because an optimisation that changes which fingerprints are
+    selected changes every stored fingerprint.
     """
-    if len(hashes) < w:
+    from collections import deque
+
+    n = len(hashes)
+    if n < w:
         return []
     out, prev = [], -1
-    for start in range(len(hashes) - w + 1):
-        window = hashes[start:start + w]
-        m = min(window)
-        idx = start + (len(window) - 1 - window[::-1].index(m))
-        if idx != prev:
-            out.append((m, idx))
-            prev = idx
+    dq = deque()                      # indices, hashes non-decreasing left->right
+    for i, h in enumerate(hashes):
+        # Strict `>` keeps the RIGHTMOST minimum: an equal value evicts the older
+        # one, so the survivor is always the latest occurrence.
+        while dq and hashes[dq[-1]] >= h:
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - w:
+            dq.popleft()
+        if i >= w - 1:
+            idx = dq[0]
+            if idx != prev:
+                out.append((hashes[idx], idx))
+                prev = idx
     return out
 
 

@@ -63,7 +63,7 @@ def test_the_gauntlet_does_not_itself_leak():
     import json, re
     names = [l.strip() for l in Path(".private-projects").read_text(encoding="utf-8").splitlines()
              if l.strip() and not l.startswith("#")]
-    gold = [json.loads(l)["query"] for l in open("eval/search_gold.jsonl") if l.strip()]
+    gold = [json.loads(l)["query"] for l in open(__import__("scripts.instruments", fromlist=["x"]).gold_path()) if l.strip()]
     for filename in sorted({f for f, _ in DECLARED.values()} | {Path(__file__).name}):
         text = (TESTS / filename).read_text(encoding="utf-8")
         hit = [n for n in names if re.search(re.escape(n), text, re.I)]

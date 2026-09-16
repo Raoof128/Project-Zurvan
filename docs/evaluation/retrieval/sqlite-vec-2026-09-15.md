@@ -139,22 +139,16 @@ re-run: **identical to the pre-removal run in every figure** (50/50, 0 real
 inversions, same deltas, same 13 failures). Ranking-neutral, and the gain is in
 the latency table above.
 
-## The 13 failing gold queries (unchanged from post-0A)
+## The 13 failing gold items (unchanged from post-0A)
+
+Referenced by INDEX into the 50-item instrument. An earlier version of this
+report listed them VERBATIM — a tracked file reproducing the measuring
+instrument is an `INSTRUMENT -> PUBLIC_ARTIFACT` transfer, the exact class
+this project's egress control blocks. Found by red-teaming the shipped
+scanner against this repository on 2026-09-16.
 
 ```
-are emails and API keys removed from shared packs
-can an agent write to my knowledge base by default
-do files get copied between projects during federation
-how are decisions that nobody resolved surfaced
-how do I connect Claude Code to the knowledge base
-how do the pieces of the system fit together
-how is the test suite structured and what gates it
-what commands should I run before saying a change is done
-what gets stripped out before an evidence bundle is shared
-what is this project and what is it for
-what stops a prompt injection in an ingested document from reaching the agent
-which formats can I export a report to
-why must claim evidence be quoted word for word
+#4, #5, #7, #9, #10, #16, #18, #28, #30, #32, #46, #47, #48
 ```
 
 ## What this experiment actually established

@@ -7,6 +7,19 @@ echo "========================================="
 echo "  Zurvan Comprehensive Quality Gate"
 echo "========================================="
 
+echo "[0/23] Running Boundary egress gate..."
+# Opt-in: reports NOT CONFIGURED and exits 0 when no store exists, so the gate
+# never blocks a machine that has not set Boundary up. When a store IS present,
+# a store that cannot prove its own integrity fails the gate just as a detected
+# leak does.
+PYTHONPATH=. python scripts/boundary_guard.py
+# Adversarial verification of the scanner itself, against real protected
+# material: integrity attacks, output-leak checks, policy fail-open probes, and
+# a sweep for protected content in tracked files. A gate nobody attacks is a
+# gate nobody has tested.
+PYTHONPATH=. python scripts/boundary_redteam.py | tail -3
+echo ""
+
 echo "[1/23] Running Public Repo Guard..."
 PYTHONPATH=. python scripts/public_repo_guard.py
 echo "✅ Public repo guard passed."

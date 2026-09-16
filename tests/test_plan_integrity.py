@@ -104,7 +104,7 @@ def test_a_plan_does_not_leak_what_its_subject_protects(plan):
              if l.strip() and not l.startswith("#")]
     hit = [n for n in names if re.search(re.escape(n), text, re.I)]
     assert not hit, f"{plan.name} contains private project name(s): {hit}"
-    gold = [json.loads(l)["query"] for l in open("eval/search_gold.jsonl") if l.strip()]
+    gold = [json.loads(l)["query"] for l in open(__import__("scripts.instruments", fromlist=["x"]).gold_path()) if l.strip()]
     echo = [q for q in gold if q.lower() in text.lower()]
     assert not echo, f"{plan.name} echoes evaluation item(s) verbatim"
 

@@ -60,8 +60,26 @@ def is_exempt(root, conn, span_bytes: bytes, source_class: str, sink: str) -> bo
         return False
     if len(span_bytes) == 0:
         return False
-    from scripts.boundary import store
-    for (blob_digest,) in conn.execute("SELECT blob_digest FROM public_origins"):
-        if span_bytes in store.get_blob(root, blob_digest):
+    for doc in _public_docs(root, conn):
+        if span_bytes in doc:
             return True
     return False
+
+
+_DOC_CACHE: dict = {}
+
+
+def _public_docs(root, conn):
+    """Approved public documents, loaded once per (root, corpus-state).
+
+    Previously re-read every blob from disk for EVERY candidate span, which is
+    linear in corpus size per span. Keyed on the set of accessioned digests so a
+    newly acceded document invalidates the cache immediately.
+    """
+    from scripts.boundary import store
+    digests = tuple(sorted(r[0] for r in conn.execute("SELECT blob_digest FROM public_origins")))
+    key = (str(root), digests)
+    if key not in _DOC_CACHE:
+        _DOC_CACHE.clear()          # bounded: one corpus state at a time
+        _DOC_CACHE[key] = [store.get_blob(root, d) for d in digests]
+    return _DOC_CACHE[key]

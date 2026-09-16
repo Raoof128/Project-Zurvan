@@ -9,7 +9,15 @@ from scripts.metrics import calculate_top_k_hit, calculate_reciprocal_rank, calc
 from scripts.hybrid_search import search_hybrid
 from scripts.config import PROJECT_ROOT
 
-DEFAULT_GOLD = str(PROJECT_ROOT / "eval" / "search_gold.jsonl")
+from scripts.instruments import gold_path as _gold_path
+
+
+def _default_gold() -> str:
+    """Resolved lazily: the cleartext is local-only and may be absent."""
+    return str(_gold_path())
+
+
+DEFAULT_GOLD = None   # sentinel; resolved at call time by _default_gold()
 
 def _resolve(path: str) -> str:
     """Resolve a repo-relative path against PROJECT_ROOT so evaluation is
@@ -58,7 +66,7 @@ def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
         print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
-def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, min_top3: float = 0.0,
+def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3: float = 0.0,
                           as_json: bool = False, max_queries: int | None = None):
     """Score retrieval against the gold set.
 
@@ -69,6 +77,7 @@ def run_search_evaluation(gold_file: str = DEFAULT_GOLD, hybrid: bool = False, m
     evaluation. Quality numbers must always come from the whole set, so a
     truncated run labels itself as one in its output.
     """
+    gold_file = gold_file or _default_gold()
     validate_gold_dataset(gold_file, quiet=as_json)
     dataset = load_gold_dataset(gold_file)
     if not dataset:
@@ -209,7 +218,7 @@ def _index_uses_mock_embeddings() -> bool:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gold", default=DEFAULT_GOLD)
+    parser.add_argument("--gold", default=None)
     parser.add_argument("--hybrid", action="store_true")
     parser.add_argument("--max-queries", type=int, default=None,
                         help="Run only the first N queries (liveness check, not a measurement)")
@@ -220,7 +229,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.validate:
-        validate_gold_dataset(args.gold)
+        validate_gold_dataset(args.gold or _default_gold())
     else:
         run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json,
                               max_queries=args.max_queries)

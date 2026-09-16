@@ -128,7 +128,7 @@ def test_instrument_text_is_absent_from_the_live_index():
     if not os.path.exists(db):
         pytest.skip("no live index")
     conn = sqlite3.connect(db)
-    gold = [json.loads(l)["query"] for l in open("eval/search_gold.jsonl") if l.strip()]
+    gold = [json.loads(l)["query"] for l in open(__import__("scripts.instruments", fromlist=["x"]).gold_path()) if l.strip()]
     exposed = [i for i, q in enumerate(gold, 1) if conn.execute(
         "select 1 from chunks where lower(text) like '%'||?||'%' limit 1",
         (q.lower(),)).fetchone()]

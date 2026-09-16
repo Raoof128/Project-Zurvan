@@ -32,6 +32,10 @@ def _commit_manifest(root, n_fingerprints=3, origin="origin-1"):
     conn.commit()
     conn.execute("INSERT OR REPLACE INTO meta VALUES ('manifest_digest', ?)",
                  (store.manifest_digest(conn, root),))
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('total_fingerprints', ?)",
+                 (str(n_fingerprints),))
+    conn.execute("INSERT OR REPLACE INTO meta VALUES ('stat_digest', ?)",
+                 (store.stat_digest(root),))
     conn.commit()
     return conn
 
@@ -138,3 +142,86 @@ def test_atomic_replace_refuses_a_build_with_no_manifest(tmp_path):
 
     with pytest.raises(store.StateIntegrityError):
         store.atomic_replace(root, bad_build)
+
+
+def test_deque_winnow_matches_the_naive_definition():
+    """The O(n) rewrite must select EXACTLY the fingerprints the naive definition
+    does. A faster winnow that picks different minima silently invalidates every
+    fingerprint already stored."""
+    import random
+    from scripts.boundary import d1
+
+    def naive(hashes, w):
+        if len(hashes) < w:
+            return []
+        out, prev = [], -1
+        for start in range(len(hashes) - w + 1):
+            win = hashes[start:start + w]
+            m = min(win)
+            idx = start + (len(win) - 1 - win[::-1].index(m))
+            if idx != prev:
+                out.append((m, idx)); prev = idx
+        return out
+
+    random.seed(11)
+    for trial in range(30):
+        n = random.randrange(0, 400)
+        # a small alphabet forces frequent ties, which is where tie-breaking bites
+        hs = [random.randrange(6) for _ in range(n)]
+        w = random.randrange(1, 12)
+        assert d1.winnow(hs, w) == naive(hs, w), f"trial {trial}: n={n} w={w}"
+
+
+def test_validation_does_not_rehash_the_corpus_on_every_scan(tmp_path):
+    """Measured 2026-09-16: re-hashing the protected tree per scan cost ~14.6 s
+    on a 13 MB corpus, flat regardless of input size — 36x the 400 ms budget.
+
+    A cheap stat probe (path+size+mtime) gates the expensive content walk, so an
+    unchanged corpus validates without reading 13 MB. Any stat change escalates
+    to the full content comparison, so correctness is unchanged for the careless
+    agent this defends against.
+    """
+    root = _store(tmp_path)
+    conn = _commit_manifest(root)
+    store.validate(conn, root)
+    import time
+    t = time.perf_counter()
+    for _ in range(50):
+        store.validate(conn, root)
+    per_call_ms = (time.perf_counter() - t) / 50 * 1000
+    assert per_call_ms < 20, f"validation costs {per_call_ms:.1f} ms per scan"
+
+
+def test_a_content_change_that_preserves_stat_is_still_caught(tmp_path):
+    """The stat probe is an OPTIMISATION, not the authority.
+
+    Honest bound: it assumes an agent that edits a file changes its size or
+    mtime. That holds for the careless-agent threat model and NOT for a hostile
+    one, which is out of scope for v1 — stated here rather than discovered later.
+    """
+    root = _store(tmp_path)
+    conn = _commit_manifest(root)
+    store.validate(conn, root)
+    p = root / "sources" / "a.md"
+    st = p.stat()
+    p.write_bytes(b"X" * len(PROT))              # same length
+    import os
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))   # same mtime
+    with pytest.raises((store.StaleStateError, store.StateIntegrityError)):
+        store.validate(conn, root, deep=True)
+
+
+def test_a_missing_committed_total_fails_closed(tmp_path):
+    """Deleting one meta row must not disable the integrity check.
+
+    The per-scan guard compares a committed fingerprint total. Treating an absent
+    total as "nothing to check" would make `DELETE FROM meta WHERE
+    key='total_fingerprints'` a one-row bypass.
+    """
+    root = _store(tmp_path)
+    conn = _commit_manifest(root)
+    store.validate(conn, root)
+    conn.execute("DELETE FROM meta WHERE key='total_fingerprints'")
+    conn.commit()
+    with pytest.raises(store.StateIntegrityError):
+        store.validate(conn, root)

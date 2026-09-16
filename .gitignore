@@ -94,3 +94,9 @@ wiki/log.md
 wiki/**
 !wiki/**/
 !wiki/**/.gitkeep
+
+# Evaluation instrument cleartext is local-only (~/.zurvan/instruments/).
+# Tracking it would violate Boundary INSTRUMENT -> PUBLIC_ARTIFACT, so the
+# scanner could not be enabled against this repo. eval/*.manifest.json carries
+# the count and digest so integrity survives a clone.
+eval/search_gold.jsonl

@@ -67,6 +67,17 @@ def _opaque_origin_id(conn, rel_path: str, source_class: str) -> str:
                     hashlib.sha256).hexdigest()
 
 
+# Shortest instrument item that will be registered as a D2 literal. Anything
+# shorter is SILENTLY UNPROTECTED, so this is a real cliff, not a tuning knob.
+#
+# Measured against the live 50-item instrument on 2026-09-16:
+#   min 24 B - p5 29 B - median 49 B - max 77 B
+#   0 items below 8 B, and 49 of 50 below T=64.
+#
+# That last number is the point: D1 cannot reach 98% of the instrument by
+# construction, so D2 registration is the ONLY thing protecting it.
+# `test_no_instrument_item_falls_below_the_registration_floor` fails if a future
+# item drops under this line, rather than letting it vanish.
 MIN_LITERAL_LEN = 8
 
 
@@ -160,6 +171,10 @@ def build(root) -> BuildResult:
             digest = store.manifest_digest(conn, root)
             conn.execute("INSERT OR REPLACE INTO meta VALUES ('manifest_digest', ?)",
                          (digest,))
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('stat_digest', ?)",
+                         (store.stat_digest(root),))
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('total_fingerprints', ?)",
+                         (str(counts["fingerprints"]),))
             conn.commit()
             counts["digest"] = digest
 
