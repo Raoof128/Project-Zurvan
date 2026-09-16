@@ -26,7 +26,12 @@ not the remaining latency problem; corpus-wide candidate generation is.**
 Two consequences fix the order of work:
 
 1. **Native SQL fusion is deferred.** Even reducing the semantic 392 ms to zero
-   leaves p50 near 326 ms, over the 300 ms gate. And if bounded candidates
+   leaves roughly 326 ms of MEAN stage cost (FTS 309 + embed 17). **That figure is
+not a p50 and must not be reported as one** — stage medians are not additive and
+a mean is not a median. The counterfactual is computed from the paired per-query
+timing records, not by subtracting one stage's mean from an end-to-end p50. The
+directional conclusion (the keyword side dominates what remains) survives; the
+number does not. And if bounded candidates
    shrink the Python loop, optimising it may never earn its complexity. Do not
    optimise machinery this experiment may make irrelevant.
 2. **Bounded FTS is measured before semantic KNN**, never together. Two
@@ -55,6 +60,12 @@ Local-first; Markdown stays the source of truth; invariant 4 (documented
 before/after `eval_search`); frozen artifacts untouchable; the 50-query gold set
 is the only honest instrument, so every gate names the queries that moved.
 
+**Baseline freeze.** A chunk count is not a baseline. Immediately before the
+experiment, freeze and record: **commit SHA + corpus digest + chunk count + gold
+set digest + embedding provider/model**. Three different corpus sizes (184,002 /
+184,171 / 184,185) already appear across this project's specs, and a before/after
+measured on different corpora is not attributable to the change.
+
 **Held constant:** chunking, embedding model, query embedding, the 0.2/0.8
 fusion weights, `MIN_HYBRID_SCORE`, the semantic full scan, the canonical
 ordering rule (`score DESC, chunk_id ASC`), and result budgeting. Only the
@@ -66,26 +77,50 @@ Independently, one per run:
 
 | Variant | Mechanism | Note |
 | --- | --- | --- |
-| **A. `LIMIT N` by BM25** | `ORDER BY bm25(chunks_fts) LIMIT N`, sweeping N | The obvious bound; N is the knob |
+| **A. `LIMIT N` by rank** | `ORDER BY rank ASC, chunk_id ASC LIMIT ?`, sweeping N | SQLite documents `ORDER BY rank` as logically equivalent to default BM25 but optimised for ordered/limited FTS5 retrieval. `chunk_id ASC` makes the cutoff deterministic when BM25 ties at the N boundary — the lexical tie rule must bite BEFORE fusion, not only after |
 | **B. High-DF term pruning** | drop terms matching > X% of the corpus | Attacks the cause (common words) rather than the symptom |
 | **C. AND-biased matching** | require the rarest k terms | Largest recall risk; measure last |
 
 Start with A, because N sweeps cleanly and the recall loss is directly
-observable. B is the more principled fix if A's N proves corpus-size-sensitive.
+observable.
+
+**Tuning and certifying on the same 50 queries is overfitting, and the report
+says so.** Sweeping N until the gold set passes and then reporting performance on
+that same set is a regression suite, not a held-out evaluation. That is useful
+engineering and a weak research claim; whichever is intended must be stated. A
+pre-registered N-selection rule or a separate dev set would make the claim
+defensible. B is the more principled fix if A's N proves corpus-size-sensitive.
 
 ## 5. Gate A2-FTS
 
 *Quality — the binding constraint*
 - **No previously-passing Top-3 query may become a failure.** A single
   regression rejects the variant regardless of latency.
+- **AND no aggregate regression beyond a predeclared tolerance:** Top-1 ≥ 0.68
+  and MRR ≥ 0.71 (baseline 0.70 / 0.73, tolerance one query). The Top-3-only
+  gate is insufficient — every rank-1 answer could fall to rank 3 with Top-3
+  still reading 0.74 while Top-1 and MRR collapse.
+- **Paired per-query rank deltas recorded for all 50**, not only the movers.
 - Top-1 / Top-3 / MRR reported against the Phase 1 baseline
   **0.70 / 0.74 / 0.7297, 13 failures on 184,171 chunks**.
-- **Every changed query is named**, with its before/after rank. At n=50 one
+- **Every changed query is named by OPAQUE ID, never by its text.** The report
+  is a tracked artefact, so literal gold text in it is an
+  `INSTRUMENT → PUBLIC_ARTIFACT` transfer — the exact class Boundary blocks.
+  (The `RETRIEVAL_CORPUS` path is already closed: `docs/evaluation/retrieval/` is
+  excluded from indexing. The publication path is not.) Cleartext stays local.
+- Named by id, with its before/after rank. At n=50 one
   query is 2%; aggregates alone are not evidence.
 - The 13 known failures may move freely — they are already failures.
 
 *Performance*
 - p50 / p95 / mean, warm, model preloaded, all 50 gold queries.
+- **ACCEPT threshold, frozen before testing:** end-to-end p50 ≤ 450 ms AND p95
+  no worse than baseline. Without a predeclared number, a variant that preserves
+  recall and saves 2 ms could be labelled ACCEPT.
+- **Fresh process per variant.** `ru_maxrss` is a high-water mark that never
+  falls, so running variants sequentially in one process contaminates every later
+  measurement. Each variant loads the same model and captures its own baseline
+  and peak.
 - Stage breakdown re-measured, so the next bottleneck is identified rather than
   assumed.
 - Retrieval-path **delta RSS** against a model-resident baseline (see below).

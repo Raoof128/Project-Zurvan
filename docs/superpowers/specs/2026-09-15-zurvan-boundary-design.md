@@ -82,15 +82,18 @@ secrecy between a model owner and an evaluator.
 **The seam: that architecture requires two mutually distrustful parties.** When
 the evaluator IS the corpus owner — every local agent system, every RAG product
 measuring its own retrieval, Zurvan — there is no second party to put on the
-other side of the enclave. Self-evaluation contamination is structurally outside
-their design, and it is the only kind Zurvan can suffer.
+other side of the enclave. Their design **does not directly solve single-owner self-evaluation
+contamination at a local corpus boundary** — same-org role separation or a
+confidential-compute variant is conceivable, so the honest claim is "not solved by
+this architecture", not "structurally impossible".
 
 Adjacent work confirms the shape of the gap rather than closing it: DyePack
 proves contamination by planting backdoors *in the benchmark*; Oren/Ni give
 provable false-positive control via canonical-ordering tests; MemAudit audits
-poisoned agent memory *post-hoc*; OWASP's Agent Memory Guard screens memory
+poisoned agent memory *post-hoc*. OWASP's Agent Memory Guard, by contrast, screens memory
 reads and writes with *heuristic detectors* and no byte-exact provenance. All
-detect after the fact, in the model or the memory. None prevents the instrument
+enforce at runtime with allow/redact/quarantine/block dispositions, but on
+heuristic detectors rather than byte-exact provenance.. None prevents the instrument
 from entering the corpus, and none can be checked by a third party who is not
 given the corpus.
 
@@ -98,7 +101,7 @@ Positioning sentence, scoped and falsifiable: **no matching prior pattern in thi
 project's current source map prevents self-evaluation contamination at the corpus
 boundary, or proves its absence without disclosing the corpus.**
 
-### 2.3 Leak #7: the log asserting merges that never happened
+### 2.3 P1 provenance-integrity incident (NOT an eighth transfer leak)
 
 `tests/test_wiki_merge.py` seeds an entity named after a real researcher. Before
 the 2026-09-15 isolation fix it wrote five `merge | <entity> | 1 sources` entries
@@ -106,7 +109,13 @@ into the live `wiki/log.md` while the page itself went to a temp directory, so
 `wiki/entities/` is empty. The audit log therefore asserts five ingests whose
 content was never in the store.
 
-This is a distinct failure class from the other six. Those put protected content
+**Taxonomy, corrected.** §1 lists **seven transfer leaks** (#1, #2, #3, #3b, #4,
+#5, #6). This event is **not** number eight — it is a different kind, recorded as
+**P1, a provenance-integrity incident**. The detector benchmark denominator stays
+at **7 transfer cases**; P1 is undetectable by D1/D2/D3 and must never be counted
+in their recall.
+
+Those seven put protected content
 where it did not belong; this one made the provenance record **state something
 false**. A store whose log can assert a merge that never happened cannot be the
 evidence base for any attestation built on it — which makes it a prerequisite,
@@ -117,7 +126,9 @@ not a footnote.
 Encrypted agent-memory vaults (Perseus Vault, AgentVault, CtxVault) and
 capability-sealed secret mediation (CapSeal) protect data **at rest** and gate
 **credentials**. Information-flow work for agents — APPA's permissions algebra,
-*Ghost in the Agent*, AgentFlow's per-object taint — tracks influence **inside an
+*Ghost in the Agent* — and AgentFlow, which does define flow/path rules, controlled
+release and a runtime reference monitor constraining which sinks receive sensitive
+fields — track influence **inside an
 agent's execution**, and NeuroTaint reconstructs provenance **offline, after the
 fact**.
 
@@ -167,7 +178,7 @@ EVAL_OUTPUT        frozen reports and rank artifacts
 PRIVATE_LOCAL      the local store itself
 ```
 
-**The v1 policy matrix.** Only the two BLOCK cells are formally guaranteed:
+**The v1 policy matrix.** Formally guaranteed: **three blocked (source class, sink) pairs across two protected source classes.** An earlier draft said "two", which an implementer could satisfy by omitting a policy entirely.
 
 | source → sink | PUBLIC_ARTIFACT | RETRIEVAL_CORPUS | EVAL_OUTPUT | PRIVATE_LOCAL |
 | --- | --- | --- | --- | --- |
@@ -178,6 +189,13 @@ PRIVATE_LOCAL      the local store itself
 Leak #1 is the `INSTRUMENT → RETRIEVAL_CORPUS` cell. Leaks #2–#6 are
 `→ PUBLIC_ARTIFACT`.
 
+**Sink labels are NON-EXCLUSIVE, and deny overrides allow.** `docs/foo.md` is
+simultaneously a `PUBLIC_ARTIFACT` and a `RETRIEVAL_CORPUS` member; an eval
+artifact may be `EVAL_OUTPUT` and tracked. Without a precedence rule,
+`PRIVATE → RETRIEVAL_CORPUS` (allow) and `PRIVATE → PUBLIC_ARTIFACT` (block)
+give contradictory verdicts on the same file. **Every applicable sink label is
+evaluated and any BLOCK wins.**
+
 ## 5. The invariant
 
 > **No sink receives an undeclassified verbatim span of ≥ T bytes whose matched
@@ -187,6 +205,13 @@ Leak #1 is the `INSTRUMENT → RETRIEVAL_CORPUS` cell. Leaks #2–#6 are
 "Protected sink" would read two ways — the sink is not what is protected. The
 forbidden-ness is a property of the (source class, sink) pair in §4's matrix, so
 the invariant names the pair.
+
+**Scope of the guarantee (corrected).** The invariant holds only for sinks
+Boundary actually mediates. V1 integrates `scan-diff` (commit) and the indexer
+write path; `EVAL_OUTPUT` and publication export are V2. Until a sink is
+integrated, **Boundary makes no claim about it** — an earlier draft asserted a
+universal invariant while wiring one sink, which would have been a guarantee
+stronger than the enforcement behind it.
 
 `T` is a **parameter, not a constant**, and its default is determined
 empirically from the frozen benchmark (§9) once D3 exists. Freezing 64 today
@@ -202,6 +227,18 @@ the verdict always comes from a **byte-exact comparison against the original
 source**. Hashes never decide, so collisions cannot produce a false block and
 the claim stays defensible.
 
+**Detection guarantee, parameterised.** "Winnowed fingerprints" alone does not
+guarantee detection of every identical span ≥ T. The spec fixes the domain (bytes
+vs tokens), the k-gram size `k`, and the window `w`, and states the resulting
+guarantee — for standard winnowing every shared substring of length ≥ `k + w - 1`
+is detected. `T` is defined in terms of `k` and `w`, not chosen independently.
+Tests exercise exactly `T-1`, `T`, `T+1`.
+
+**Postings are one-to-many.** A fingerprint maps to a LIST of `(source_id,
+offset)`: common k-grams and hash collisions legitimately have many origins, and
+keeping one produces false negatives or misattributed provenance. All postings
+resolve, then byte-compare.
+
 ### D2 — Salient-literal registry
 Exact matching for short, high-salience strings that no span rule can reach —
 project names (5–6 B), private paths, complete gold queries. Named *literal*,
@@ -215,6 +252,13 @@ match: exact
 case_sensitive: false
 forbidden_sinks: [RETRIEVAL_CORPUS, PUBLIC_ARTIFACT]
 ```
+
+**Storage semantics.** The canonical literal lives **only** in local
+`literals.sqlite` — a SHA-256 cannot locate an arbitrary case-insensitive
+substring, so a searchable representation must exist locally. Tracked or exported
+metadata carries the hash / opaque id only. Matching uses Unicode **casefold**
+(not `lower()`), and the casefold version is recorded in each release so a
+normalisation change cannot silently re-open one.
 
 Case-insensitivity is mandatory and load-bearing: on 2026-09-15 a redaction pass
 covering lower and upper case missed a title-cased occurrence, which survived
@@ -234,9 +278,31 @@ candidate span
             no  → protected match → BLOCK
 ```
 
+**D3 is source-class and sink aware.** Public-origin subtraction is sound for
+`PRIVATE` (confidentiality): if the exact span is genuinely public, disclosing it
+again discloses nothing. It is **not** sound for `INSTRUMENT → RETRIEVAL_CORPUS`
+(measurement integrity): a gold query whose words also occur publicly still
+matches its own answer and still contaminates. Instrument spans require explicit
+benchmark declassification or retirement, never generic public origin.
+
+**The trusted public corpus must never be seeded from "everything currently
+tracked."** If the tree already contains an accidental leak and `public.sqlite` is
+rebuilt from it, D3 blesses that leak permanently — yesterday's mistake becomes
+tomorrow's known-public origin. Seed only from approved, reviewed, known-clean
+provenance, recording accession provenance and digest per entry.
+
 D3 is first-class because without it D1 is unusable. Measured on real corpora
 (§8), the private store contains ingested copies of the project's **own public
 documents**, so a naive gate blocks a commit for quoting the repo's README.
+
+## 6b. Fail-closed state validation
+
+Every scan verifies, before rendering any verdict: protected-source digest,
+classification-policy digest, literal-registry digest, fingerprint-index digest.
+**Stale, missing, partial or mismatched Boundary state is a hard failure, never a
+"clean" result.** Index replacement is atomic. Without this, editing a protected
+source after the last `build` yields silent false negatives — which destroys the
+guarantee more quietly than any detector bug could.
 
 ## 7. Architecture
 
@@ -296,8 +362,20 @@ index build time            s
 index size                  MB
 ```
 
-Acceptance for v1: **7/7 recall**, a stated FP rate, and p95 scan latency under
-the threshold that keeps the gate from being disabled — measured, not asserted.
+**Acceptance for v1 — predeclared BEFORE testing, not chosen after:**
+
+| Gate | Threshold |
+| --- | --- |
+| Recall on the 7 transfer leaks | **7/7**, no exceptions |
+| False-positive artefact rate | **≤ 1 blocked artefact per 200 clean** (predeclare; a "stated FP rate" is not a gate — 60% FP satisfies that prose) |
+| Added scan latency, p95 | **≤ 400 ms** on the clean corpus |
+| Index build | completes and validates on the full protected corpus |
+
+**`scan-diff` semantics.** Scanning diff hunks alone is unsafe: a protected span
+can be assembled across a changed/unchanged boundary, across two hunks, or moved
+by a rename with no textual diff. Commit gating therefore scans the **complete
+staged post-image blob of every changed file**, and pre-push scans the resulting
+**commit range trees**, never the working tree.
 
 ## 10. CLI and gate integration
 
@@ -319,8 +397,11 @@ writes, and the indexer's write path (the `RETRIEVAL_CORPUS` sink).
 
 Controlled release exists from day one, because a scanner that cannot be
 overridden legitimately gets disabled illegitimately. A release record stores an
-opaque id, the span hash, the scope, a reason and a timestamp — and **never** the
-private source path, title, or the quoted text.
+opaque id, the span digest, **the source class and origin id**, **the permitted
+sink(s)**, **the detector normalisation version**, a reason and a timestamp — and
+**never** the private source path, title, or the quoted text. Binding all five is
+what stops a release for sink A from declassifying sink B, or the same bytes from
+a different protected origin.
 
 ## 12. What v1 does NOT detect
 
@@ -373,9 +454,15 @@ offline-reproducible, "without trusting any vendor, model, or lab."**
 > at time T under parameters `(T_bytes, normalisation)` — checkable by a third
 > party given neither the corpus nor the instrument.
 
-An honest evaluator satisfies it for free by running the check; a contaminated
-one cannot forge it, because the verifier recomputes the intersection over keyed
-k-gram fingerprints. Once the seal is cheap, publishing retrieval metrics
+**Status: RESEARCH IOU, not a V1 deliverable.** The claim "a contaminated
+evaluator cannot forge it" is currently **too strong**. A third party can
+recompute an intersection over supplied commitments, but nothing yet binds those
+commitments to the *complete real corpus* — an evaluator could attest over a
+subset that excludes the contamination. Closing this needs a completeness/binding
+construction (authenticated precommitment, TEE, ZK, or a trusted witness), not
+merely signed keyed k-gram sets. Private-set-intersection cardinality is
+established territory, but truthful-input commitment is a separate, unsolved
+requirement here. Until that exists, Instrument Seal is a research direction. Once the seal is cheap, publishing retrieval metrics
 *without* one becomes the signal (make the absence auditable).
 
 **The number it publishes — Instrument Exposure.** Fraction of eval items with a
@@ -399,6 +486,28 @@ about a model.
 being fixed first — an attestation over a store whose log can assert a merge that
 never happened is an attestation over a lie.
 
+## 15c. Required migration — Boundary currently fails against this repository
+
+**`eval/search_gold.jsonl` is tracked in git today.** Under §4, that is an
+`INSTRUMENT → PUBLIC_ARTIFACT` transfer, which Boundary blocks. The spec is
+therefore not implementable against the current tree without this migration, and
+shipping the scanner first would mean its first honest run blocks the repository
+it lives in.
+
+| Move | From | To |
+| --- | --- | --- |
+| Instrument cleartext | `eval/search_gold.jsonl` (tracked) | `~/.zurvan/instruments/` (local) |
+| Tracked remnant | — | schema + gold-set digest + opaque per-query ids |
+| Protected sources, literals, releases, fingerprints | — | `~/.zurvan/boundary/` (local) |
+
+**What does NOT move: `wiki/`.** An earlier IOU floated relocating the whole
+knowledge base. That would rewrite a foundational property of this project —
+`wiki/` is the tracked Markdown knowledge layer and the Obsidian vault, with
+SQLite rebuildable from it — to implement a sub-project. Boundary moves the
+*protected corpora and its own state* out of git, then enforces classification at
+the transitions into tracked or indexed Markdown. Sub-project E does not get to
+eat the architecture it is protecting.
+
 ## 16. Open questions (IOUs)
 
 1. **Default `T`** — empirical, from the frozen benchmark after D3 lands.
@@ -407,6 +516,7 @@ never happened is an attestation over a lie.
    a laundering vector.
 3. **`RETRIEVAL_CORPUS` enforcement point** — the indexer's write path or a
    pre-index scan; the first is stronger, the second is cheaper.
-4. **Migration** — `wiki/` currently lives in the repo; moving the store to
-   `~/.zurvan/boundary/` touches ~184k indexed chunks and every `wiki/...` path
-   in the gold set and the frozen reports.
+4. ~~**Migration** — move `wiki/` out of the repo.~~ **RETIRED 2026-09-16:**
+   superseded by §15c. Moving `wiki/` would rewrite the project's foundational
+   architecture to serve a sub-project. Only the protected corpora, the instrument
+   cleartext and Boundary's own state leave git.
