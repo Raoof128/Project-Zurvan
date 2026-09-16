@@ -192,16 +192,24 @@ def test_protected_blob_renamed_without_textual_diff_still_blocks(store):
 
 # ── row 14 ────────────────────────────────────────────────────────────────────
 def test_a_release_for_one_sink_does_not_declassify_another(store):
-    """Proves releases bind span + class + origin + sink + normalisation version.
+    """Proves a release binds to ONE (match, sink) pair, not to bytes globally.
 
-    Releasing bytes globally would silently declassify the same bytes for another
-    sink, or the same text arriving from a different protected origin.
+    Uses INSTRUMENT deliberately: it is the only class with TWO blocked sinks, so
+    isolation is observable. An earlier version released PRIVATE for EVAL_OUTPUT
+    and asserted it became unblocked — but PRIVATE -> EVAL_OUTPUT is not a blocked
+    pair, so that assertion held whether or not the release existed. A test that
+    passes for the wrong reason is worse than no test.
     """
-    boundary.release(store, span=PRIVATE_DOC, sink="EVAL_OUTPUT",
-                     reason="author-approved quotation")
-    assert not boundary.scan(store, PRIVATE_DOC, sink="EVAL_OUTPUT").blocked
-    assert boundary.scan(store, PRIVATE_DOC, sink="PUBLIC_ARTIFACT").blocked, \
-        "release leaked across sinks"
+    text = f"as discussed, {INSTRUMENT_ITEM} remains open"
+    before = boundary.scan(store, text, sink="RETRIEVAL_CORPUS")
+    assert before.blocked, "precondition: this must block before any release"
+
+    boundary.release(store, match_id=before.matches[0].match_id,
+                     sinks=["RETRIEVAL_CORPUS"], reason="author-approved quotation")
+
+    assert not boundary.scan(store, text, sink="RETRIEVAL_CORPUS").blocked
+    assert boundary.scan(store, text, sink="PUBLIC_ARTIFACT").blocked, \
+        "a release for one sink leaked into another"
 
 
 # ── row 15 ────────────────────────────────────────────────────────────────────
