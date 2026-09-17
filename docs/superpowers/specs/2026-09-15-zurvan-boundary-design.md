@@ -500,6 +500,68 @@ would name a private project inside a stored page) so an audit can challenge it.
 | Prior 11/200 | remains historically valid for the provenance-blind setup it measured |
 | v2 FP gate | **NOT YET MEASURED** — a qualifying post-provenance evaluation corpus does not exist yet |
 
+### Scan-side sink provenance — added 2026-09-17
+
+**The sequence, because the conclusion depends on it:**
+
+1. Provenance-blind legacy measurement: **11/200**, every one an ingestion
+   round-trip. Invalid as measured.
+2. Provenance-aware diagnostic attempt A: **4/200**, **3/199** independent.
+   FAIL. The round-trip class is gone.
+3. Characterisation **rejected** the two obvious explanations. Byte entropy is
+   inverted — the surviving false positives scored 4.74 and 4.21 bits/byte
+   against 4.02 for genuine protected prose, so an entropy filter would suppress
+   secrets and keep templates. Protected-origin frequency never fires — each
+   span appeared in 1 of 300 origins.
+4. Every remaining genuine-looking match was a span **already committed to this
+   repository's canonical branch**.
+5. Diagnosis changed: this is missing scan-side provenance, **not** evidence
+   that `T = 64` is wrong. `T` is unchanged.
+
+**The invariant.** A matched span is not a NEW disclosure when those exact bytes
+were present in the accepted protected-repository sink **before the candidate
+operation began**.
+
+- **Match-level, not file-level.** A changed file carries old public spans and
+  new private ones; exempting the whole candidate would make "append a secret to
+  a public file" a bypass.
+- **The candidate cannot prove itself.** Evidence comes from a baseline captured
+  beforehand from accepted refs only. The working tree, index, candidate commit,
+  `refs/stash`, `refs/original/*`, scratch refs and foreign repositories are all
+  excluded — the ingestion allowlist, applied to the other side.
+- **Restricted to `PRIVATE -> PUBLIC_ARTIFACT`**, the same pair D3 may exempt.
+  INSTRUMENT is never exempted: a gold item whose words appear in the sink still
+  matches its own answer and still contaminates.
+
+**Relationship to Global Constraint 7 — a real tension, resolved by transience.**
+GC7 forbids seeding the trusted public corpus from "everything currently
+tracked", because a leak already in the tree would be blessed **permanently**.
+This baseline is never acceded: it is recomputed per operation and never written
+to `public_origins`. Remove the text from the canonical branch and the exemption
+disappears with it, which is the opposite of the permanence GC7 exists to
+prevent. The two rules therefore diverge on a deleted public file — a recorded
+accession survives (it is evidence of what was true when made), a baseline does
+not (it is a question asked fresh). Both behaviours are pinned by tests.
+
+**Stated bounds.**
+
+- The baseline is the **tip trees** of accepted refs, not all history. Content
+  deleted from the canonical branch stops being evidence. Conservative in the
+  safe direction, and bounded.
+- A span **straddling** the public/new boundary by even one byte is not exempt,
+  so a benign reformat can still block. The principled fix is residual
+  subtraction — strip the public parts and block only if what remains reaches
+  `T` — which D3 promises at span level and has the same edge. Deliberately not
+  bundled with this change.
+
+**Attempt A is preserved, and is not the operational gate.** All 200 of its
+artefacts were already-committed blobs, so the corpus does not model candidate
+commit blobs. The operational corpus must contain blobs that are NOT reachable
+from the baseline: modified existing files and genuinely new files. Attempt A is
+kept as a regression corpus for sink-publicity behaviour — its already-public
+matches are expected to disappear, and that result must not be reported as the
+v2 FP score.
+
 ### D1 degenerate content — added 2026-09-16
 
 T counts **content**, not bytes. A 270-byte rule of box-drawing characters is

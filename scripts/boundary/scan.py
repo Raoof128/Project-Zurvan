@@ -229,12 +229,18 @@ def release(root, match_id: str, sinks, reason: str) -> str:
     return release_id
 
 
-def scan_bytes(root, data: bytes, sink) -> Verdict:
+def scan_bytes(root, data: bytes, sink, baseline=None) -> Verdict:
     """The core scanner. Operates on BYTES, because the guarantee is over bytes.
 
     One connection is opened for the whole scan and validation runs against that
     same connection: the previous draft opened the database three separate times,
     so an atomic rebuild between opens could validate one store and scan another.
+
+    `baseline` is an optional `sink.SinkBaseline` captured by the caller BEFORE
+    the candidate operation. A matched span whose exact bytes were already in
+    the accepted sink is not a NEW disclosure and is exempted match by match —
+    never file by file, or appending a secret to a public file would bypass the
+    gate. It is transient and never accedes anything; see `boundary/sink.py`.
     """
     root = Path(root)
     sinks = [sink] if isinstance(sink, str) else list(sink)
@@ -279,6 +285,8 @@ def scan_bytes(root, data: bytes, sink) -> Verdict:
                     continue
                 if d3.is_exempt(root, conn, span, src_class, s):
                     continue
+                if _already_in_sink(baseline, span, src_class, s):
+                    continue
                 if _released(conn, mid, s):
                     continue
                 if (mid, s) in seen:
@@ -312,9 +320,25 @@ def scan_bytes(root, data: bytes, sink) -> Verdict:
     return Verdict(blocked=bool(matches), matches=tuple(matches))
 
 
-def scan(root, text: str, sink) -> Verdict:
+
+def _already_in_sink(baseline, span: bytes, source_class: str, sink: str) -> bool:
+    """Was this exact span already in the accepted sink before the candidate?
+
+    Restricted to the same (class, sink) pair D3 may exempt — PRIVATE reaching
+    PUBLIC_ARTIFACT. INSTRUMENT is never exempted here for the same reason it is
+    never exempted there: a gold item whose words also appear in the sink still
+    matches its own answer and still contaminates a measurement.
+    """
+    if baseline is None:
+        return False
+    if (source_class, sink) not in d3._EXEMPTIBLE:
+        return False
+    return baseline.contains_span(span)
+
+
+def scan(root, text: str, sink, baseline=None) -> Verdict:
     """Text convenience wrapper. `scan_bytes` is the contract."""
-    return scan_bytes(root, text.encode("utf-8"), sink)
+    return scan_bytes(root, text.encode("utf-8"), sink, baseline=baseline)
 
 
 def scan_blob(root, path: str, blob: bytes, sink, change_type: str = "modify") -> Verdict:

@@ -1,5 +1,5 @@
 """Zurvan Boundary — provenance-aware egress and contamination control."""
-from scripts.boundary import store, d1, d2, d3, policy      # noqa: F401  submodules
+from scripts.boundary import store, d1, d2, d3, policy, sink  # noqa: F401  submodules
 from scripts.boundary.store import (                        # noqa: F401
     Config, StaleStateError, StateIntegrityError, init,
 )
