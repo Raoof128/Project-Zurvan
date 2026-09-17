@@ -562,6 +562,60 @@ kept as a regression corpus for sink-publicity behaviour — its already-public
 matches are expected to disappear, and that result must not be reported as the
 v2 FP score.
 
+### Verdicts — recall and the operational FP gate, 2026-09-17
+
+Both gates are now measured against frozen corpora. **`T = 64` is unchanged, and
+no detector policy was tuned.**
+
+| Gate | Result | Verdict |
+| --- | --- | --- |
+| **Recall** (11 fixtures, 10 leaks + 1 control) | **10/10 detected, 100%**; control correct; **0 leaks suppressed** by sink provenance | **PASS** |
+| **Operational FP** (200 candidate blobs) | **0/200 blocked** — 0/100 modified, 0/100 new | **PASS** (ceiling ≤ 1) |
+
+**Recall — `~/.zurvan/instruments/boundary-recall-v1/`.** Eleven shapes: long
+prose, exactly `T`, `T−1` as a control, embedded in benign text, multiple
+separated spans, code/config, prose, and four built specifically to attack
+match-level sink provenance — public bytes before the private span, after it, on
+both sides, and a private span appended to a wholly public file. All four block.
+The sink rule suppressed **no** genuine disclosure, which is the property that
+makes the FP result below safe to accept.
+
+**Operational FP — `~/.zurvan/instruments/boundary-fp-operational-v1/`.** 100
+deterministic benign edits to baseline-public files, plus 100 superseded
+historical blobs. **Six candidates (M079, M080, N022, N063, N065, N099) block
+WITHOUT the sink baseline and are clean with it** — six exceeds the ceiling of
+one, so without scan-side sink provenance this gate fails. That is the
+measurement establishing the rule does real work rather than merely looking
+principled.
+
+**The first operational attempt returned 33/200 and is recorded as INVALID BY
+CONSTRUCTION, not as a detector failure.** Its "new" half was sourced from
+`raw/` — the same tree as the protected corpus, which held 254 documents from
+one export family — so all 100 candidates were siblings of protected documents,
+genuinely shared content with them, and were largely blocked *correctly*. The
+corrected half comes from the repository's own git history, independent by
+construction because `raw/` has never been committed.
+
+**Stated bound on the 0/200.** The "new" half is superseded versions of tracked
+files: real candidate blobs a gate sees on a revert or cherry-pick, but largely
+sink-public and therefore the easier case. A corpus of genuinely novel documents
+unrelated to both the sink and the protected corpus would be harder and is not
+available locally.
+
+**Residual subtraction is NOT implemented, on evidence.** The straddling-span
+limitation is real and pinned by a test, but neither frozen corpus produced a
+case: 0 false positives, 0 suppressed leaks. Building it now would be designing
+against a predicted failure rather than an observed one.
+
+**FP gate status, superseding the earlier lines.**
+
+| | |
+| --- | --- |
+| Provenance-blind legacy (11/200) | historical; measured a provenance-inverted corpus |
+| Diagnostic attempt A (4/200, 3/199) | preserved; **not** the operational gate — all its artefacts were already-committed blobs |
+| **Operational v2 (0/200)** | **MEASURED, PASS**, with the bound above |
+| **Recall (10/10)** | **MEASURED, PASS** |
+
 ### D1 degenerate content — added 2026-09-16
 
 T counts **content**, not bytes. A 270-byte rule of box-drawing characters is

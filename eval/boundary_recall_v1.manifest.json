@@ -1,0 +1,35 @@
+{
+  "instrument": "boundary_recall_v1",
+  "cleartext_location": "~/.zurvan/instruments/boundary-recall-v1/ (never in git)",
+  "why_not_in_git": "A frozen evaluation corpus is a measuring instrument, and an instrument a system can read is not measuring it. Same rule that moved eval/search_gold.jsonl out of git on 2026-09-16. Digests and headline results only.",
+  "file_digests": {
+    "recall-manifest.json": "a27ff468ce9a47def54640c90c8cec1a7a91c1988df67a95fb8e3e40ff13f5ab",
+    "recall-result.json": "6277e581c3a1b9ff2aecf36d0728788cfc3bdb653b0f4cfc13a3637237633ab6"
+  },
+  "purpose": "Does Boundary still catch a real disclosure?",
+  "threshold_bytes": 64,
+  "recipe_version": "recall-v1",
+  "leak_shapes": [
+    "exact-long-prose",
+    "near-threshold-exact-T",
+    "near-threshold-below-T",
+    "embedded-in-benign",
+    "multiple-separated-spans",
+    "protected-code-or-config",
+    "protected-prose",
+    "public-prefix-overlap",
+    "public-suffix-overlap",
+    "public-both-sides",
+    "appended-to-entirely-public-file"
+  ],
+  "result": {
+    "detected": 10,
+    "leaks": 10,
+    "recall": 1.0,
+    "controls_correct": true,
+    "false_negatives": [],
+    "leaks_suppressed_by_sink_baseline": [],
+    "verdict": "PASS \u2014 10/10, no leak suppressed by sink provenance"
+  },
+  "note": "Spans recorded by digest and length only; a frozen artefact must not quote the protected material it tests with."
+}

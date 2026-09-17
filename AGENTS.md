@@ -27,14 +27,25 @@
   verbatim), and gitignore globs for generated pages are case-folded because
   gitignore matching is case-sensitive while the CLI writes lowercase names.
 - Quality gate before claiming done: `pytest` (0 failed), `public_repo_guard.py`, `git diff --check`.
-- **Boundary's FP acceptance criterion is INVALID AS MEASURED, not passed.**
-  Measured 11/200 against a ≤1/200 ceiling on 2026-09-16, and every match was
-  read: all are ingestion round-trips, generator boilerplate or code idiom, not
-  coincidences. `ingest.py` records no source class, so a public document
-  becomes PRIVATE by landing in `wiki/sources/` — a provenance inversion that
-  makes the metric unmeasurable on this corpus. Do not report the gate as met,
-  and do not "fix" it by seeding D3 from tracked files (Global Constraint 7 —
-  that is the laundering hole). The v2 criterion is in the spec.
+- **Boundary's gates are MEASURED as of 2026-09-17: recall 10/10, operational
+  false positives 0/200.** Read the history before quoting any number, because
+  three of them are not results:
+  - **11/200 (2026-09-16)** — historical. Invalid as measured: every match was
+    an ingestion round-trip, because `ingest.py` recorded no source class and a
+    public document became PRIVATE by landing in `wiki/sources/`.
+  - **4/200 / 3/199 (diagnostic attempt A)** — preserved, and **not** the
+    operational gate: all 200 of its artefacts were blobs already reachable from
+    the sink, which is not what a commit gate ever sees.
+  - **33/200 (first operational attempt)** — **invalid by construction**, not a
+    detector failure: its "new" half were sibling documents of the protected
+    corpus and were largely blocked correctly.
+  - **0/200 operational, 10/10 recall** — the current result, with the bound
+    that the "new" half is superseded tracked-file versions, the easier case.
+
+  `T = 64` is unchanged and no detector policy has been tuned. Never "fix" a
+  future failure by seeding D3 from tracked files (Global Constraint 7 — that is
+  the laundering hole); scan-side sink provenance is transient per operation and
+  is how the same effect is obtained without permanence.
 - **D1 measures informative length, not bytes.** A run of a repeated unit is not
   protected content. Changing `MAX_PERIOD`, `MIN_RUN` or the acceptance rule
   changes what every stored fingerprint means: bump `D1_VERSION` with it, or
@@ -77,6 +88,18 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-09-17d (Australia/Sydney) — both Boundary gates measured against frozen corpora: recall 10/10, operational false positives 0/200, T untouched
+**Raouf:**
+- **Scope:** `scripts/eval_boundary_recall.py` (new), `scripts/eval_boundary_candidates.py` (new), `eval/boundary_recall_v1.manifest.json`, `eval/boundary_fp_operational_v1.manifest.json`, Boundary spec. Frozen corpora live in `~/.zurvan/instruments/boundary-{recall-v1,fp-operational-v1}/`, never in git.
+- **Recall — the question that had been NOT MEASURED since Boundary shipped — is 10/10, 100%.** Eleven fixtures: long prose, exactly `T`, `T−1` as a control (correctly CLEAN), embedded in benign text, multiple separated spans, code/config, prose, and four built specifically to attack match-level sink provenance — public bytes before the private span, after it, on **both sides**, and a private span appended to a wholly public file. All four block. **Zero leaks were suppressed by the sink baseline**, which is what makes the FP number below safe to accept.
+- **Operational false positives: 0/200 — 0/100 modified, 0/100 new.** The decisive figure is not the zero: **six candidates block WITHOUT the sink baseline and are clean with it**. Six exceeds the ceiling of one, so without scan-side sink provenance this gate fails. That is the measurement showing the rule does real work rather than merely reading well.
+- **I rejected my own first operational run, at 33/200.** Its "new" half was sourced from `raw/`, the same tree as the protected corpus — which held **254 documents from one export family** — so all 100 candidates were siblings of protected documents, genuinely shared content with them, and were largely blocked **correctly**. Recorded as **invalid by construction, not a detector failure**. The corrected half comes from the repository's own git history: `raw/` has never been committed, so nothing there can have an ingestion relationship with the protected corpus.
+- **Stated bound on the 0/200.** The "new" half is superseded versions of tracked files — real candidate blobs a gate sees on a revert or cherry-pick, but largely sink-public and therefore the easier case. A corpus of genuinely novel documents unrelated to both the sink and the protected corpus would be harder and is not available locally.
+- **`T = 64` is unchanged and no detector policy was tuned.** Three explanations for the earlier failures were measured and rejected before any change: byte entropy (**inverted** — 4.74/4.21 bits per byte for the false positives against **4.02** for genuine protected prose), protected-origin frequency (1 of 300 origins), and the threshold itself.
+- **Residual subtraction deliberately NOT implemented.** The straddling-span limitation is real and pinned by a test, but neither frozen corpus produced a case — 0 false positives, 0 suppressed leaks. Building it now would be designing against a predicted failure rather than an observed one.
+- **Verification:** recall **10/10** with controls correct; operational FP **0/200**; sink contracts **13/13**; harness contracts **11/11**; provenance **37/37**; `boundary_redteam` **27/27**; `pytest` **870 passed / 4 skipped / 0 failed** (uncontaminated run); `public_repo_guard` passed; `git diff --check` clean. Committed locally; **not pushed**.
+- **Follow-ups:** (1) A harder "new file" corpus — genuinely novel documents independent of both the sink and the protected corpus — would strengthen the 0/200. (2) Residual subtraction, if evidence ever produces a straddling case. (3) Commit-gate batching, now unblocked: both gates have valid results. (4) `PUBLIC_DECLARED` still has no promotion path for an audit that verifies a declared URL.
+
 ### 2026-09-17b (Australia/Sydney) — provenance at ingestion: three weaker definitions of "public" were implemented, demonstrated exploitable, and rejected
 **Raouf:**
 - **Scope:** `scripts/provenance.py` (new), `scripts/ingest.py` (frontmatter + accession + `--public-url`), `tests/test_ingest_provenance.py` (new, 37 contracts), Boundary spec §8.
@@ -92,19 +115,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
 - **Attempt A is preserved and is NOT the operational gate.** All 200 of its artefacts were already-committed blobs, which does not model candidate commit blobs; it is kept as a regression corpus for sink-publicity behaviour.
 - **Verification:** provenance contracts **37/37**; `boundary_redteam` **27/27**; `public_repo_guard` passed; `git diff --check` clean; full `pytest` recorded below. Committed locally; **not pushed**.
 - **Follow-ups:** (1) Build the post-provenance FP evaluation corpus the v2 criterion requires — not by re-running the legacy one. (2) Commit-gate batching stays blocked until that measurement is valid. (3) `PUBLIC_DECLARED` has no promotion path yet: an audit that verifies a declared URL cannot record that finding.
-
-### 2026-09-17 (Australia/Sydney) — the index had two ways to die and no way to say so; one of the three failures that day was mine
-**Raouf:**
-- **Scope:** `scripts/rebuild_search_index.py` (rebuilt around a temp build + atomic swap), `scripts/index_health.py` (new), `scripts/agent_workflow.py`, `scripts/cli.py`, `scripts/check.sh`, `scripts/eval_search.py`, `scripts/hybrid_search.py`, `scripts/e2e_all_phases_until_17.sh`, `.claude/settings.json`, `.gitignore`, `tests/test_index_integrity.py` (new, 31 contracts), `tests/conftest.py`, `tests/test_agent_workflow.py`.
-- **Found:** the canonical index was unusable in two ways at once. `data/search.sqlite` held **2,000 of 184,231 chunks** from **59 of 4,418 sources** — a SessionStart hook started a rebuild at 13:23:49 and the session exited at 13:24:32, so SIGKILL left exactly one `COMMIT_EVERY` batch. `data/search.sqlite.prev` held all 184,231 chunks with **every vector `mock`/`deterministic_hash`**, written in 38 s by a rebuild in a shell where `ZURVAN_EMBED_PROVIDER` was unset. Both passed every check the project had; counts agreed in both.
-- **One sentence in two places.** The rebuild moved the live index to `.prev` and built AT the canonical path, so any interruption published a partial index. And `get_embedding` returns hashes as a successful result when the provider is unset **or when SentenceTransformers fails to load**. `check.sh` gate 5 rebuilds production and pinned nothing — the likeliest source of the poisoning.
-- **Atomic rebuild invariant.** Build at `data/search.sqlite.building-<pid>`, validate there, promote with one `os.replace()`; the old index stays readable (`mode=ro`, in place) for embedding reuse throughout. Exception, SIGINT, SIGTERM, SIGKILL or failed validation all leave the canonical path holding the old index. `.prev` is gone and carries no correctness weight. A build file owned by a live process makes the next rebuild refuse to start.
-- **Exact-provider invariant.** Abort when the provider received ≠ requested (the silent fallback), and abort a CANONICAL rebuild unless the space is exactly `sentence_transformers`/`all-MiniLM-L6-v2`/`384`. `zurvan index search` carries the production space itself instead of inheriting the shell.
-- **Health is not a row count.** `index_health.py` checks integrity, chunk/FTS/embedding agreement, source coverage, a single embedding space, that space being expected, and every vector's byte width. Exposed as `zurvan index health [--deep]`, enforced in gate 5, reported on the session-start card. Asked with no stated expectation, a mock index is UNHEALTHY.
-- **Test isolation, and my own failure.** Mutation-testing the new guards I removed both; this file's "a canonical rebuild is refused" test then rebuilt the production index and deleted it. The 2,000-chunk partial was already condemned, but a guard whose own test can destroy what it guards has one point of failure. Canonical-path tests now run against a disposable root; no canonical rebuild can start while `PYTEST_CURRENT_TEST` is set; `conftest.py` fails the session if `data/search.sqlite` changes at all; an AST meta-test rejects any test starting a rebuild without naming a disposable target.
-- **Read paths were creating the index.** `agent_prime` left a 0-byte database at the canonical path. All ten readers now open `mode=ro`; exactly one write-mode connection remains and it opens the build path.
-- **Two hazards found by accident.** A backtick in a shell audit command executed `zurvan index search` and ran a second production rebuild for ten minutes beside the first — atomicity meant neither corrupted anything, but nothing refused it. And renaming `.prev` to `.building-<pid>` escaped `.gitignore`'s `data/*.sqlite`, leaving a 737 MB index of private knowledge one `git add -A` from staging; rules now match the shape, with a test over every artefact name.
-- **Recovery:** one foreground rebuild, provider pinned, not hook-driven — **184,241 chunks = 184,241 embeddings = 184,241 FTS rows, 4,421 of 4,421 indexable sources**, one space, 0 mock, 0 wrong-width, `integrity_check` ok, no leftovers. The **+10 chunks / +3 sources** against the old index are three pages written after it was built (6+2+2 chunks); **zero sources removed**.
-- **Retrieval:** Top-1 0.70 → **0.72**, Top-3 0.74 → **0.76**, MRR 0.7297 → **0.7457**, failures 13 → **12**, against the frozen 2026-09-15 baseline. **49/50 queries hold their exact rank; zero regressions.** The single mover is item #47 (rank 5 → 1), attributable to the `CLAUDE.md` rewrite committed in `03445e7` AFTER that baseline was frozen — **no causal retrieval gain is claimed for this recovery**, which restored behaviour rather than improving it. No gold query appears verbatim in any indexed root file.
-- **Verification:** `pytest` **822 passed, 4 skipped, 0 failed**; `data/search.sqlite` byte-identical (`f739ab6c…`) before and after the suite; index integrity **31/31**; `boundary_redteam` **27/27**; `public_repo_guard` passed; `git diff --check` clean. **`check.sh` could not complete and is reported as INVALIDATED, not passed:** twice it aborted at gate 2 when a session in another project wrote a note into the shared wiki through MCP (14:57:12 and 15:03:52). The guard is correct — the corpus moved mid-measurement — and was not weakened; its message now prints the `wiki/log.md` lines appended during the run so the writer is identifiable at a glance. Committed locally; **not pushed**.
-- **Follow-ups:** (1) **Measurement snapshots** — `docs/superpowers/specs/2026-09-17-measurement-snapshot-design.md`; gates must read a hard-linked snapshot of the index rather than assume a shared store holds still, with one open question (whether an attributed external write should still fail the suite) left for Raouf. (2) Gates 3–23 of `check.sh` have not run since these changes. (3) `zurvan index search` from an unpinned shell now REFUSES rather than poisoning — correct, but it is a behaviour change for anyone with a script that calls it.

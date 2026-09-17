@@ -1,0 +1,57 @@
+{
+  "instrument": "boundary_fp_operational_v1",
+  "cleartext_location": "~/.zurvan/instruments/boundary-fp-operational-v1/ (never in git)",
+  "why_not_in_git": "A frozen evaluation corpus is a measuring instrument, and an instrument a system can read is not measuring it. Same rule that moved eval/search_gold.jsonl out of git on 2026-09-16. Digests and headline results only.",
+  "file_digests": {
+    "candidates-manifest.json": "887bdaceec68102b7c82a19fc113ef9929368b62575c429e19cf592cde47ce45",
+    "result.json": "3050c36040cd4a097b6c177ac7565362e0f873ae85c086336d8341e4a89b6aa1"
+  },
+  "purpose": "Does Boundary block ordinary new work? Candidate blobs, not committed files.",
+  "recipe_version": "candidates-v1",
+  "classes": {
+    "modified": 100,
+    "new": 100
+  },
+  "strata": {
+    "config": 15,
+    "markdown": 124,
+    "other-text": 3,
+    "python": 56,
+    "shell": 2
+  },
+  "protected_corpus": {
+    "documents": 300,
+    "acceded_public": 0,
+    "declared": 0
+  },
+  "baseline_sink_blobs": 389,
+  "baseline_refs": [
+    "refs/heads/main",
+    "refs/remotes/origin/main"
+  ],
+  "result": {
+    "blocked": 0,
+    "of": 200,
+    "modified_blocked": 0,
+    "modified_total": 100,
+    "new_blocked": 0,
+    "new_total": 100,
+    "ceiling": 1,
+    "verdict": "PASS",
+    "rescued_by_sink_publicity": [
+      "M079",
+      "M080",
+      "N022",
+      "N063",
+      "N065",
+      "N099"
+    ],
+    "note_on_rescued": "These candidates block WITHOUT the sink baseline and are clean with it. Six is greater than the ceiling of one, so without scan-side sink provenance this gate would have failed."
+  },
+  "stated_bound": "The 'new' half is superseded versions of tracked files \u2014 real candidate blobs a gate sees on a revert or cherry-pick, but largely sink-public and therefore the easier case. A corpus of genuinely novel documents unrelated to both the sink and the protected corpus would be harder and is not available locally.",
+  "rejected_first_attempt": {
+    "result": "33/200",
+    "status": "INVALID BY CONSTRUCTION, not a detector failure",
+    "reason": "The 'new' half was sourced from raw/, the same tree as the protected corpus. The protected corpus held 254 documents from one export family and all 100 candidates were siblings of them, so they genuinely shared content and blocking them was largely CORRECT. That half measured nothing about overreach."
+  }
+}
