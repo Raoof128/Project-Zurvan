@@ -205,7 +205,34 @@ def resolve_source_page_path(source_dir, stem, file_hash):
     return candidate
 
 
-def create_source_page(filepath, file_hash, text):
+def accede_public_origin(text: str, provenance: str) -> None:
+    """Record public material in Boundary's trusted public corpus, NOW.
+
+    The moment of accession is the only moment at which the evidence exists: the
+    file is in front of us, and git either already holds these bytes or it does
+    not. Deferring the decision to a later build means deciding it from
+    "whatever is tracked then", which is the laundering hole Global Constraint 7
+    names — a leak already in the tree would be blessed as a known-public origin
+    forever.
+
+    Boundary is opt-in (spec §7): with no store this is a no-op, and the class
+    recorded in the page's frontmatter is still durable enough for a later build
+    to replay what was decided here.
+    """
+    try:
+        from scripts.boundary_guard import default_root
+        from scripts.boundary import store
+
+        root = default_root()
+        if not (root / store.DB_NAME).is_file():
+            return
+        from scripts import boundary
+        boundary.accede_public(root, text, provenance)
+    except Exception as exc:                      # never fail an ingest over this
+        print(f"Warning: could not accede public origin to Boundary ({exc}).")
+
+
+def create_source_page(filepath, file_hash, text, declared_public_url=None):
     basename = os.path.basename(filepath)
     stem = source_page_stem(filepath)
     source_dir = str(PROJECT_ROOT / "wiki" / "sources")
@@ -216,12 +243,22 @@ def create_source_page(filepath, file_hash, text):
     figures = pdf_figure_inventory(filepath) if filepath.lower().endswith(".pdf") else []
     figure_count = sum(f["images"] for f in figures)
 
+    # Origin class is decided HERE, from the file in front of us, and written
+    # onto the page. Without it a document's class came from the directory it
+    # landed in — everything under `wiki/sources/` was PRIVATE, including this
+    # repository's own README, which is why the false-positive gate could not be
+    # measured at all (spec §8).
+    from scripts.provenance import classify_origin, may_accede
+    origin_class, origin_provenance = classify_origin(filepath, declared_public_url)
+
     content = f"""---
 title: {basename}
 hash: {file_hash}
 figures: {figure_count}
 figures_transcribed: false
 extraction_status: unextracted
+origin_class: {origin_class}
+origin_provenance: {origin_provenance}
 ingested_at: {datetime.datetime.now().isoformat()}
 ---
 
@@ -236,6 +273,18 @@ ingested_at: {datetime.datetime.now().isoformat()}
 """
     with open(out_path, 'w', encoding='utf-8') as f:
         f.write(content)
+
+    # Accede the ORIGINAL bytes, not the page wrapper: D3 exempts a span by
+    # containment inside an approved public document, and the span a scan will
+    # see is the document's own text.
+    #
+    # Only PUBLIC_VERIFIED reaches here. A declared origin — a staged-only file,
+    # a sibling repository's commit, a URL nobody checked — is recorded on the
+    # page and goes no further, because an unverified claim that grants an
+    # exemption IS the laundering primitive.
+    if may_accede(origin_class):
+        accede_public_origin(text, origin_provenance)
+
     return filename
 
 # `create_stub_concept_and_claim` was deleted on 2026-09-14.
@@ -355,6 +404,12 @@ def ingest_image_stub(filepath: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Ingest a raw source document")
     parser.add_argument("filepath", help="Path to the raw source file")
+    parser.add_argument(
+        "--public-url", default=None,
+        help="Declare that this document came from a public URL. Recorded as a "
+             "DECLARED origin (scheme `url-declared`), deliberately distinct "
+             "from the verifiable `git-blob` evidence, because nothing here can "
+             "check it. Mis-declaring one is a laundering vector (spec IOU 2).")
     args = parser.parse_args()
 
     require_ingest_dependencies()
@@ -389,7 +444,8 @@ def main():
     print(f"Ingesting {args.filepath}...")
     try:
         text = extract_text(args.filepath)
-        filename = create_source_page(args.filepath, file_hash, text)
+        filename = create_source_page(args.filepath, file_hash, text,
+                                      declared_public_url=args.public_url)
         append_log(filename)
         update_index(filename)
     except BaseException:

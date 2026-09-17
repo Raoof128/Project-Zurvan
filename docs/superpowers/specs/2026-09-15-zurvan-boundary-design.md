@@ -440,12 +440,65 @@ not passed*, and replaced **prospectively**:
 > ingestion relationship to the protected corpus — i.e. after ingestion records
 > a source class and D3 exempts material acceded as public.
 
-**Open item (blocks the FP gate, design-gated — not implemented here).** Wire
-provenance into ingestion: a page ingested from a tracked repo file or a public
+**Open item — IMPLEMENTED 2026-09-17, see "Provenance at ingestion" below.**
+The FP gate remains NOT YET MEASURED under the v2 criterion: the mechanism
+exists and is validated, but no qualifying post-provenance evaluation corpus
+does. The original text of the item follows.
+
+Wire provenance into ingestion: a page ingested from a tracked repo file or a public
 URL is recorded with a PUBLIC origin class and acceded to D3 at ingest time.
 Seeding D3 from "everything currently tracked" remains forbidden (Global
 Constraint 7) — that is the laundering hole, and this is the opposite: recording
 what was already public *at the moment it entered*, with its provenance.
+
+### Provenance at ingestion — added 2026-09-17
+
+The open item above is implemented. `scripts/provenance.py` decides an origin
+class when a document is acceded, from evidence available at that moment, and
+`ingest.py` writes it onto the source page as `origin_class` / `origin_provenance`.
+
+**Three classes, because "public" is not one thing.**
+
+    PRIVATE  ->  PUBLIC_DECLARED  ->  PUBLIC_VERIFIED
+
+Only `PUBLIC_VERIFIED` is acceded to D3, so only it can exempt a span.
+`PUBLIC_DECLARED` is recorded for audit and never honoured — an unverified claim
+that grants an exemption is itself the laundering primitive.
+
+**`PUBLIC_VERIFIED` = these exact bytes are reachable from an ALLOWLISTED ref in
+the repository this gate protects.** Three weaker predicates were implemented,
+demonstrated to be exploitable, and rejected:
+
+| Predicate | Why it fails | Evidence |
+| --- | --- | --- |
+| `git cat-file -e` (object exists) | `git hash-object -w` satisfies it with no commit, ref or intent | dangling blob reports EXISTS; `log --find-object` finds nothing |
+| `git log --all` (any ref) | `--all` covers `refs/stash`, `refs/original/*`, scratch branches | a stashed file and a temp-branch file were both found |
+| index / "tracked" | `git add` is local, unshared, reversible | staging then unstaging would leave the text exempt forever |
+
+Default allowlist: the canonical branch as git reports it (`origin/HEAD`, else
+`main`/`master`). A repository with neither verifies **nothing** — fail closed.
+`ZURVAN_PROTECTED_REFS` declares release refs where a project has them.
+
+Staged-only, foreign-repository commits and declared URLs all class
+`PUBLIC_DECLARED`. A foreign repository matters: `git init && git add && git
+commit` in a scratch directory is not a publication event, and treating it as
+one would mean anyone who can run git can cross the boundary.
+
+**An accession is historical evidence.** It survives a later reset, rebase or
+branch deletion: the disclosure already happened, re-validating would make a
+routine rebase silently re-block clean content, and revocation belongs in the
+declassification ledger rather than in `git rebase`. Each accession records the
+blob OID and a repository identity (its root-commit OID — a filesystem path
+would name a private project inside a stored page) so an audit can challenge it.
+
+**FP gate status after this change — unchanged, and deliberately so.**
+
+| | |
+| --- | --- |
+| Mechanism | IMPLEMENTED, experimentally validated (round-trip blocks without provenance, clears with it, private material still blocks) |
+| Legacy corpus | INVALID for the v2 criterion — none of the ~4,400 existing pages carries a class, and Global Constraint 7 forbids upgrading them retroactively |
+| Prior 11/200 | remains historically valid for the provenance-blind setup it measured |
+| v2 FP gate | **NOT YET MEASURED** — a qualifying post-provenance evaluation corpus does not exist yet |
 
 ### D1 degenerate content — added 2026-09-16
 
