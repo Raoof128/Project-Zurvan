@@ -59,7 +59,11 @@ def _index_staleness(root: Path | None = None, db_path: Path | None = None) -> s
     if not Path(db_path).exists():
         return "missing — run `zurvan index search`"
     try:
-        conn = sqlite3.connect(str(db_path))
+        # read-only: `sqlite3.connect` CREATES the file when it is missing, and
+        # a reporting function that leaves a 0-byte database at the canonical
+        # index path turns "missing" into "unreadable" for everything that looks
+        # afterwards. Observed on 2026-09-17.
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         newest_indexed = conn.execute("SELECT MAX(indexed_at) FROM chunks").fetchone()[0]
         conn.close()
         indexed_at = datetime.datetime.fromisoformat(newest_indexed)
@@ -211,19 +215,19 @@ def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
     topic-free and cheap: hard rules digest, index/graph health, recent
     activity, open-question count. Designed for a SessionStart hook.
 
-    fix_stale: if the search index is STALE, run the incremental rebuild first
-    (reuses unchanged embeddings); on failure degrade to the STALE warning.
+    fix_stale: **accepted and ignored.** This used to rebuild the index when it
+    was stale, and that is exactly how the index was destroyed on 2026-09-17: a
+    rebuild launched from a SessionStart hook is a child of the session, so it
+    was SIGKILLed when the session exited 43 seconds later and left 2,000 of
+    184,231 chunks behind. A hook reports; a human rebuilds. The parameter stays
+    so an older hook configuration degrades to a no-op instead of an argparse
+    error at session start.
     project: return the lean cross-project recall digest instead of the full
     Zurvan card (for SessionStart hooks in other repos).
     """
     import sqlite3
 
-    if fix_stale and _index_staleness().startswith("STALE"):
-        try:
-            from scripts.rebuild_search_index import rebuild_search_index
-            rebuild_search_index()
-        except Exception:
-            pass  # degrade to the STALE warning below
+    _ = fix_stale  # deliberately inert — see the docstring
 
     if project:
         return project_digest(project)
@@ -244,13 +248,32 @@ def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
     except Exception:
         lines.append("Graph: unavailable — run `zurvan graph rebuild`.")
 
+    staleness = _index_staleness()
     try:
-        conn = sqlite3.connect(str(ROOT / "data" / "search.sqlite"))
+        conn = sqlite3.connect(f"file:{ROOT / 'data' / 'search.sqlite'}?mode=ro", uri=True)
         chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         conn.close()
-        lines.append(f"Search index: {chunk_count} chunks — {_index_staleness()}.")
+        lines.append(f"Search index: {chunk_count} chunks — {staleness}.")
     except Exception:
-        lines.append("Search index: unavailable — run `zurvan index search`.")
+        # The verdict is still reported: an index that cannot be opened is the
+        # single most important thing on this card, and the previous version
+        # dropped the staleness line entirely when the count query failed.
+        lines.append(f"Search index: unreadable — {staleness}.")
+
+    # Freshness is not health. A poisoned index (deterministic-hash vectors) and
+    # a truncated one (2,000 of 184,231 chunks) both report "fresh" and both
+    # answer queries exactly like a complete index. Say so on the card, because
+    # the alternative is an agent trusting a number that means nothing.
+    try:
+        from scripts.index_health import check_index_health
+        health = check_index_health(ROOT / "data" / "search.sqlite")
+        if not health.ok:
+            lines.append(
+                "⚠ Index health: UNHEALTHY — " + "; ".join(health.problems)
+                + ". Rebuild with `zurvan index search` before trusting a result."
+            )
+    except Exception:
+        lines.append("⚠ Index health: could not be determined.")
 
     from scripts.question_routing import count_questions
     question_count = count_questions()

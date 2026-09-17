@@ -9,13 +9,19 @@ from scripts.context_export import search_memory, export_context
 from scripts.config import PROJECT_ROOT
 
 
-def _run_script(script_name: str, extra_args: list[str] | None = None) -> None:
+def _run_script(script_name: str, extra_args: list[str] | None = None,
+                env: dict[str, str] | None = None) -> None:
     """Run a helper script with the current interpreter from the repo root and
     propagate its exit code. Previously these used a bare `python` and
     CWD-relative paths (broken from any other directory) and always exited 0
     even when the child failed (e.g. `zurvan eval search --min-top3`)."""
     cmd = [sys.executable, str(PROJECT_ROOT / "scripts" / script_name)] + (extra_args or [])
-    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+    # `env` is passed ONLY when a caller supplied one. Every other subcommand
+    # keeps the exact call it had, which matters because the CLI smoke stubs
+    # `subprocess.run` with a fixed signature — an unconditional `env=None`
+    # broke it, and a keyword argument is not worth a test edit.
+    extra = {"env": {**os.environ, **env}} if env else {}
+    result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), **extra)
     if result.returncode != 0:
         sys.exit(result.returncode)
 
@@ -381,6 +387,13 @@ def main():
     index_sub = index_parser.add_subparsers(dest="action")
     index_sub.add_parser("rebuild")
     index_sub.add_parser("search")
+    index_health_p = index_sub.add_parser(
+        "health", help="Is the search index complete, consistent and real?")
+    index_health_p.add_argument("--min-sources", type=int, default=0)
+    index_health_p.add_argument("--min-chunks", type=int, default=1)
+    index_health_p.add_argument("--deep", action="store_true",
+                                help="also verify every vector's byte width")
+    index_health_p.add_argument("--json", action="store_true", dest="as_json")
     
     # zurvan eval
     eval_parser = subparsers.add_parser("eval", help="Evaluation commands")
@@ -452,7 +465,9 @@ def main():
         help="Lean cross-project recall digest for this project name (~150 tokens)")
     agent_prime_p.add_argument(
         "--fix-stale", action="store_true",
-        help="Incrementally rebuild the search index first when it is stale")
+        help="DEPRECATED, ignored: a session-start hook reports staleness and "
+             "never repairs it (a hook-launched rebuild is killed with the "
+             "session). Run `zurvan index search` yourself.")
 
     agent_post = agent_sub.add_parser("postedit", help="Agent post-edit log")
     agent_post.add_argument("--summary", required=True)
@@ -924,7 +939,30 @@ def main():
     elif args.command == "index" and args.action == "rebuild":
         _run_script("rebuild_index.py")
     elif args.command == "index" and args.action == "search":
-        _run_script("rebuild_search_index.py")
+        # `zurvan index search` is a PRODUCTION entry point, so it pins the
+        # production embedding space rather than inheriting whatever shell it
+        # was typed into. Without this the command fails outright from a plain
+        # terminal (the rebuild refuses a mock canonical build) — correct, but
+        # the fix belongs here: "pin the provider anywhere a rebuild can start"
+        # (wiki/decisions/anything-that-can-start-a-zurvan-index-rebuild-mus).
+        # An explicitly set variable still wins, and a mock one still gets
+        # refused, which is the point.
+        from scripts.index_health import CANONICAL_MODEL, CANONICAL_PROVIDER
+        _run_script("rebuild_search_index.py", env={
+            "ZURVAN_EMBED_PROVIDER": os.environ.get(
+                "ZURVAN_EMBED_PROVIDER", CANONICAL_PROVIDER),
+            "ZURVAN_EMBED_MODEL": os.environ.get(
+                "ZURVAN_EMBED_MODEL", CANONICAL_MODEL),
+        })
+    elif args.command == "index" and args.action == "health":
+        from scripts.index_health import main as index_health_main
+        argv = ["--min-sources", str(args.min_sources),
+                "--min-chunks", str(args.min_chunks)]
+        if args.deep:
+            argv.append("--deep")
+        if getattr(args, "as_json", False):
+            argv.append("--json")
+        sys.exit(index_health_main(argv))
     elif args.command == "eval" and args.action == "search":
         _run_script("eval_search.py", [
             "--gold", _resolved_gold(args.gold),

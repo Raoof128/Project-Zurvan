@@ -31,6 +31,11 @@ export ZURVAN_CONFIG_DIR="$TMP_CONFIG"
 export ZURVAN_LLM_PROVIDER=mock
 export ZURVAN_LLM_MODEL=mock
 export ZURVAN_EMBED_PROVIDER=mock
+# This run happens inside a throwaway worktree, so `<worktree>/data/search.sqlite`
+# is that checkout's canonical path — and a canonical rebuild under the mock
+# provider is refused since 2026-09-17. Naming the index explicitly is how a
+# caller declares "this index is disposable", which is exactly true here.
+export ZURVAN_SEARCH_DB="$TMP_REPO/data/search.sqlite"
 export ZURVAN_MCP_READONLY=1
 export ZURVAN_MCP_TRANSPORT=stdio
 export ZURVAN_MCP_ALLOW_RAW_READ=0

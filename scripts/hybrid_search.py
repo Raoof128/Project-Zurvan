@@ -41,7 +41,8 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
         )
         return []
 
-    conn = sqlite3.connect(db_path)
+    # read-only: the query path must never create or modify the index
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     from scripts import vec_storage
     vec_storage.load_extension(conn)
     cursor = conn.cursor()

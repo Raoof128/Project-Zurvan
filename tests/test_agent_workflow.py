@@ -177,21 +177,23 @@ def test_agent_prime_project_routes_to_digest(tmp_path, monkeypatch):
     assert "# Zurvan prime" not in out  # digest replaces the full card
 
 
-def test_agent_prime_fix_stale_triggers_incremental_reindex(monkeypatch):
+def test_agent_prime_fix_stale_no_longer_triggers_a_reindex(monkeypatch):
+    """Inverted on 2026-09-17, deliberately.
+
+    This test used to assert `rb.assert_called_once()` — a rebuild launched
+    from the session-start hook. That rebuild is a child of the session, so
+    when the session exited 43 seconds in, SIGKILL left the canonical index
+    holding 2,000 of 184,231 chunks: structurally valid, 96% missing, and
+    answering queries exactly like a complete index. A hook reports; a human
+    rebuilds. The flag stays accepted so an older configuration degrades to a
+    no-op rather than failing at session start.
+    """
     monkeypatch.setattr("scripts.agent_workflow._index_staleness",
                         lambda *a, **k: "STALE — 3 file(s) newer than the index; run `zurvan index search`")
     with _patch("scripts.rebuild_search_index.rebuild_search_index") as rb:
-        agent_prime(fix_stale=True)
-    rb.assert_called_once()
-
-
-def test_agent_prime_fix_stale_survives_reindex_failure(monkeypatch):
-    monkeypatch.setattr("scripts.agent_workflow._index_staleness",
-                        lambda *a, **k: "STALE — 1 file(s) newer than the index; run `zurvan index search`")
-    with _patch("scripts.rebuild_search_index.rebuild_search_index",
-                side_effect=RuntimeError("boom")):
-        out = agent_prime(fix_stale=True)   # must not raise
-    assert "STALE" in out                    # degrades to the existing warning
+        out = agent_prime(fix_stale=True)
+    rb.assert_not_called()
+    assert "STALE" in out, "staleness must still be REPORTED"
 
 
 def test_agent_prime_fix_stale_skips_when_fresh(monkeypatch):

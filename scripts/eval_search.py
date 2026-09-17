@@ -208,7 +208,7 @@ def _index_uses_mock_embeddings() -> bool:
     from scripts.config import get_search_db_path
 
     try:
-        conn = sqlite3.connect(str(get_search_db_path()))
+        conn = sqlite3.connect(f"file:{get_search_db_path()}?mode=ro", uri=True)
         row = conn.execute("SELECT provider FROM embeddings LIMIT 1").fetchone()
         conn.close()
         return bool(row) and row[0] == "mock"

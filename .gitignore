@@ -107,5 +107,17 @@ eval/search_gold.jsonl
 sources/
 
 # Derived SQLite state and rebuild leftovers.
+#
+# `data/*.sqlite` (line 22) only matches names ENDING in .sqlite, and only at
+# the top level of data/. Every rebuild artefact is named around that suffix
+# rather than with it, so each one needs its own rule — and each one is a full
+# copy of the private corpus. Renaming the scheme on 2026-09-17 (`.prev` became
+# `.building-<pid>`) briefly left a 737 MB index of private knowledge one
+# `git add -A` from being staged. Match the SHAPE, not the current spelling.
 data/*.sqlite-journal
 data/*.sqlite.prev
+data/*.sqlite.building-*
+data/*.sqlite.*
+data/**/*.sqlite
+data/**/*.sqlite-*
+data/quarantine/

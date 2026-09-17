@@ -19,8 +19,14 @@ if pgrep -f "cli.py index search" > /dev/null 2>&1 || pgrep -f "rebuild_search_i
   exit 1
 fi
 if [ -f data/search.sqlite-journal ]; then
-  echo "❌ Stale SQLite journal at data/search.sqlite-journal — a previous rebuild"
-  echo "   was interrupted. Inspect the index before running the gate."
+  # Since 2026-09-17 a rebuild writes to `data/search.sqlite.building-<pid>` and
+  # swaps it in with one os.replace(), so an interrupted rebuild leaves NOTHING
+  # at the canonical path and its own leftovers are swept by the next run. A
+  # journal beside the canonical index therefore no longer means "interrupted
+  # rebuild" — it means something wrote the production index directly, which
+  # nothing in this repository is supposed to do.
+  echo "❌ SQLite journal at data/search.sqlite-journal — something is writing the"
+  echo "   canonical index outside rebuild_search_index. Inspect before gating."
   exit 1
 fi
 
@@ -77,8 +83,27 @@ echo "✅ Audit completed."
 echo ""
 
 echo "[5/23] Rebuilding Search Index..."
-PYTHONPATH=. python scripts/rebuild_search_index.py
-echo "✅ Search index rebuilt."
+# This gate rebuilds the PRODUCTION index, so the embedding space is pinned
+# here rather than inherited. Gate 3 above exports a mock LLM provider, and
+# check.sh is routinely run from a plain shell where ZURVAN_EMBED_PROVIDER is
+# unset — under which `get_embedding` returns deterministic hashes and reports
+# success. That is how 184,231 real vectors became hashes on 2026-09-16, with
+# every count-based check still passing. rebuild_search_index refuses a mock
+# canonical build as well; this line means it never has to.
+PYTHONPATH=. \
+ZURVAN_EMBED_PROVIDER=sentence_transformers \
+ZURVAN_EMBED_MODEL=all-MiniLM-L6-v2 \
+python scripts/rebuild_search_index.py
+
+# A rebuild is not finished until the result has been read. Counts alone passed
+# on an index whose every vector was a hash, and on one holding 2,000 of
+# 184,231 chunks; this asserts the embedding space, the chunk/FTS/embedding
+# agreement and each vector's byte width.
+if ! PYTHONPATH=. python scripts/index_health.py --deep; then
+    echo "❌ Search index is not healthy — every retrieval number below it would be meaningless."
+    exit 1
+fi
+echo "✅ Search index rebuilt and verified healthy."
 echo ""
 
 echo "[6/23] Evaluating Retrieval Harness..."
