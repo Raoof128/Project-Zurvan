@@ -1,0 +1,44 @@
+{
+  "instrument": "boundary-fp-v2",
+  "purpose": "Frozen evaluation set for the Boundary v2 false-positive criterion.",
+  "cleartext_location": "~/.zurvan/instruments/boundary-fp-v2/ (never in git)",
+  "why_not_in_git": "The scan corpus is a measuring instrument. Tracked instruments get quoted, and a system that can read its own exam is not being measured \u2014 the same reason eval/search_gold.jsonl left git on 2026-09-16. Only the digest and the headline result live here, deliberately with no per-artefact digest.",
+  "scan_manifest_sha256": "8fb7921dc62bc47204478feba10d9322b981c2a5eb7fe8ee15e835ae8a8df78c",
+  "artefacts": 200,
+  "selection_seed": 20260917,
+  "selection_method": "proportional stratified sample, largest-remainder quota, sorted candidates, random.Random(seed).sample",
+  "strata": {
+    "config": 9,
+    "markdown": 55,
+    "other-text": 9,
+    "python": 125,
+    "shell": 2
+  },
+  "seed_corpus": {
+    "protected": 300,
+    "acceded_public": 10,
+    "declared_not_acceded": 0
+  },
+  "criterion": "<= 1 blocked artefact per 200",
+  "result": {
+    "measured_blocked": 4,
+    "measured_of": 200,
+    "independent_blocked": 3,
+    "independent_of": 199,
+    "total_anchor_matches": 7,
+    "verdict": "FAIL",
+    "non_independent": {
+      "scripts/e2e_smoke.sh": {
+        "protected_bytes": 391,
+        "artefact_bytes": 4247,
+        "relationship": "the protected document is contained verbatim in the scanned artefact"
+      }
+    },
+    "reproduced": "identical from a fresh store, 2026-09-17"
+  },
+  "pilot_run_kept_for_the_record": {
+    "protected_documents": 40,
+    "result": "1/200 PASS",
+    "status": "UNDERPOWERED \u2014 not a valid measurement. The same frozen 200 artefacts give 4/200 against a 300-document protected corpus. Recorded rather than erased: it is the reason the protected corpus scale is now part of the criterion's statement."
+  }
+}
