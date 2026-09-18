@@ -648,3 +648,108 @@ def resolve_implicit(caller, actor, root=None) -> int:
     finally:
         conn.close()
     return count
+
+
+def _set_revision(conn, new_revision, atomicity, digest) -> None:
+    conn.execute(
+        "UPDATE knowledge_state SET current_revision = ?, atomicity = ?,"
+        " manifest_digest = ? WHERE id = 1",
+        (new_revision, atomicity, digest))
+
+
+def bootstrap(root=None, actor="bootstrap") -> int:
+    """Record the stable authoritative manifest of an existing store.
+
+    A fresh ledger has no digest, so it can neither agree nor disagree with the
+    filesystem. Treating that as "nothing to contradict" was safe for a
+    diagnostic and is not safe for a correctness mechanism: it makes the first
+    drift check silently vacuous. Bootstrapping is deliberate, and the revision
+    it produces is honestly labelled EXTERNAL_OBSERVED, because Zurvan did not
+    witness the operations that produced those bytes.
+    """
+    from scripts.knowledge_manifest import authoritative_manifest
+    base = ks.store_root(root)
+    ensure_schema(base)
+    first = authoritative_manifest(base)
+    second = authoritative_manifest(base)
+    if first != second:
+        raise LedgerError(
+            "the store is changing while being bootstrapped; retry when quiet")
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if conn.execute("SELECT COUNT(*) FROM mutations WHERE state = ?",
+                            (ACTIVE,)).fetchone()[0]:
+                raise LedgerError("a mutation is in flight; bootstrap when quiet")
+            rev = conn.execute(
+                "SELECT current_revision FROM knowledge_state WHERE id = 1"
+            ).fetchone()[0]
+            new_revision = rev + 1
+            _set_revision(conn, new_revision, EXTERNAL_OBSERVED, first)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return new_revision
+
+
+def observe_external_drift(root=None):
+    """Detect a completed unmanaged edit and record it, in one operation.
+
+    Two different questions, both required:
+
+        M_before == M_after                  these bytes were STABLE
+        live == revision.manifest_digest     Zurvan KNEW about them
+
+    A finished Obsidian edit passes stability perfectly and fails the second.
+    Detection and minting are one call because splitting them leaves a window
+    in which the filesystem can move between what was observed and what is
+    recorded.
+
+    Returns the new revision, or `None` when Zurvan's view is already current.
+    Refuses on an unbootstrapped store, a SUSPECT store, or an in-flight
+    mutation — minting underneath a running operation would attribute its
+    half-written files to an external observation.
+    """
+    from scripts.knowledge_manifest import authoritative_manifest
+    base = ks.store_root(root)
+    state = current(base)
+    if not state.manifest_digest:
+        raise LedgerError(
+            "no manifest recorded for this store; run `zurvan knowledge "
+            "bootstrap` once so drift has a baseline to contradict")
+    if state.state != CLEAN:
+        raise LedgerError(
+            f"store is {state.state}; reconcile before observing drift")
+
+    first = authoritative_manifest(base)
+    if first == state.manifest_digest:
+        return None
+    second = authoritative_manifest(base)
+    if first != second:
+        raise LedgerError("the store is still changing; retry when quiet")
+
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if conn.execute("SELECT COUNT(*) FROM mutations WHERE state = ?",
+                            (ACTIVE,)).fetchone()[0]:
+                raise LedgerError("a mutation is in flight; not external drift")
+            rev, recorded, st = conn.execute(
+                "SELECT current_revision, manifest_digest, state"
+                " FROM knowledge_state WHERE id = 1").fetchone()
+            if st != CLEAN or recorded != state.manifest_digest:
+                raise LedgerError("the ledger moved during observation; retry")
+            new_revision = rev + 1
+            _set_revision(conn, new_revision, EXTERNAL_OBSERVED, second)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return new_revision

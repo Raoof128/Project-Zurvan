@@ -412,3 +412,112 @@ def test_the_caller_summary_is_a_query_not_an_audit(root):
     summary = kr.implicit_callers(root)
     assert sum(summary.values()) == 2
     assert all(":" in k for k in summary)
+
+
+def test_committing_records_the_manifest_the_revision_represents(root):
+    from scripts import knowledge_manifest as km
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+    assert kr.current(root).manifest_digest == km.authoritative_manifest(root)
+
+
+def test_an_existing_store_must_be_bootstrapped_before_drift_means_anything(root):
+    """A fresh ledger records no digest, so there is nothing to compare
+    against. Answering `None` and feeding it to an UPDATE against a NOT NULL
+    column was measured as an IntegrityError."""
+    page(root, "a.md").write_text("alpha\n")
+    with pytest.raises(kr.LedgerError):
+        kr.observe_external_drift(root)
+
+
+def test_bootstrap_records_the_stable_manifest_as_external_observed(root):
+    from scripts import knowledge_manifest as km
+    page(root, "a.md").write_text("alpha\n")
+
+    new = kr.bootstrap(root, actor="local:raouf")
+
+    rev = kr.current(root)
+    assert new == 1
+    assert rev.state == kr.CLEAN
+    assert rev.atomicity == kr.EXTERNAL_OBSERVED
+    assert rev.manifest_digest == km.authoritative_manifest(root)
+
+
+def test_no_drift_is_reported_for_a_store_only_zurvan_touched(root):
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+    assert kr.observe_external_drift(root) is None
+
+
+def test_a_completed_edit_outside_zurvan_mints_an_external_observed_revision(root):
+    """The hole the double manifest cannot see: the edit finished long before
+    anyone looked, so before/after stability holds perfectly. Ordinary manual
+    editing is a supported workflow, so this is CLEAN with a weaker atomicity
+    claim, not a broken store."""
+    from scripts import knowledge_manifest as km
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+    before = kr.current(root).revision
+
+    page(root, "a.md").write_text("edited in Obsidian\n")     # never told Zurvan
+    new = kr.observe_external_drift(root)
+
+    rev = kr.current(root)
+    assert new == before + 1
+    assert rev.state == kr.CLEAN
+    assert rev.atomicity == kr.EXTERNAL_OBSERVED
+    assert rev.manifest_digest == km.authoritative_manifest(root)
+    assert kr.observe_external_drift(root) is None
+
+
+def test_a_managed_operation_after_drift_restores_managed_atomicity(root):
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+    page(root, "a.md").write_text("edited\n")
+    kr.observe_external_drift(root)
+    assert kr.current(root).atomicity == kr.EXTERNAL_OBSERVED
+
+    with kr.operation(writer="cli", root=root):
+        _write(root, "b.md")
+
+    assert kr.current(root).atomicity == kr.MANAGED
+
+
+def test_external_observed_claims_stability_not_a_transaction(root):
+    """It asserts these bytes formed one stable observed filesystem state. It
+    does NOT assert one logical user transaction, and no consumer may read it
+    as MANAGED."""
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+    page(root, "a.md").write_text("edited\n")
+    kr.observe_external_drift(root)
+    assert kr.current(root).atomicity != kr.MANAGED
+
+
+def test_drift_is_refused_while_an_operation_is_in_flight(root):
+    """Minting a revision underneath a running mutation would attribute that
+    mutation's half-written files to an external observation.
+
+    The first operation is not scene-setting. Without it the store has no
+    recorded digest, `observe_external_drift` raises the BOOTSTRAP error first,
+    and this test passes while exercising nothing it claims to.
+    """
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")                       # commits; digest recorded
+    with kr.operation(writer="cli", root=root):
+        _write(root, "b.md")                       # now in flight
+        with pytest.raises(kr.LedgerError, match="in flight"):
+            kr.observe_external_drift(root)
+
+
+def test_drift_is_refused_while_the_store_is_suspect(root):
+    """Same trap: bootstrap first, or the bootstrap error answers instead."""
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")                       # commits; digest recorded
+    with pytest.raises(RuntimeError):
+        with kr.operation(writer="cli", root=root):
+            _write(root, "b.md")
+            raise RuntimeError("torn")
+    assert kr.current(root).state == kr.SUSPECT
+    with pytest.raises(kr.LedgerError, match="SUSPECT"):
+        kr.observe_external_drift(root)
