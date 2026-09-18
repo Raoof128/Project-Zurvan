@@ -348,7 +348,7 @@ benefit.
 | `wiki/` (135 MB, 4,430 files) | clonefile, else copy | COW clone gets its own inode | 0.55–0.59 s, **0 blocks** |
 | `data/search.sqlite` (738 MB) | hardlink | published inode never modified in place | 0.26 ms, 0 blocks |
 | `data/graph.sqlite` (13 MB) | clonefile, else copy | see §4.4 | < 10 ms, 0 blocks |
-| manifest (stat walk) | — | — | 15–17 ms warm, 116 ms cold |
+| authoritative manifest (`os.walk`) | — | — | 31 ms over 4,405 files |
 
 Bound: measured on one APFS volume on one machine. `cp -c` fails across volumes
 and does not exist off APFS, which is why the fallback is a first-class path.
@@ -440,7 +440,7 @@ addressed the first.
 
 An edit landing *while* capture walks the tree yields bytes from different
 moments. Detection: compute the manifest before and after the capture; any
-difference discards the capture and retries. Cost 15–17 ms warm.
+difference discards the capture and retries. Cost 31 ms (§4.1).
 
 `_corpus_manifest_sha` (`scripts/measurement_snapshot.py:95`) computes
 `(relpath, size, mtime_ns)` — **it does not compute an inode field**; rev 1 said
@@ -449,8 +449,10 @@ it did. Z0 promotes this function from diagnostic to correctness mechanism
 the measured cost is unchanged.
 
 The authoritative manifest covers `wiki/` **excluding derived subtrees**
-(§4.1). Measured on the live store: 19/19/18 ms over 4,405 files excluding
-traces, against 26/20/19 ms over all 4,430.
+(§4.1). Measured end-to-end on the live store: **31/31/30 ms** over 4,405
+files using `os.walk` with a structural prune. The implementation matters more
+than the mechanism here — `Path.rglob` with a `resolve()` per file costs 238 ms
+to list and 226 ms to hash, 15× worse, and this runs on every writing command.
 
 ### 5.2 The completed edit — revision/manifest binding
 

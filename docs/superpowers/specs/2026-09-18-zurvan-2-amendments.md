@@ -41,7 +41,10 @@ Two properties of the shipped piece *are* correct and are carried forward:
   there as diagnostic. Z0 promotes it to a correctness mechanism **and extends
   it with `st_ino`**, which the same `stat` call already returns, so the
   measured cost is unchanged. The extension is new behaviour, not existing
-  behaviour.
+  behaviour. **Corrected 2026-09-18 (rev 3 gauntlet):** the 15–17 ms figure was
+  an `os.walk` measurement; an implementation using `Path.rglob` with a
+  `resolve()` per file costs 464 ms, 15× worse. The mechanism is only as cheap
+  as the walk that feeds it, so the implementation is specified, not left open.
 
 ---
 
@@ -71,7 +74,7 @@ Measured 2026-09-18 on the live store, `/dev/disk3s5` (APFS):
 | `cp -c -R wiki` — 135 MB, 4,425 files | 0.59 / 0.56 / 0.55 s | **0** |
 | `cp -c data/graph.sqlite` — 13 MB | 0.00 s | **0** |
 | `os.link data/search.sqlite` — 738 MB (existing) | 0.26 ms | **0** |
-| stat-walk manifest over 4,425 wiki files | 15–17 ms warm, 116 ms cold | — |
+| authoritative manifest, `os.walk` over 4,405 wiki files | 31/31/30 ms | — |
 
 `du` reports 417 MB for three wiki clones; `df` free space **rose 5.5 MB**
 across the test. Clones carry distinct inodes with `nlink` 1, so an in-place
