@@ -1063,12 +1063,21 @@ def _main():
     elif args.command == "knowledge":
         from scripts import knowledge_reconcile as krec
         from scripts import knowledge_revision as kr
-        if args.action == "status":
+        # Every read command here needs a ledger, and a store that has never
+        # taken a write does not have one. That is a legitimate state, not an
+        # error to traceback on — `status` caught it and `doctor` did not,
+        # which only a run against the real store revealed. `callers` is in
+        # this list for a different reason: without it, an empty inventory on a
+        # store with no ledger prints "No unresolved implicit callers", which
+        # reads as "migration complete" when the truth is "nothing recorded".
+        if args.action in ("status", "doctor", "reconcile", "callers"):
             try:
-                rev = kr.current()
+                kr.current()
             except kr.LedgerError as exc:
                 print(f"no ledger yet: {exc}")
                 return
+        if args.action == "status":
+            rev = kr.current()
             print(f"revision:   {rev.revision}")
             print(f"state:      {rev.state}")
             print(f"atomicity:  {rev.atomicity}")

@@ -730,3 +730,53 @@ def test_a_read_does_not_create_the_ledger(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert "knowledge_state" not in names
+
+
+@pytest.fixture
+def store_with_other_tables(tmp_path, monkeypatch):
+    """A registry that exists and holds unrelated tables, but no ledger.
+
+    The production store's third state, which no other fixture reaches: it has
+    `sources` from ingestion and has never taken a write through the ledger.
+    `_connect_ro` succeeds there and the query is what fails.
+    """
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir()
+    (tmp_path / "wiki").mkdir()
+    conn = sqlite3.connect(kr.db_path(tmp_path))
+    try:
+        conn.execute("CREATE TABLE sources (id INTEGER PRIMARY KEY)")
+        conn.commit()
+    finally:
+        conn.close()
+    return tmp_path
+
+
+def test_listing_mutations_on_a_store_with_no_ledger_returns_nothing(
+        store_with_other_tables):
+    root = store_with_other_tables
+    assert kr.mutations_in(kr.ACTIVE, root) == []
+    assert kr.implicit_mutations(root) == []
+    assert kr.implicit_callers(root) == {}
+
+
+def test_orphan_detection_on_a_store_with_no_ledger_is_a_no_op(
+        store_with_other_tables):
+    assert kr.detect_orphans(store_with_other_tables) == []
+
+
+def test_the_fingerprint_of_a_store_with_no_ledger_is_stable(
+        store_with_other_tables):
+    root = store_with_other_tables
+    assert kr.ledger_fingerprint(root) == kr.ledger_fingerprint(root)
+
+
+@pytest.mark.parametrize("action", ["status", "doctor", "callers"])
+def test_knowledge_read_commands_report_a_missing_ledger_rather_than_crash(
+        store_with_other_tables, action):
+    """The production store's shape: a registry holding `sources` and no
+    ledger. Every read command must say so; `status` caught it and `doctor`
+    did not, which only a run against the real store revealed."""
+    result = _cli(store_with_other_tables, "knowledge", action)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr

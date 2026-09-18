@@ -352,15 +352,25 @@ def _transition(conn, mutation_id, want, new, **fields) -> None:
 
 
 def mutations_in(state, root=None) -> list:
-    """Reader. A store with no ledger has no mutations, which is true."""
+    """Reader. A store with no ledger has no mutations, which is true.
+
+    "No ledger" has THREE shapes, and only two are reachable from a fixture:
+    no registry file at all, a registry with the full schema, and — the
+    production store's actual state — a registry that exists holding `sources`
+    from ingestion and has never taken a write through the ledger. In the third
+    the connection opens fine and the QUERY is what fails.
+    """
     try:
         conn = _connect_ro(root)
     except LedgerError:
         return []
     try:
-        rows = conn.execute(
-            f"SELECT {_MUTATION_COLS} FROM mutations WHERE state = ?"
-            " ORDER BY started_at", (state,)).fetchall()
+        try:
+            rows = conn.execute(
+                f"SELECT {_MUTATION_COLS} FROM mutations WHERE state = ?"
+                " ORDER BY started_at", (state,)).fetchall()
+        except sqlite3.OperationalError:
+            return []
     finally:
         conn.close()
     return [_row_to_mutation(r) for r in rows]
@@ -649,9 +659,12 @@ def implicit_mutations(root=None, unresolved_only=True) -> list:
     except LedgerError:
         return []
     try:
-        rows = conn.execute(
-            f"SELECT {_MUTATION_COLS} FROM mutations"
-            f" WHERE implicit = 1{clause} ORDER BY started_at").fetchall()
+        try:
+            rows = conn.execute(
+                f"SELECT {_MUTATION_COLS} FROM mutations"
+                f" WHERE implicit = 1{clause} ORDER BY started_at").fetchall()
+        except sqlite3.OperationalError:
+            return []          # a registry with no ledger tables; see above
     finally:
         conn.close()
     return [_row_to_mutation(r) for r in rows]
