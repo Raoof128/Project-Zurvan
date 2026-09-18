@@ -16,6 +16,7 @@ A test that legitimately exercises live-state mutation should redirect the store
 with `ZURVAN_ROOT` rather than being exempted here.
 """
 import os
+import sqlite3
 import sys
 import uuid
 from pathlib import Path
@@ -46,6 +47,29 @@ _WATCHED = {
 }
 
 
+def _ledger_fingerprint() -> str:
+    """Everything the knowledge ledger asserts, as one digest.
+
+    `data/` was outside this guard's field of view, and the revision ledger
+    lives there. A module that resolves its root through the import-bound
+    `scripts.config.PROJECT_ROOT` — which `monkeypatch.setenv("ZURVAN_ROOT")`
+    does NOT move — writes here while the page under test goes to the redirect,
+    and every watched count stays put.
+
+    A revision counter alone is not enough: CLEAN -> SUSPECT, an atomicity
+    change, a mutation reaching ORPHANED and a reconciliation record all leave
+    it untouched. The guard needs no semantics, only a way to notice movement.
+
+    Defensive: a guard that raises on its own bookkeeping is worse than no
+    guard, so any failure reads as "unavailable" and simply never moves.
+    """
+    try:
+        from scripts.knowledge_revision import ledger_fingerprint
+        return ledger_fingerprint(LIVE_ROOT)
+    except Exception:
+        return "unavailable"
+
+
 def _snapshot() -> dict:
     counts = {}
     for label, (rel, glob) in _WATCHED.items():
@@ -56,6 +80,7 @@ def _snapshot() -> dict:
         len(log.read_text(encoding="utf-8", errors="replace").splitlines())
         if log.is_file() else 0
     )
+    counts["knowledge ledger"] = _ledger_fingerprint()
     return counts
 
 
@@ -168,14 +193,19 @@ def live_store_is_not_a_test_fixture(pytestconfig):
                 pytestconfig,
                 "[live store] changed during the suite, and every write was "
                 "EXTERNAL — another Zurvan client, not this run:\n"
-                + "\n".join(f"  {k}: {b} -> {a} ({a - b:+d})"
-                             for k, (b, a) in sorted(moved.items()))
+                + "\n".join(
+                    f"  {k}: {b} -> {a}"
+                    + (f" ({a - b:+d})" if isinstance(a, int) and isinstance(b, int)
+                       else "")
+                    for k, (b, a) in sorted(moved.items()))
                 + "\n" + writelog.describe(records)
                 + "\n  Not a failure: retrieval is measured against a frozen "
                   "snapshot (scripts/measurement_snapshot.py), so this changed nothing.")
             return
         detail = "\n".join(
-            f"  {k}: {b} -> {a} ({a - b:+d})" for k, (b, a) in sorted(moved.items())
+            f"  {k}: {b} -> {a}"
+            + (f" ({a - b:+d})" if isinstance(a, int) and isinstance(b, int) else "")
+            for k, (b, a) in sorted(moved.items())
         )
         raise AssertionError(
             "The LIVE knowledge base changed while the suite ran. It is the "

@@ -129,3 +129,61 @@ def test_the_guard_still_short_circuits_for_a_fully_redirected_run(tmp_path):
          "tests/test_case.py"],
         cwd=tmp_path, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.output[-2000:]
+
+
+def test_the_nested_store_is_never_the_real_repository(tmp_path):
+    """Precondition for the test below. The copied conftest's LIVE_ROOT is
+    `Path(__file__).resolve().parents[1]`, which resolves to the temp
+    directory — so the nested run's "production" IS the fixture. Asserted
+    rather than inferred, because the next test deliberately mutates what that
+    run considers production."""
+    assert tmp_path.resolve() != REPO.resolve()
+
+
+def test_a_test_that_mutates_the_nested_ledger_fails_the_session(tmp_path):
+    """The guard watched `wiki/` and nothing under `data/`.
+
+    A module resolving its root through the import-bound `config.PROJECT_ROOT`
+    writes the ledger into the real store while the page under test lands in
+    the redirect — silently, because no watched count moved. This is that wire.
+    """
+    result = _nested(tmp_path, """
+import sqlite3
+from pathlib import Path
+
+def test_bumps_the_nested_ledger():
+    root = Path(__file__).resolve().parents[1]
+    db = root / "data" / "registry.sqlite"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS knowledge_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " current_revision INTEGER NOT NULL, state TEXT NOT NULL,"
+        " atomicity TEXT NOT NULL, manifest_digest TEXT NOT NULL);"
+        "INSERT OR REPLACE INTO knowledge_state"
+        " VALUES (1, 99, 'CLEAN', 'MANAGED', '');")
+    conn.commit()
+    conn.close()
+""")
+    assert result.returncode != 0
+    assert "knowledge ledger" in result.output
+
+
+def test_the_fingerprint_is_part_of_the_snapshot(tmp_path):
+    """`CLEAN -> SUSPECT` moves neither a revision counter nor a row count, so
+    the guard must watch a fingerprint rather than either. Asserted directly on
+    the helper, because a nested run compares a store against itself and a
+    change made before the run starts is not a change DURING it."""
+    # Loaded BY PATH, never as `import tests.conftest`: measured, that resolves
+    # to /opt/anaconda3/.../site-packages/tests/conftest.py — an unrelated
+    # package that happens to own the name. A test asserting against a
+    # stranger's file passes or fails for reasons that have nothing to do with
+    # this repository.
+    import importlib.util
+    path = REPO / "tests" / "conftest.py"
+    spec = importlib.util.spec_from_file_location("_conftest_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.__file__ == str(path)
+    assert "knowledge ledger" in module._snapshot()
