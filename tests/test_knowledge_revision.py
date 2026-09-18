@@ -124,3 +124,29 @@ def test_own_identity_is_cached_per_pid_not_globally(root, monkeypatch):
     monkeypatch.setattr(kr, "process_identity", lambda pid: f"{pid}:pretend")
     assert kr.own_identity() == "4242:pretend"
     assert kr.own_identity() != mine
+
+
+def test_a_transition_from_the_wrong_state_is_refused(root):
+    conn = kr._connect(root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "INSERT INTO mutations (mutation_id, base_revision, state,"
+            " owner_identity, started_at) VALUES ('m1', 0, ?, 'x', 'now')",
+            (kr.COMMITTED,))
+        with pytest.raises(kr.MutationStateError):
+            kr._transition(conn, "m1", want=kr.ACTIVE, new=kr.COMMITTED)
+        conn.execute("ROLLBACK")
+    finally:
+        conn.close()
+
+
+def test_a_transition_on_a_missing_row_is_refused(root):
+    conn = kr._connect(root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        with pytest.raises(kr.MutationStateError):
+            kr._transition(conn, "nope", want=kr.ACTIVE, new=kr.COMMITTED)
+        conn.execute("ROLLBACK")
+    finally:
+        conn.close()

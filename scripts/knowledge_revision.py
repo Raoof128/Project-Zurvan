@@ -252,3 +252,81 @@ def process_state(pid, identity) -> str:
     if live is None:
         return DEAD
     return ALIVE if live == identity else DEAD
+
+
+@dataclass
+class Mutation:
+    mutation_id: str
+    base_revision: int
+    state: str
+    project: str | None
+    writer: str | None
+    implicit: bool
+    caller: str | None
+    owner_pid: int | None
+    owner_identity: str
+    started_at: str
+    committed_at: str | None
+    planned_paths: list
+    completed_paths: list
+    orphan_reason: str | None
+    orphaned_at: str | None
+    resolved_at: str | None
+    resolution_revision: int | None
+
+
+_MUTATION_COLS = (
+    "mutation_id, base_revision, state, project, writer, implicit, caller,"
+    " owner_pid, owner_identity, started_at, committed_at,"
+    " planned_paths, completed_paths, orphan_reason, orphaned_at,"
+    " resolved_at, resolution_revision"
+)
+
+
+def _row_to_mutation(row) -> Mutation:
+    return Mutation(
+        mutation_id=row[0], base_revision=row[1], state=row[2], project=row[3],
+        writer=row[4], implicit=bool(row[5]), caller=row[6], owner_pid=row[7],
+        owner_identity=row[8], started_at=row[9], committed_at=row[10],
+        planned_paths=json.loads(row[11] or "[]"),
+        completed_paths=json.loads(row[12] or "[]"),
+        orphan_reason=row[13], orphaned_at=row[14],
+        resolved_at=row[15], resolution_revision=row[16],
+    )
+
+
+def _transition(conn, mutation_id, want, new, **fields) -> None:
+    """Move a mutation from `want` to `new`, or raise.
+
+    Compare-and-set, inside the caller's transaction. Updating by id alone let
+    `commit_mutation` run twice and advance the revision twice, and let orphan
+    detection reclassify a mutation that had committed between the liveness
+    check and the update.
+    """
+    assignments = ["state = ?"]
+    values = [new]
+    for key, value in fields.items():
+        assignments.append(f"{key} = ?")
+        values.append(value)
+    values.extend([mutation_id, want])
+    cur = conn.execute(
+        f"UPDATE mutations SET {', '.join(assignments)}"
+        " WHERE mutation_id = ? AND state = ?", values)
+    if cur.rowcount != 1:
+        row = conn.execute(
+            "SELECT state FROM mutations WHERE mutation_id = ?",
+            (mutation_id,)).fetchone()
+        found = row[0] if row else "<no such mutation>"
+        raise MutationStateError(
+            f"{mutation_id}: expected {want} to become {new}, found {found}")
+
+
+def mutations_in(state, root=None) -> list:
+    conn = _connect(root)
+    try:
+        rows = conn.execute(
+            f"SELECT {_MUTATION_COLS} FROM mutations WHERE state = ?"
+            " ORDER BY started_at", (state,)).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_mutation(r) for r in rows]
