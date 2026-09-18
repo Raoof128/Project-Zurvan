@@ -93,29 +93,24 @@ def _canonical_index(root=None) -> Path:
 # ── identity ──────────────────────────────────────────────────────────────────
 
 def _corpus_manifest_sha(root: Path) -> str:
-    """(relpath, size, mtime_ns) over every indexable file. Reads no content.
+    """(relpath, size, mtime_ns, ino) over every indexable file. Reads no content.
 
-    This is DIAGNOSTIC, not the measurement input: the hybrid retriever never
-    opens these files. It is recorded so a later reader can tell whether the
-    corpus had moved on by the time a number was produced — which is a fact
-    worth knowing and, since this design, not a fact that invalidates anything.
+    Delegates to `knowledge_manifest` so there is one implementation: Z0 needs
+    this digest shape as a correctness mechanism, and two implementations of
+    "has the corpus moved" would drift.
+
+    `st_ino` and a scope-version prefix were added in Z0, so the value changes
+    once at that commit; its meaning does not, and no test asserts a literal
+    digest. This caller keeps its diagnostic contract: a snapshot must still be
+    capturable on a store whose corpus cannot be fully scanned, so the
+    fail-closed error is caught HERE and reported as an empty digest rather
+    than failing the capture.
     """
+    from scripts.knowledge_manifest import ManifestUnavailable, indexable_manifest
     try:
-        from scripts.chunk import scan_markdown_files
-        files = sorted(scan_markdown_files(root))
-    except Exception:
+        return indexable_manifest(root)
+    except ManifestUnavailable:
         return ""
-    h = hashlib.sha256()
-    for path in files:
-        p = Path(path)
-        try:
-            st = p.stat()
-            rel = str(p.relative_to(root)) if p.is_absolute() else str(p)
-        except (OSError, ValueError):
-            continue
-        rec = f"{rel}\x00{st.st_size}\x00{st.st_mtime_ns}".encode()
-        h.update(len(rec).to_bytes(8, "big") + rec)
-    return h.hexdigest()
 
 
 def index_identity(index_path, deep: bool = False) -> dict:
