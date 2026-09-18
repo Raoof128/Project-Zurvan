@@ -90,3 +90,37 @@ def test_the_fingerprint_moves_when_anything_in_the_ledger_moves(root):
     finally:
         conn.close()
     assert kr.ledger_fingerprint(root) != before
+
+
+def test_our_own_process_is_alive(root):
+    assert kr.process_state(os.getpid(), kr.own_identity()) == kr.ALIVE
+
+
+def test_a_pid_that_does_not_exist_is_dead(root):
+    assert kr.process_state(2_000_000, "2000000:whenever") == kr.DEAD
+
+
+def test_a_recycled_pid_is_dead_not_alive(root):
+    """A pid alone is recycled. Pairing it with a start time stops an unrelated
+    new process vouching for a dead mutation."""
+    assert kr.process_state(os.getpid(), "different identity") == kr.DEAD
+
+
+def test_an_uninspectable_process_is_unknown_not_dead(monkeypatch, root):
+    """`ps` failing is not evidence of death, and orphaning on it would mark
+    the store SUSPECT because a subprocess timed out."""
+    def explode(*a, **k):
+        raise OSError("ps unavailable")
+    monkeypatch.setattr(kr.subprocess, "run", explode)
+    assert kr.process_state(os.getpid(), "whatever") == kr.UNKNOWN
+
+
+def test_own_identity_is_cached_per_pid_not_globally(root, monkeypatch):
+    """A forked child inherits the parent's module state. Caching without the
+    pid would let it answer with its parent's identity."""
+    mine = kr.own_identity()
+    assert kr._OWN_IDENTITY[0] == os.getpid()
+    monkeypatch.setattr(kr.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(kr, "process_identity", lambda pid: f"{pid}:pretend")
+    assert kr.own_identity() == "4242:pretend"
+    assert kr.own_identity() != mine
