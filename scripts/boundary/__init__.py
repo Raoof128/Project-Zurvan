@@ -7,6 +7,9 @@ from scripts.boundary.policy import PolicyError             # noqa: F401
 from scripts.boundary.scan import (                         # noqa: F401
     BuildResult, Match, Verdict, build, release, scan, scan_blob, scan_bytes,
 )
+# After `scan`: the session imports Match/Verdict from it.
+from scripts.boundary import session                        # noqa: F401,E402
+from scripts.boundary.session import ScanSession, batch_scan  # noqa: F401,E402
 
 
 def config(root):

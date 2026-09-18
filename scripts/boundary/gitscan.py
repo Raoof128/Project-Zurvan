@@ -61,17 +61,31 @@ def staged_blobs(repo):
     return results
 
 
-def scan_staged(boundary_root, repo=None):
+def scan_staged(boundary_root, repo=None, baseline=None):
     """Scan every staged post-image against the sinks its path belongs to.
 
     Returns [(path, change_type, Verdict)] for BLOCKED paths only.
+
+    ONE scan session covers the whole staged set, so the protected corpus is
+    loaded and validated once per commit rather than once per file. Every path
+    is therefore judged against the same view of protected state — and every
+    path IS judged: there is no fail-fast, because an author who stages ten
+    files deserves to see all ten verdicts, not the first one ten times.
+
+    `baseline`, when supplied, is an accepted-sink snapshot the caller captured
+    BEFORE staging. It is frozen for the batch and candidates are never added to
+    it; otherwise staging the same leak twice would let the first copy make the
+    second one "already public".
     """
-    from scripts import boundary
+    from scripts.boundary.session import ScanSession
     repo = Path(repo or ".")
+    staged = staged_blobs(repo)
+    if not staged:
+        return []
     blocked = []
-    for path, change, data in staged_blobs(repo):
-        verdict = boundary.scan_blob(boundary_root, path, data, sink=sinks_for(path),
-                                     change_type=change)
-        if verdict.blocked:
-            blocked.append((path, change, verdict))
+    with ScanSession(boundary_root, baseline=baseline) as session:
+        for path, change, data in staged:
+            verdict = session.scan(data, sinks_for(path))
+            if verdict.blocked:
+                blocked.append((path, change, verdict))
     return blocked

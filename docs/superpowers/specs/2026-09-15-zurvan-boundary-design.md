@@ -616,6 +616,110 @@ against a predicted failure rather than an observed one.
 | **Operational v2 (0/200)** | **MEASURED, PASS**, with the bound above |
 | **Recall (10/10)** | **MEASURED, PASS** |
 
+### Commit-gate batching — one scan session per invocation, 2026-09-18
+
+Performance only. `T = 64`, the source×sink matrix, D1/D2/D3 semantics, the sink
+baseline rule and both frozen evaluation corpora are untouched. The measurements
+below were taken before and after on the same generated fixture, and every
+verdict was compared rather than assumed.
+
+**The old cost model.** `gitscan.scan_staged` called `scan_bytes` once per staged
+post-image, and `scan_bytes` opens the store, validates it, reads the config,
+loads every origin row and builds a fresh blob cache. None of that depends on
+which candidate is being scanned, so the gate paid for it N times. Measured on a
+150-document fixture at 100 staged files:
+
+| repeated per staged file | 100 files |
+| --- | --- |
+| store opens (`sqlite3.connect` + `quick_check` + schema + version check) | 100 |
+| `store.validate` (3 aggregates + orphan join + `stat_digest` tree walk) | 100 |
+| origin table loads | 100 |
+| literal registry loads | 100 |
+| HMAC registry-key reads | 100 |
+| release-table queries | one per (match, sink) |
+| **`store.get_blob` — read + full SHA-256 re-verification** | **4,056** |
+
+The blob reads dominate. `get_blob` re-hashes every blob it returns, deliberately
+— a blob store that trusts its own filenames is a filesystem, not an integrity
+mechanism — and a per-scan cache threw that proof away between files, so the same
+150 protected blobs were read and re-hashed 4,056 times.
+
+**The session invariant.** A `ScanSession` reads protected state, public
+accessions, the literal registry, the release table and the accepted sink
+baseline **once, before the first candidate**, and never re-reads them. Every
+candidate in the batch is answered against exactly the same view.
+
+That is stronger than the per-file path, not weaker. With isolated scans a
+mid-commit edit to the protected tree made the gate raise `StaleStateError`
+partway down the staged list, so the same staged set got different answers
+depending on where the edit landed. Staleness is now deferred to the **next**
+gate invocation, which still refuses until a rebuild — never swallowed.
+
+**The intra-batch anti-laundering invariant.** The baseline is frozen and
+candidates are never added to it. The obvious optimisation — accumulate what you
+have already scanned — would create a laundering primitive that does not
+otherwise exist: stage the leak twice, the first copy enters the "already
+public" set, the second reads clean, and one `git add` declassifies protected
+material. For the same reason match de-duplication stays **per candidate**;
+hoisting the `seen` set into the session would drop a genuine leak from the
+second file that happens to share a span with the first.
+
+Both were verified by mutation rather than by reading: each bug was written into
+`session.py`, the named regression was run, and the test failed. Five mutants,
+five caught — hoisted `seen`, accumulated baseline, unshared blob cache,
+per-candidate store open, and fail-fast on first block.
+
+**Benchmark methodology.** `scripts/bench_boundary_gate.py`. A disposable fixture
+— 150 generated protected documents, one instrument file, a throwaway git repo
+of generated candidates, two of which carry a real protected span — built from
+fixed seeds so the same bytes are scanned in both modes. It refuses to run
+against `~/.zurvan/boundary` or the working tree. Two modes over **one** fixture:
+`isolated` (one independent scan per staged blob, the old model, preserved
+because `scan_bytes` is now a one-candidate session) and `batch`. Timings are
+p50/p95 over 11 repetitions after a discarded warm-up; counters and peak memory
+are collected in separate passes so instrumentation never enters a timed one.
+
+Staging must produce a real diff: the first draft re-staged byte-identical
+content, `diff --cached` was empty, and it reported 8 ms for 100 files.
+
+**Before / after** (11 reps; the 5-rep run agrees to within 3%):
+
+| staged files | isolated p50 | batch p50 | speed-up | isolated p95 | batch p95 | per file |
+| ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 1 | 0.074 s | 0.074 s | **1.0×** | 0.082 s | 0.076 s | 74 ms → 74 ms |
+| 10 | 0.486 s | 0.231 s | **2.1×** | 0.544 s | 0.259 s | 48.6 ms → 23.1 ms |
+| 50 | 2.092 s | 0.811 s | **2.6×** | 2.175 s | 1.022 s | 41.8 ms → 16.2 ms |
+| 100 | 4.236 s | 1.604 s | **2.6×** | 4.360 s | 1.958 s | 42.4 ms → 16.0 ms |
+
+Expensive initialisations, at 100 files: store opens **100 → 1**, validations
+**100 → 1**, `stat_digest` tree walks **100 → 1**, registry-key reads
+**100 → 1**, blob reads **4,056 → 150**. Blob reads saturate at 150 — the number
+of protected blobs — so each is read and verified at most once per batch, which
+is the floor.
+
+There is no speed-up at one staged file, and the table says so. The work is
+identical; only its amortisation changed.
+
+**Stated cost.** Peak traced memory at 100 files rises 1.29 MB → 2.19 MB. The
+shared blob cache is bounded by the size of the protected corpus, not by the
+candidate count — the same 150 blobs at 50 files as at 100 — so on the real
+11.2 MB corpus the ceiling is roughly that, once, for the life of one commit.
+
+**Correctness results.** Blocked counts were identical in all three runs
+(pre-change isolated, post-change isolated, post-change batch) at every size:
+1/1, 2/10, 3/50, 3/100. Batching tests **17/17**; all Boundary suites **95/95**;
+`boundary_redteam` **27/27**; frozen recall **10/10** with controls correct and
+zero leaks suppressed; frozen operational FP **0/200** with the same **6**
+candidates suppressed by sink publicity; `pytest` **900 passed / 4 skipped /
+0 failed**.
+
+**Open item this exposed, not fixed here.** The commit gate never passes a
+baseline: `boundary_guard.main` → `gitscan.scan_staged` supplies `baseline=None`,
+so scan-side sink provenance — implemented, tested and measured at 0/200 — is
+**not active in the real gate**. `scan_staged` now accepts a `baseline`
+parameter, so wiring it is a one-line caller change, but doing so would change
+live verdicts and is a policy decision, not a performance one.
+
 ### D1 degenerate content — added 2026-09-16
 
 T counts **content**, not bytes. A 270-byte rule of box-drawing characters is

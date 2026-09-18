@@ -184,15 +184,26 @@ def build(root) -> BuildResult:
                        n_fingerprints=counts["fingerprints"])
 
 
-def _match_id(conn, span_digest: str, source_class: str, origin_id: str, detector: str) -> str:
+def _derive_match_id(key: bytes, span_digest: str, source_class: str,
+                     origin_id: str, detector: str) -> str:
     """Binds span + class + origin + detector (Global Constraint 10).
 
     A release references THIS, so releasing one occurrence cannot declassify the
     same bytes arriving from a different protected origin or via another detector.
+
+    Split out from `_match_id` so a scan session can derive ids from a registry
+    key it read once, without a second copy of the formula existing anywhere. Two
+    copies would drift, and a drifted match id silently voids every recorded
+    release.
     """
-    return hmac.new(d2._registry_key(conn),
+    return hmac.new(key,
                     f"{span_digest}\x00{source_class}\x00{origin_id}\x00{detector}".encode(),
                     hashlib.sha256).hexdigest()
+
+
+def _match_id(conn, span_digest: str, source_class: str, origin_id: str, detector: str) -> str:
+    return _derive_match_id(d2._registry_key(conn), span_digest, source_class,
+                            origin_id, detector)
 
 
 def _released(conn, match_id: str, sink: str) -> bool:
@@ -230,95 +241,23 @@ def release(root, match_id: str, sinks, reason: str) -> str:
 
 
 def scan_bytes(root, data: bytes, sink, baseline=None) -> Verdict:
-    """The core scanner. Operates on BYTES, because the guarantee is over bytes.
+    """Scan ONE candidate. Operates on BYTES, because the guarantee is over bytes.
 
-    One connection is opened for the whole scan and validation runs against that
-    same connection: the previous draft opened the database three separate times,
-    so an atomic rebuild between opens could validate one store and scan another.
+    This is a one-candidate `ScanSession`: open the store once, validate against
+    that same connection, scan, close. Keeping it a thin wrapper rather than a
+    second copy of the pipeline is what makes batch equivalence a property of the
+    code instead of a property of two implementations agreeing today.
 
     `baseline` is an optional `sink.SinkBaseline` captured by the caller BEFORE
-    the candidate operation. A matched span whose exact bytes were already in
-    the accepted sink is not a NEW disclosure and is exempted match by match —
-    never file by file, or appending a secret to a public file would bypass the
-    gate. It is transient and never accedes anything; see `boundary/sink.py`.
+    the candidate operation. A matched span whose exact bytes were already in the
+    accepted sink is not a NEW disclosure and is exempted match by match — never
+    file by file, or appending a secret to a public file would bypass the gate.
+    It is transient and never accedes anything; see `boundary/sink.py`.
     """
-    root = Path(root)
-    sinks = [sink] if isinstance(sink, str) else list(sink)
-    with closing(store.open_db(root)) as conn:
-        store.validate(conn, root)                  # Stale / Integrity — never a verdict
-        cfg = store.read_config(conn)
-        origins = {oid: (cls, blob) for oid, cls, blob in
-                   conn.execute("SELECT origin_id, source_class, blob_digest FROM origins")}
-        blob_cache: dict[str, bytes] = {}
-        seen, matches = set(), []
+    from scripts.boundary.session import ScanSession      # circular at module level
 
-        # ── D1 ───────────────────────────────────────────────────────────────
-        anchors = set(d1.candidates(conn, data, cfg))      # dedup before any blob read
-        for origin_id, src_off, cand_off in sorted(anchors):
-            meta = origins.get(origin_id)
-            if meta is None:
-                raise store.StateIntegrityError(
-                    f"fingerprint references unknown origin {origin_id[:12]}")
-            src_class, blob_digest = meta
-            if blob_digest not in blob_cache:
-                # get_blob re-verifies the digest, so confirmation compares against
-                # bytes whose integrity has been proven this scan.
-                blob_cache[blob_digest] = store.get_blob(root, blob_digest)
-            start, length = d1.confirm(blob_cache[blob_digest], src_off, data, cand_off)
-            span = data[start:start + length]
-            # T counts CONTENT, not bytes. A 270-byte rule of box-drawing
-            # characters is three bytes repeated; measured against real material
-            # it blocked `scripts/check.sh` for sharing a horizontal rule with a
-            # protected page. `d1.informative_length` collapses repeating runs,
-            # and rows 18-20 of the gauntlet pin that the rule cannot be used to
-            # manufacture a match OR to conceal one.
-            # `informative_length(span) <= len(span)` always, so the raw
-            # length is a free exact short-circuit: it rejects the great
-            # majority of anchors without the collapse scan.
-            if (length < cfg.threshold_bytes
-                    or d1.informative_length(span) < cfg.threshold_bytes):
-                continue
-            span_digest = hashlib.sha256(span).hexdigest()
-            mid = _match_id(conn, span_digest, src_class, origin_id, "D1")
-            for s in sinks:
-                if not policy.is_blocked(src_class, [s]):
-                    continue
-                if d3.is_exempt(root, conn, span, src_class, s):
-                    continue
-                if _already_in_sink(baseline, span, src_class, s):
-                    continue
-                if _released(conn, mid, s):
-                    continue
-                if (mid, s) in seen:
-                    continue
-                seen.add((mid, s))
-                matches.append(Match(match_id=mid, origin_id=origin_id,
-                                     source_class=src_class, detector="D1",
-                                     span_digest=span_digest, sink=s))
-
-        # ── D2 ───────────────────────────────────────────────────────────────
-        # Release semantics apply here too. The previous draft checked releases
-        # for D1 only, so a literal could never be declassified at all.
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            text = data.decode("utf-8", "replace")
-        for literal_id, src_class, origin_id in d2.match(conn, text):
-            mid = _match_id(conn, literal_id, src_class, origin_id, "D2")
-            for s in sinks:
-                if not policy.is_blocked(src_class, [s]):
-                    continue
-                if _released(conn, mid, s):
-                    continue
-                if (mid, s) in seen:
-                    continue
-                seen.add((mid, s))
-                matches.append(Match(match_id=mid, origin_id=origin_id,
-                                     source_class=src_class, detector="D2",
-                                     span_digest=literal_id, sink=s))
-
-    return Verdict(blocked=bool(matches), matches=tuple(matches))
-
+    with ScanSession(root, baseline=baseline) as session:
+        return session.scan(data, sink)
 
 
 def _already_in_sink(baseline, span: bytes, source_class: str, sink: str) -> bool:

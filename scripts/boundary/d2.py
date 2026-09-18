@@ -65,10 +65,24 @@ def register(conn, literal: str, source_class: str, origin_id: str) -> str:
     return literal_id
 
 
-def match(conn, text: str):
+def load_literals(conn) -> tuple:
+    """The whole registry, read once.
+
+    A scan session holds this for a whole batch rather than re-reading the table
+    per candidate. The registry is small and immutable for the life of a scan;
+    the folded candidate text is the part that actually varies.
+    """
+    return tuple(conn.execute(
+        "SELECT literal_id, literal_casefold, source_class, origin_id FROM literals"))
+
+
+def match_loaded(literals, text: str):
     """[(literal_id, source_class, origin_id)] — every matching origin, not one."""
     folded = _fold(text)
     return [(literal_id, source_class, origin_id)
-            for literal_id, lit, source_class, origin_id in conn.execute(
-                "SELECT literal_id, literal_casefold, source_class, origin_id FROM literals")
+            for literal_id, lit, source_class, origin_id in literals
             if lit in folded]
+
+
+def match(conn, text: str):
+    return match_loaded(load_literals(conn), text)

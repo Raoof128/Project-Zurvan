@@ -49,27 +49,36 @@ def accede(root, conn, document: bytes, provenance: str) -> str:
     return accession_id
 
 
-def is_exempt(root, conn, span_bytes: bytes, source_class: str, sink: str) -> bool:
+def span_in_public_docs(span_bytes: bytes, source_class: str, sink: str, docs) -> bool:
     """True when this exact span occurs INSIDE an approved public document.
 
     Containment, not digest equality. A public document exempts its own
     substrings; it does not exempt anything longer that merely starts with one
     (the partial-overlap escape, which the residual test pins).
+
+    Takes the documents rather than fetching them, so a scan session can load
+    the accessioned corpus once and hold it frozen for a whole batch. The
+    decision itself is unchanged — same exemptible pairs, same containment.
     """
     if (source_class, sink) not in _EXEMPTIBLE:
         return False
     if len(span_bytes) == 0:
         return False
-    for doc in _public_docs(root, conn):
+    for doc in docs:
         if span_bytes in doc:
             return True
     return False
 
 
+def is_exempt(root, conn, span_bytes: bytes, source_class: str, sink: str) -> bool:
+    return span_in_public_docs(span_bytes, source_class, sink,
+                               public_docs(root, conn))
+
+
 _DOC_CACHE: dict = {}
 
 
-def _public_docs(root, conn):
+def public_docs(root, conn):
     """Approved public documents, loaded once per (root, corpus-state).
 
     Previously re-read every blob from disk for EVERY candidate span, which is
