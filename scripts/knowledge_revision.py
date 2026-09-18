@@ -330,3 +330,273 @@ def mutations_in(state, root=None) -> list:
     finally:
         conn.close()
     return [_row_to_mutation(r) for r in rows]
+
+
+@dataclass
+class Operation:
+    root: Path
+    project: str | None = None
+    writer: str | None = None
+    caller: str | None = None
+    implicit: bool = False
+    mutation_id: str | None = None
+    depth: int = 0          # nesting depth; join-only, never used to commit
+
+
+@dataclass
+class WriteTicket:
+    mutation_id: str
+    owns: bool          # True when this single write must commit the mutation
+
+
+#: One operation per context. A module global let an inner operation clear the
+#: active id on exit, after which the outer operation's remaining writes became
+#: implicit — splitting one logical operation without anyone knowing.
+#:
+#: Deliberately NOT an environment variable. An earlier design exported the
+#: mutation id so subprocesses could join, and `zurvan --project X` then
+#: re-invoked the CLI against a DIFFERENT store with the id still set — writes
+#: there matched no row and were silently dropped. A subprocess now opens its
+#: own operation in its own store, which is the honest answer.
+_CTX: ContextVar = ContextVar("zurvan_operation", default=None)
+
+
+def active_operation():
+    return _CTX.get()
+
+
+def _describe_caller() -> str:
+    """`module:function` of the first frame outside this module and safe_write.
+
+    `writer="implicit"` told a migration nothing about WHAT to migrate. The
+    inventory exists to be actioned, so it records something actionable. Names
+    only — never arguments, which on this store can be private content.
+    """
+    import sys
+    frame = sys._getframe(1)
+    skip = {__name__, "scripts.safe_write"}
+    while frame is not None:
+        module = frame.f_globals.get("__name__", "?")
+        if module not in skip:
+            return f"{module}:{frame.f_code.co_name}"
+        frame = frame.f_back
+    return "unknown"
+
+
+def _insert_mutation(op: Operation) -> str:
+    mutation_id = f"m{uuid.uuid4().hex[:12]}"
+    pid = os.getpid()
+    ensure_schema(op.root)
+    conn = _connect(op.root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        base = conn.execute(
+            "SELECT current_revision FROM knowledge_state WHERE id = 1"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO mutations (mutation_id, base_revision, state, project,"
+            " writer, implicit, caller, owner_pid, owner_identity, started_at,"
+            " last_heartbeat) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (mutation_id, base, ACTIVE, op.project, op.writer,
+             int(bool(op.implicit)), op.caller, pid, own_identity(),
+             _now(), _now()))
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    return mutation_id
+
+
+def _append_path(mutation_id, column, path, root) -> None:
+    """Append one path to `planned_paths` or `completed_paths`. Fails closed."""
+    conn = _connect(root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            f"SELECT {column}, state FROM mutations WHERE mutation_id = ?",
+            (mutation_id,)).fetchone()
+        if row is None or row[1] != ACTIVE:
+            conn.execute("ROLLBACK")
+            raise MutationStateError(
+                f"{mutation_id}: cannot record {column} in state "
+                f"{row[1] if row else '<missing>'}")
+        paths = json.loads(row[0] or "[]")
+        if str(path) not in paths:
+            paths.append(str(path))
+        conn.execute(
+            f"UPDATE mutations SET {column} = ?, last_heartbeat = ?"
+            " WHERE mutation_id = ? AND state = ?",
+            (json.dumps(paths), _now(), mutation_id, ACTIVE))
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+
+def plan_write(path, root=None):
+    """Record the intent to write BEFORE the bytes land.
+
+    Returns a `WriteTicket`, or `None` when the path is outside the
+    authoritative scope. Activates the operation's mutation row lazily, so an
+    operation that never writes leaves no trace in the ledger.
+
+    Raises rather than returning quietly: a write whose intent could not be
+    recorded must not proceed. `writelog` may be best-effort; this may not.
+    """
+    base = ks.store_root(root)
+    if not ks.is_authoritative(path, base):
+        return None
+    op = _CTX.get()
+    owns = False
+    if op is None or op.root != base:
+        op = Operation(root=base, writer="implicit", implicit=True,
+                       caller=_describe_caller())
+        owns = True
+    if op.mutation_id is None:
+        op.mutation_id = _insert_mutation(op)
+    _append_path(op.mutation_id, "planned_paths", path, base)
+    return WriteTicket(mutation_id=op.mutation_id, owns=owns)
+
+
+def complete_write(ticket, path, root=None) -> None:
+    """Record that the bytes landed. Fails closed, loudly.
+
+    If this raises, the file is already published and the ledger does not know
+    it — a correctness incident. The store is marked SUSPECT before the error
+    propagates, because the alternative is a knowledge base that silently
+    forgot a write it performed.
+    """
+    if ticket is None:
+        return
+    base = ks.store_root(root)
+    try:
+        _append_path(ticket.mutation_id, "completed_paths", path, base)
+    except Exception:
+        _mark_suspect(base)
+        raise
+    if ticket.owns:
+        commit_mutation(ticket.mutation_id, root=base)
+
+
+def _mark_suspect(root) -> None:
+    conn = _connect(root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE knowledge_state SET state = ? WHERE id = 1",
+                     (SUSPECT,))
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+
+
+def commit_mutation(mutation_id, manifest_digest=None, root=None) -> int:
+    """Commit one mutation and advance the revision by exactly one."""
+    base = ks.store_root(root)
+    if manifest_digest is None:
+        from scripts.knowledge_manifest import authoritative_manifest
+        manifest_digest = authoritative_manifest(base)
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            rev = conn.execute(
+                "SELECT current_revision FROM knowledge_state WHERE id = 1"
+            ).fetchone()[0]
+            new_revision = rev + 1
+            _transition(conn, mutation_id, want=ACTIVE, new=COMMITTED,
+                        committed_at=_now())
+            conn.execute(
+                "UPDATE knowledge_state SET current_revision = ?, atomicity = ?,"
+                " manifest_digest = ? WHERE id = 1",
+                (new_revision, MANAGED, manifest_digest))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return new_revision
+
+
+def abandon_mutation(mutation_id, reason, root=None) -> str:
+    """End a mutation that did not complete.
+
+    Nothing PLANNED -> ABORTED, knowledge state untouched: a command that
+    failed on its arguments tore nothing. Anything planned -> ORPHANED and the
+    revision becomes SUSPECT. An earlier design keyed this on `completed_paths`,
+    which is empty precisely in the crash this is meant to catch.
+    """
+    base = ks.store_root(root)
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT planned_paths FROM mutations WHERE mutation_id = ?",
+                (mutation_id,)).fetchone()
+            planned = json.loads((row[0] if row else None) or "[]")
+            state = ORPHANED if planned else ABORTED
+            _transition(conn, mutation_id, want=ACTIVE, new=state,
+                        orphan_reason=reason, orphaned_at=_now(),
+                        committed_at=_now())
+            if state == ORPHANED:
+                conn.execute(
+                    "UPDATE knowledge_state SET state = ? WHERE id = 1",
+                    (SUSPECT,))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return state
+
+
+def _finish(op: Operation, ok: bool, reason: str = "") -> None:
+    if op.mutation_id is None:
+        return                       # nothing was ever planned; no row exists
+    if ok:
+        commit_mutation(op.mutation_id, root=op.root)
+    else:
+        abandon_mutation(op.mutation_id, reason, root=op.root)
+
+
+@contextmanager
+def operation(project=None, writer=None, caller=None, root=None):
+    """Scope one logical operation. Joins an enclosing one on the same store.
+
+    No database row is created here. The mutation activates on the first
+    planned write, so a read-only command leaves the ledger untouched and
+    cannot make a snapshot capture report BUSY.
+    """
+    base = ks.store_root(root)
+    existing = _CTX.get()
+    if existing is not None:
+        if existing.root != base:
+            raise NestedMutationError(
+                f"operation on {base} opened inside one on {existing.root}")
+        existing.depth += 1
+        try:
+            yield existing
+        finally:
+            existing.depth -= 1
+        return
+
+    op = Operation(root=base, project=project, writer=writer, caller=caller)
+    token = _CTX.set(op)
+    try:
+        try:
+            yield op
+        except SystemExit as exc:
+            # `sys.exit` is control flow, not a crash: `scripts/cli.py` uses it
+            # on ~20 dispatch branches. Treating it as a crash marked the
+            # PRODUCTION store SUSPECT on every non-zero exit — including
+            # `zurvan knowledge reconcile`, which exits 1 on NEEDS_REVIEW and
+            # would SUSPECT the store it had just cleared.
+            _finish(op, ok=exc.code in (0, None), reason=f"exit {exc.code}")
+            raise
+        except BaseException as exc:
+            _finish(op, ok=False, reason=f"{type(exc).__name__}: {exc}")
+            raise
+        else:
+            _finish(op, ok=True)
+    finally:
+        _CTX.reset(token)

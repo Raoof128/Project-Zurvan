@@ -150,3 +150,162 @@ def test_a_transition_on_a_missing_row_is_refused(root):
         conn.execute("ROLLBACK")
     finally:
         conn.close()
+
+
+def _write(root, name, body="x"):
+    """Publish bytes the way `safe_write` will: plan, write, complete."""
+    target = page(root, name)
+    ticket = kr.plan_write(target, root=root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body)
+    kr.complete_write(ticket, target, root=root)
+    return target
+
+
+def test_a_read_only_operation_creates_no_mutation_row(root):
+    """`zurvan search` must not become a registry write, and must not make a
+    capture report BUSY while it runs."""
+    with kr.operation(writer="cli", root=root):
+        pass
+    conn = sqlite3.connect(kr.db_path(root))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM mutations").fetchone()[0] == 0
+    finally:
+        conn.close()
+    assert kr.current(root).revision == 0
+
+
+def test_a_mutation_activates_on_the_first_planned_write(root):
+    with kr.operation(writer="cli", root=root):
+        assert kr.mutations_in(kr.ACTIVE, root) == []
+        _write(root, "a.md")
+        assert len(kr.mutations_in(kr.ACTIVE, root)) == 1
+    assert kr.current(root).revision == 1
+
+
+def test_intent_is_recorded_before_the_bytes_land(root):
+    """The crash-gap property. Between plan and publish, the ledger must
+    already name the path that is about to change."""
+    target = page(root, "a.md")
+    with kr.operation(writer="cli", root=root):
+        ticket = kr.plan_write(target, root=root)
+        m = kr.mutations_in(kr.ACTIVE, root)[0]
+        assert str(target) in m.planned_paths
+        assert m.completed_paths == []
+        target.write_text("x")
+        kr.complete_write(ticket, target, root=root)
+
+
+def test_a_crash_between_publishing_and_completing_is_not_read_as_clean(root):
+    """Rev 2's defect. The file landed; bookkeeping never recorded it. The
+    store must not come back CLEAN just because `completed_paths` is empty."""
+    target = page(root, "a.md")
+    mid = None
+    with pytest.raises(RuntimeError):
+        with kr.operation(writer="cli", root=root):
+            kr.plan_write(target, root=root)
+            target.write_text("x")               # bytes are live
+            mid = kr.mutations_in(kr.ACTIVE, root)[0].mutation_id
+            raise RuntimeError("killed here")
+    assert kr.current(root).state == kr.SUSPECT
+    m = [x for x in kr.mutations_in(kr.ORPHANED, root) if x.mutation_id == mid]
+    assert m and m[0].planned_paths == [str(target)]
+
+
+def test_three_writes_in_one_operation_are_one_revision(root):
+    with kr.operation(writer="cli", root=root):
+        for name in ("a.md", "b.md", "log.md"):
+            _write(root, name)
+    assert kr.current(root).revision == 1
+
+
+def test_a_nested_operation_joins_rather_than_splitting(root):
+    """A single module global let an inner operation clear the active id, so
+    the outer operation's later writes silently became implicit."""
+    with kr.operation(writer="outer", root=root):
+        _write(root, "a.md")
+        outer = kr.mutations_in(kr.ACTIVE, root)[0].mutation_id
+        with kr.operation(writer="inner", root=root):
+            _write(root, "b.md")
+        assert [m.mutation_id for m in kr.mutations_in(kr.ACTIVE, root)] == [outer]
+        _write(root, "c.md")
+    assert kr.current(root).revision == 1
+    conn = sqlite3.connect(kr.db_path(root))
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM mutations").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_a_nested_operation_on_a_different_store_is_refused(root, tmp_path):
+    other = tmp_path / "other"
+    (other / "data").mkdir(parents=True)
+    (other / "wiki").mkdir()
+    kr.ensure_schema(other)
+    with kr.operation(writer="outer", root=root):
+        with pytest.raises(kr.NestedMutationError):
+            with kr.operation(writer="inner", root=other):
+                pass
+
+
+def test_a_clean_exit_commits_rather_than_abandoning(root):
+    with pytest.raises(SystemExit):
+        with kr.operation(writer="cli", root=root):
+            _write(root, "a.md")
+            raise SystemExit(0)
+    assert kr.current(root).revision == 1
+    assert kr.current(root).state == kr.CLEAN
+
+
+def test_a_failing_exit_that_wrote_nothing_does_not_suspect_the_store(root):
+    """~20 dispatch branches in cli.py call sys.exit(1) on validation failure,
+    before touching the store."""
+    with pytest.raises(SystemExit):
+        with kr.operation(writer="cli", root=root):
+            raise SystemExit(1)
+    assert kr.current(root).state == kr.CLEAN
+    assert kr.current(root).revision == 0
+
+
+def test_a_failing_exit_after_a_write_is_suspect(root):
+    with pytest.raises(SystemExit):
+        with kr.operation(writer="cli", root=root):
+            _write(root, "a.md")
+            raise SystemExit(1)
+    assert kr.current(root).state == kr.SUSPECT
+
+
+def test_a_write_outside_the_authoritative_scope_creates_no_mutation(root):
+    (root / "docs").mkdir(exist_ok=True)
+    with kr.operation(writer="cli", root=root):
+        assert kr.plan_write(root / "docs" / "x.md", root=root) is None
+    assert kr.current(root).revision == 0
+
+
+def test_committing_twice_is_refused_rather_than_advancing_twice(root):
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+        mid = kr.mutations_in(kr.ACTIVE, root)[0].mutation_id
+    assert kr.current(root).revision == 1
+    with pytest.raises(kr.MutationStateError):
+        kr.commit_mutation(mid, root=root)
+    assert kr.current(root).revision == 1
+
+
+def test_no_observer_sees_a_half_completed_logical_operation(root):
+    observed = []
+
+    def observe():
+        if kr.mutations_in(kr.ACTIVE, root):
+            observed.append("BUSY")
+        else:
+            observed.append(kr.current(root).revision)
+
+    observe()
+    with kr.operation(writer="cli", root=root):
+        _write(root, "decisions/foo.md")
+        observe()
+        _write(root, "log.md")
+    observe()
+
+    assert observed == [0, "BUSY", 1]
