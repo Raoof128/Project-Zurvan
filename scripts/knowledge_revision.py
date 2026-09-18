@@ -80,6 +80,25 @@ def _connect(root=None) -> sqlite3.Connection:
     return conn
 
 
+def _connect_ro(root=None) -> sqlite3.Connection:
+    """A reader. Opens `mode=ro` so it cannot create the file.
+
+    `sqlite3.connect` creates the database it cannot find — the hazard this
+    repository already records for the search index, where a 0-byte file reads
+    as "unreadable" rather than "missing". A read of the ledger must leave a
+    store without one exactly as it found it.
+    """
+    path = db_path(root)
+    if not path.is_file():
+        raise LedgerError(
+            f"no ledger at {path}. It is created on the first write, or by "
+            "`zurvan knowledge bootstrap`.")
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True,
+                           timeout=_BUSY_MS / 1000)
+    conn.execute(f"PRAGMA busy_timeout={_BUSY_MS}")
+    return conn
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -156,16 +175,28 @@ def ensure_schema(root=None) -> None:
 
 
 def current(root=None) -> Revision:
-    conn = _connect(root)
+    """Read the ledger. Never creates it.
+
+    A read that created tables would be a write on a read path, and would fail
+    differently on a read-only store. A store whose ledger does not exist yet
+    is a legitimate state — it is created on the first write — so this reports
+    it rather than tracebacking with `no such table`.
+    """
+    conn = _connect_ro(root)
     try:
-        row = conn.execute(
-            "SELECT current_revision, state, atomicity, manifest_digest"
-            " FROM knowledge_state WHERE id = 1").fetchone()
+        try:
+            row = conn.execute(
+                "SELECT current_revision, state, atomicity, manifest_digest"
+                " FROM knowledge_state WHERE id = 1").fetchone()
+        except sqlite3.OperationalError as exc:
+            raise LedgerError(
+                f"no ledger in {db_path(root)}: {exc}. It is created on the "
+                "first write, or by `zurvan knowledge bootstrap`.") from exc
     finally:
         conn.close()
     if row is None:
         raise LedgerError(
-            f"no knowledge_state row in {db_path(root)}; run ensure_schema first")
+            f"no ledger row in {db_path(root)}; run ensure_schema first")
     return Revision(revision=row[0], state=row[1],
                     atomicity=row[2], manifest_digest=row[3])
 
@@ -178,10 +209,9 @@ def ledger_fingerprint(root=None) -> str:
     reaching ORPHANED and a reconciliation record all leave the revision
     counter untouched.
     """
-    path = db_path(root)
-    if not path.is_file():
+    if not db_path(root).is_file():
         return "absent"
-    conn = _connect(root)
+    conn = _connect_ro(root)
     try:
         h = hashlib.sha256()
         for table, cols in (
@@ -322,7 +352,11 @@ def _transition(conn, mutation_id, want, new, **fields) -> None:
 
 
 def mutations_in(state, root=None) -> list:
-    conn = _connect(root)
+    """Reader. A store with no ledger has no mutations, which is true."""
+    try:
+        conn = _connect_ro(root)
+    except LedgerError:
+        return []
     try:
         rows = conn.execute(
             f"SELECT {_MUTATION_COLS} FROM mutations WHERE state = ?"
@@ -610,7 +644,10 @@ def implicit_mutations(root=None, unresolved_only=True) -> list:
     evidence, which this project does not do.
     """
     clause = " AND resolved_at IS NULL" if unresolved_only else ""
-    conn = _connect(root)
+    try:
+        conn = _connect_ro(root)
+    except LedgerError:
+        return []
     try:
         rows = conn.execute(
             f"SELECT {_MUTATION_COLS} FROM mutations"

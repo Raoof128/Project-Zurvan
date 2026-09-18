@@ -641,3 +641,92 @@ def test_suspect_propagates_across_an_unrelated_later_operation(root):
         _write(root, "log.md")
 
     assert kr.current(root).state == kr.SUSPECT
+
+
+def _cli(root, *args):
+    """Run the CLI in a FRESH interpreter rooted at this test's store.
+
+    Not `cli.main()` in-process. `scripts/memory.py:7` does
+    `from scripts.config import PROJECT_ROOT` at module scope, so every page
+    path is bound to whatever the root was when that module was first imported
+    — `monkeypatch.setenv("ZURVAN_ROOT")` cannot move it. In-process the write
+    would target the REAL wiki, `safe_write.is_safe_path` would refuse it
+    (failing safe, at least), and the revision would never advance. A
+    subprocess reads the environment at import, which is the only way this
+    works. `tests/test_cli.py:25` already shells out for the same reason.
+    """
+    import subprocess
+    import sys
+    repo = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "ZURVAN_ROOT": str(root), "PYTHONPATH": str(repo)}
+    return subprocess.run([sys.executable, "scripts/cli.py", *args],
+                          cwd=str(repo), env=env, capture_output=True, text=True)
+
+
+def test_decision_add_through_the_cli_is_exactly_one_revision(root):
+    """`decision add` writes the page and appends `wiki/log.md`. Through the
+    dispatcher that is one logical operation."""
+    before = kr.current(root).revision
+
+    result = _cli(root, "decision", "add", "--title", "T", "--reason", "R",
+                  "--status", "accepted", "--tags", "zurvan")
+
+    assert result.returncode == 0, result.stderr
+    assert kr.current(root).revision == before + 1
+    assert kr.implicit_mutations(root) == []
+
+
+def test_a_read_only_command_writes_nothing_to_the_ledger(root):
+    before = kr.ledger_fingerprint(root)
+    result = _cli(root, "version")
+    assert result.returncode == 0, result.stderr
+    assert kr.ledger_fingerprint(root) == before
+
+
+def test_a_cli_command_that_exits_nonzero_without_writing_stays_clean(root):
+    """~20 dispatch branches call sys.exit(1) on a validation failure. None of
+    them may mark the shared store SUSPECT."""
+    result = _cli(root, "claim", "add", "--text", "t", "--source",
+                  "nonexistent.md", "--evidence", "e", "--confidence", "high")
+    assert result.returncode != 0
+    assert kr.current(root).state == kr.CLEAN
+
+
+def test_the_mutation_records_that_the_cli_wrote_it(root):
+    """Orphan reports name a writer and a project. On a shared cross-project
+    store, `(unknown)` is a far worse diagnostic than it looks."""
+    result = _cli(root, "decision", "add", "--title", "T", "--reason", "R",
+                  "--status", "accepted")
+    assert result.returncode == 0, result.stderr
+    committed = kr.mutations_in(kr.COMMITTED, root)
+    assert len(committed) == 1
+    assert committed[0].writer == "cli"
+
+
+def test_reading_a_store_with_no_ledger_is_an_error_not_a_traceback(tmp_path,
+                                                                    monkeypatch):
+    """A read must not create tables, and must not crash on their absence.
+
+    Found by smoking `zurvan knowledge status` against a virgin store: every
+    test fixture calls `ensure_schema` first, so no test had ever asked the
+    ledger a question before it existed.
+    """
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir()
+    with pytest.raises(kr.LedgerError, match="no ledger"):
+        kr.current(tmp_path)
+    assert kr.ledger_fingerprint(tmp_path) == "absent"
+
+
+def test_a_read_does_not_create_the_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir()
+    with pytest.raises(kr.LedgerError):
+        kr.current(tmp_path)
+    conn = sqlite3.connect(kr.db_path(tmp_path))
+    try:
+        names = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+    assert "knowledge_state" not in names

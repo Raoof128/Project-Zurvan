@@ -267,7 +267,7 @@ operation finished. A decision page that parses cleanly while `log.md` never
 received its line is syntactically perfect and semantically half-done.
 `reconcile` may refuse and report; it may never resolve by deleting.
 
-`zurvan snapshot doctor` reports it in a form a human can act on:
+`zurvan knowledge doctor` reports it in a form a human can act on:
 
 ```
 SUSPECT revision 1848
@@ -673,7 +673,7 @@ live process identity. Crash cleanup must not delete a snapshot because a
 process vanished moments ago (§8.5). Snapshot metadata may outlive the heavy
 artifacts it referenced.
 
-CLI: `zurvan snapshot list`, `zurvan snapshot gc`, `zurvan snapshot doctor`,
+CLI: `zurvan snapshot list`, `zurvan snapshot gc`, `zurvan knowledge doctor`,
 `zurvan knowledge reconcile`. No GC framework.
 
 ---

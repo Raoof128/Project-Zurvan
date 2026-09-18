@@ -37,7 +37,7 @@ def _resolved_gold(value):
     return str(gold_path())
 
 
-def main():
+def _main():
     args_list = sys.argv[1:]
     project_name = None
     project_root_override = None
@@ -492,6 +492,25 @@ def main():
     snap_restore = snapshot_sub.add_parser("restore", help="Restore a snapshot")
     snap_restore.add_argument("snapshot_name")
     snap_restore.add_argument("--force", action="store_true")
+
+    # zurvan knowledge — the revision ledger. NOT under `zurvan snapshot`:
+    # that command builds release archives and `scripts/snapshot.py` is its
+    # module. Colliding on that name once already cost a session.
+    knowledge_parser = subparsers.add_parser(
+        "knowledge", help="Knowledge revisions and reconciliation")
+    knowledge_sub = knowledge_parser.add_subparsers(dest="action")
+    knowledge_sub.add_parser("status", help="Current revision, state, atomicity")
+    knowledge_sub.add_parser("doctor", help="Report orphaned mutations")
+    knowledge_sub.add_parser(
+        "bootstrap", help="Record this store's manifest as the drift baseline")
+    knowledge_sub.add_parser(
+        "callers", help="Unresolved implicit callers still to be migrated")
+    k_rec = knowledge_sub.add_parser("reconcile", help="Return the store to CLEAN")
+    k_rec.add_argument("--accept", action="store_true",
+                       help="record an explicit decision for an operation whose "
+                            "completeness cannot be established mechanically")
+    k_rec.add_argument("--actor", default="local:unknown")
+    k_rec.add_argument("--reason", default=None)
 
     args = parser.parse_args(args_list)
     
@@ -1041,8 +1060,75 @@ def main():
             restore_snapshot(args.snapshot_name, args.force)
         else:
             snapshot_parser.print_help()
+    elif args.command == "knowledge":
+        from scripts import knowledge_reconcile as krec
+        from scripts import knowledge_revision as kr
+        if args.action == "status":
+            try:
+                rev = kr.current()
+            except kr.LedgerError as exc:
+                print(f"no ledger yet: {exc}")
+                return
+            print(f"revision:   {rev.revision}")
+            print(f"state:      {rev.state}")
+            print(f"atomicity:  {rev.atomicity}")
+            print("baseline:   " + ("recorded" if rev.manifest_digest
+                                    else "ABSENT — run `zurvan knowledge bootstrap`"))
+        elif args.action == "bootstrap":
+            print(f"bootstrapped at revision {kr.bootstrap(actor='cli')}")
+        elif args.action == "callers":
+            callers = kr.implicit_callers()
+            if not callers:
+                print("No unresolved implicit callers.")
+            for caller, count in sorted(callers.items(), key=lambda kv: -kv[1]):
+                print(f"{count:6}  {caller}")
+        elif args.action == "doctor":
+            reports = krec.inspect()
+            rev = kr.current()
+            if not reports:
+                print(f"{rev.state} revision {rev.revision}; no orphans.")
+            else:
+                print(krec.format_report(reports, "NEEDS_REVIEW", rev.revision))
+        elif args.action == "reconcile":
+            result = krec.reconcile(accept=args.accept, actor=args.actor,
+                                    reason=args.reason)
+            print(krec.format_report(result["reports"], result["status"],
+                                     result["revision"]))
+            print(f"\nstatus: {result['status']}")
+            if result["status"] == "NEEDS_REVIEW":
+                raise SystemExit(1)
+        else:
+            knowledge_parser.print_help()
     else:
         parser.print_help()
+
+def main():
+    """One CLI invocation is one logical operation.
+
+    Wrapping here rather than at each `safe_write` call site is deliberate:
+    `decision add` writes a page and then appends `wiki/log.md`, and a revision
+    minted between them is a half-operation. Only `memory.py` and
+    `wiki_merge.py` call `safe_write` at all, and every command reaches them
+    through this function, so one wrap covers them and anything added later.
+
+    Wrapping a read-only command costs nothing: the mutation row is created on
+    the first PLANNED write, so `zurvan search` leaves the ledger untouched and
+    cannot make a snapshot capture report BUSY.
+
+    `_main` is the original function, renamed and otherwise untouched: its
+    dispatch body closes over `trace_parser`, `boundary_parser`, `graph_parser`
+    and `snapshot_parser`, locals created before `parse_args`, so splitting
+    dispatch into its own function would raise `NameError`.
+    """
+    from scripts import knowledge_revision as _kr
+    try:
+        from scripts.project_registry import get_current_project
+        project = get_current_project()[0]
+    except Exception:
+        project = None
+    with _kr.operation(writer="cli", project=project):
+        return _main()
+
 
 if __name__ == "__main__":
     main()
