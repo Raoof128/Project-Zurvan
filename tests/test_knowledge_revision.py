@@ -521,3 +521,123 @@ def test_drift_is_refused_while_the_store_is_suspect(root):
     assert kr.current(root).state == kr.SUSPECT
     with pytest.raises(kr.LedgerError, match="SUSPECT"):
         kr.observe_external_drift(root)
+
+
+def _orphan(root, planned, completed=()):
+    """A process that died mid-mutation: an ACTIVE row whose owner identity
+    belongs to no live process. Nothing is killed for real — a test that kills
+    processes to check a database column is testing the wrong thing.
+
+    Every path is absolute and under this test's root.
+    """
+    op = kr.Operation(root=root, project="other", writer="test")
+    mid = kr._insert_mutation(op)
+    for p in planned:
+        kr._append_path(mid, "planned_paths", p, root)
+    for p in completed:
+        kr._append_path(mid, "completed_paths", p, root)
+    conn = sqlite3.connect(kr.db_path(root))
+    try:
+        conn.execute(
+            "UPDATE mutations SET owner_pid = ?, owner_identity = ?"
+            " WHERE mutation_id = ?", (2_000_000, "2000000:long ago", mid))
+        conn.commit()
+    finally:
+        conn.close()
+    return mid
+
+
+def test_a_dead_owner_that_planned_a_write_is_an_orphan(root):
+    a, b = str(page(root, "decisions/x.md")), str(page(root, "log.md"))
+    mid = _orphan(root, planned=[a, b], completed=[a])
+
+    orphans = kr.detect_orphans(root)
+
+    assert [m.mutation_id for m in orphans] == [mid]
+    assert kr.current(root).state == kr.SUSPECT
+
+
+def test_a_crash_after_publishing_but_before_completing_still_orphans(root):
+    """Keying this on `completed_paths` made it empty in precisely this crash,
+    so the store came back CLEAN while the file had already changed."""
+    a = str(page(root, "decisions/x.md"))
+    _orphan(root, planned=[a], completed=[])
+
+    orphans = kr.detect_orphans(root)
+
+    assert len(orphans) == 1
+    assert orphans[0].planned_paths == [a]
+    assert kr.current(root).state == kr.SUSPECT
+
+
+def test_an_orphan_names_the_path_that_never_completed(root):
+    a, b = str(page(root, "decisions/x.md")), str(page(root, "log.md"))
+    _orphan(root, planned=[a, b], completed=[a])
+    orphan = kr.detect_orphans(root)[0]
+    assert set(orphan.planned_paths) - set(orphan.completed_paths) == {b}
+    assert orphan.orphaned_at
+
+
+def test_a_dead_owner_that_planned_nothing_is_aborted_not_suspect(root):
+    _orphan(root, planned=[])
+    assert kr.detect_orphans(root) == []
+    assert kr.current(root).state == kr.CLEAN
+
+
+def test_a_live_owner_is_never_orphaned(root):
+    with kr.operation(writer="cli", root=root):
+        _write(root, "a.md")
+        assert kr.detect_orphans(root) == []
+        assert kr.current(root).state == kr.CLEAN
+
+
+def test_an_uninspectable_owner_is_left_alone(monkeypatch, root):
+    """`ps` failing is not evidence of death. Orphaning on UNKNOWN would mark
+    the store SUSPECT because a subprocess timed out."""
+    a = str(page(root, "a.md"))
+    _orphan(root, planned=[a])
+    monkeypatch.setattr(kr, "process_state", lambda *a, **k: kr.UNKNOWN)
+    assert kr.detect_orphans(root) == []
+    assert kr.current(root).state == kr.CLEAN
+    assert len(kr.mutations_in(kr.ACTIVE, root)) == 1
+
+
+def test_a_mutation_that_commits_during_detection_is_not_reclassified(root,
+                                                                     monkeypatch):
+    """The read-then-update race: reading the active list on one connection and
+    updating on another let a commit in between be overwritten."""
+    a = str(page(root, "a.md"))
+    mid = _orphan(root, planned=[a])
+
+    def commit_then_report_dead(*args, **kwargs):
+        kr.commit_mutation(mid, manifest_digest="x", root=root)
+        return kr.DEAD
+
+    monkeypatch.setattr(kr, "process_state", commit_then_report_dead)
+    assert kr.detect_orphans(root) == []
+    assert kr.mutations_in(kr.COMMITTED, root)[0].mutation_id == mid
+
+
+def test_live_writes_continue_while_a_revision_is_suspect(root):
+    _orphan(root, planned=[str(page(root, "a.md"))])
+    kr.detect_orphans(root)
+    assert kr.current(root).state == kr.SUSPECT
+
+    with kr.operation(writer="cli", root=root):
+        _write(root, "later.md")
+
+    assert kr.current(root).revision == 1
+
+
+def test_suspect_propagates_across_an_unrelated_later_operation(root):
+    """If R held a half-written page and the next operation only appends a
+    session log, R+1 still holds the half-written page. Advancing is not
+    repair."""
+    _orphan(root, planned=[str(page(root, "a.md")), str(page(root, "b.md"))],
+            completed=[str(page(root, "a.md"))])
+    kr.detect_orphans(root)
+
+    with kr.operation(writer="cli", root=root):
+        _write(root, "log.md")
+
+    assert kr.current(root).state == kr.SUSPECT

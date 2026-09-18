@@ -753,3 +753,58 @@ def observe_external_drift(root=None):
     finally:
         conn.close()
     return new_revision
+
+
+def detect_orphans(root=None) -> list:
+    """Transition ACTIVE mutations whose owner is provably dead.
+
+    Only `DEAD` orphans. `UNKNOWN` — a `ps` failure, a timeout, a permission
+    problem — leaves the row alone: absence of proof of life is not proof of
+    death, and marking a shared store SUSPECT because a subprocess timed out
+    would make the flag worthless.
+
+    The decision is keyed on `planned_paths`, not `completed_paths`. A crash
+    between publication and bookkeeping leaves `completed_paths` empty while
+    the bytes are live, which is exactly the case this exists to catch.
+
+    Candidates are re-read under the lock and transitioned with compare-and-set,
+    so a mutation that commits between the liveness check and the update is not
+    reclassified from stale information.
+    """
+    base = ks.store_root(root)
+    candidates = [m for m in mutations_in(ACTIVE, base)
+                  if process_state(m.owner_pid, m.owner_identity) == DEAD]
+    if not candidates:
+        return []
+    orphaned = []
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            torn = False
+            for m in candidates:
+                row = conn.execute(
+                    "SELECT state, planned_paths FROM mutations"
+                    " WHERE mutation_id = ?", (m.mutation_id,)).fetchone()
+                if row is None or row[0] != ACTIVE:
+                    continue                    # it finished; leave it alone
+                planned = json.loads(row[1] or "[]")
+                new = ORPHANED if planned else ABORTED
+                _transition(conn, m.mutation_id, want=ACTIVE, new=new,
+                            orphan_reason="owner_process_dead",
+                            orphaned_at=_now())
+                if planned:
+                    torn = True
+                    orphaned.append(m.mutation_id)
+            if torn:
+                conn.execute(
+                    "UPDATE knowledge_state SET state = ? WHERE id = 1",
+                    (SUSPECT,))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    found = {m.mutation_id: m for m in mutations_in(ORPHANED, base)}
+    return [found[i] for i in orphaned if i in found]
