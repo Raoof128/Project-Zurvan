@@ -808,3 +808,58 @@ def detect_orphans(root=None) -> list:
         conn.close()
     found = {m.mutation_id: m for m in mutations_in(ORPHANED, base)}
     return [found[i] for i in orphaned if i in found]
+
+
+def reconcile_revision(mutation_ids, actor, reason=None, root=None) -> dict:
+    """Accept the authoritative state and mint a NEW CLEAN revision.
+
+    The approved design requires `SUSPECT R -> ... -> CLEAN R'`. Flipping
+    `state = CLEAN` in place leaves the pre-orphan manifest attached to a
+    revision now declared coherent — the laundering the design forbids.
+
+    The new revision is EXTERNAL_OBSERVED: Zurvan did not witness the operation
+    that produced these bytes, so it may not claim they were one managed
+    transaction. A durable `reconciliations` row records who accepted what.
+    """
+    from scripts.knowledge_manifest import authoritative_manifest
+    base = ks.store_root(root)
+    first = authoritative_manifest(base)
+    second = authoritative_manifest(base)
+    if first != second:
+        raise LedgerError("the store is changing; reconcile when quiet")
+
+    conn = _connect(base)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if conn.execute("SELECT COUNT(*) FROM mutations WHERE state = ?",
+                            (ACTIVE,)).fetchone()[0]:
+                raise LedgerError("a mutation is in flight; reconcile when quiet")
+            rev, before = conn.execute(
+                "SELECT current_revision, manifest_digest"
+                " FROM knowledge_state WHERE id = 1").fetchone()
+            new_revision = rev + 1
+            for mutation_id in mutation_ids:
+                _transition(conn, mutation_id, want=ORPHANED, new=RESOLVED,
+                            resolved_at=_now(), resolution_actor=actor,
+                            resolution_reason=reason,
+                            resolution_revision=new_revision)
+            conn.execute(
+                "UPDATE knowledge_state SET current_revision = ?, state = ?,"
+                " atomicity = ?, manifest_digest = ? WHERE id = 1",
+                (new_revision, CLEAN, EXTERNAL_OBSERVED, second))
+            conn.execute(
+                "INSERT INTO reconciliations (reconciliation_id, at, actor,"
+                " reason, mutation_ids, manifest_before, manifest_after,"
+                " from_revision, to_revision) VALUES (?,?,?,?,?,?,?,?,?)",
+                (f"r{uuid.uuid4().hex[:12]}", _now(), actor, reason,
+                 json.dumps(list(mutation_ids)), before, second,
+                 rev, new_revision))
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return {"from_revision": rev, "to_revision": new_revision,
+            "manifest_after": second}
