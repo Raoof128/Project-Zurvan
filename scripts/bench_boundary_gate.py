@@ -190,11 +190,40 @@ def run_isolated(root: Path, repo: Path):
 
 
 def run_batch(root: Path, repo: Path):
+    """Batched scanner, no sink baseline — scanner cost in isolation."""
     from scripts.boundary import gitscan
     return gitscan.scan_staged(root, repo)
 
 
-MODES = {"isolated": run_isolated, "batch": run_batch}
+def run_gate(root: Path, repo: Path):
+    """The whole production path: capture the accepted-sink baseline, then scan.
+
+    Reported separately from `batch` on purpose. Baseline capture is a fixed
+    per-invocation cost that scales with the SINK, not with the staged set, so
+    folding it into the scanner numbers would hide which of the two any future
+    regression came from.
+    """
+    from scripts.boundary import gitscan
+    from scripts.boundary.sink import capture_baseline
+    return gitscan.scan_staged(root, repo, baseline=capture_baseline(repo))
+
+
+def time_capture(repo: Path, reps: int = 5) -> dict:
+    from scripts.boundary.sink import capture_baseline
+
+    capture_baseline(repo)
+    samples = []
+    for _ in range(reps):
+        t0 = time.perf_counter()
+        baseline = capture_baseline(repo)
+        samples.append(time.perf_counter() - t0)
+    samples.sort()
+    return {"p50_s": round(statistics.median(samples), 4),
+            "blobs": baseline.identity["blobs"],
+            "held_mb": round(sum(len(v) for v in baseline.blobs.values()) / 1e6, 2)}
+
+
+MODES = {"isolated": run_isolated, "batch": run_batch, "gate": run_gate}
 
 
 def measure(root: Path, repo: Path, mode: str, sizes, reps: int) -> list[dict]:
@@ -233,7 +262,7 @@ def measure(root: Path, repo: Path, mode: str, sizes, reps: int) -> list[dict]:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--mode", choices=[*MODES, "both"], default="both")
+    parser.add_argument("--mode", choices=[*MODES, "both", "all"], default="all")
     parser.add_argument("--sizes", default="1,10,50,100")
     parser.add_argument("--reps", type=int, default=5)
     parser.add_argument("--protected", type=int, default=150)
@@ -258,14 +287,19 @@ def main(argv=None) -> int:
         raise SystemExit("refusing to benchmark against the live Boundary root")
 
     root, repo = build_fixture(workdir, args.protected, max(sizes))
-    modes = [*MODES] if args.mode == "both" else [args.mode]
+    modes = ({"both": ["isolated", "batch"], "all": [*MODES]}
+             .get(args.mode, [args.mode]))
     rows = []
     for mode in modes:
         rows.extend(measure(root, repo, mode, sizes, args.reps))
 
     if args.as_json:
         Path(args.as_json).write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+    cap = time_capture(repo)
     print(f"Fixture: {args.protected} protected documents, {workdir}")
+    print(f"Baseline capture: {cap['p50_s']:.4f}s for {cap['blobs']} sink blobs "
+          f"({cap['held_mb']} MB held) — a fixed per-invocation cost, "
+          f"independent of the staged count")
     print(f"{'mode':<9} {'n':>4} {'p50 s':>9} {'p95 s':>9} {'per-file':>9} "
           f"{'opens':>6} {'valids':>7} {'blobs':>6} {'mem MB':>7}")
     for r in rows:

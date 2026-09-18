@@ -313,3 +313,87 @@ def test_the_baseline_records_what_it_was_captured_from(repo):
     assert baseline.identity["blobs"] >= 1
     assert baseline.identity["commits"], "the baseline commit must be recorded"
     assert all(len(c) == 40 for c in baseline.identity["commits"].values())
+
+
+# ── capturing the baseline is a per-commit cost, so it must not be per-blob ───
+
+def test_the_baseline_reads_every_blob_without_a_subprocess_per_blob(
+        tmp_path, monkeypatch):
+    """One `git cat-file` per blob made the gate cost ~1s before it scanned.
+
+    Measured on the benchmark fixture: 0.92 s to capture 100 sink blobs, and
+    3.16 s for this repository's 399 — a fixed cost paid on every commit,
+    dwarfing the 0.075 s it takes to scan a single staged file. The number of
+    git invocations must scale with the number of REFS, not with the size of
+    the sink.
+    """
+    import subprocess as sp
+
+    def repo_with(n_files: int, name: str) -> Path:
+        r = tmp_path / name
+        r.mkdir()
+        _git(r, "init", "-q", "-b", "main")
+        _git(r, "config", "user.email", "t@example.com")
+        _git(r, "config", "user.name", "T")
+        for i in range(n_files):
+            (r / f"f{i:03d}.txt").write_text(f"content number {i}\n", encoding="utf-8")
+        _git(r, "add", "-A")
+        _git(r, "commit", "-qm", "files")
+        return r
+
+    small, large = repo_with(4, "small"), repo_with(40, "large")
+
+    def count(repo) -> int:
+        calls = []
+        real_run = sp.run
+        monkeypatch.setattr(sp, "run",
+                            lambda *a, **kw: (calls.append(a[0]), real_run(*a, **kw))[1])
+        baseline = capture_baseline(repo)
+        monkeypatch.undo()
+        return len(calls), baseline
+
+    small_calls, small_baseline = count(small)
+    large_calls, large_baseline = count(large)
+
+    assert small_baseline.identity["blobs"] == 4
+    assert large_baseline.identity["blobs"] == 40
+    # The constant itself is not the contract — INDEPENDENCE from sink size is.
+    # Asserting a magic number here would just be a second guess to maintain.
+    assert small_calls == large_calls, (
+        f"{small_calls} git invocations for 4 blobs but {large_calls} for 40: "
+        "capture cost scales with the sink, and it is paid on every commit")
+
+
+def test_the_baseline_reproduces_awkward_blob_bytes_exactly(tmp_path):
+    """Batch reading is only safe if it is byte-exact.
+
+    `git cat-file --batch` frames each object by a declared length, so anything
+    that parses on newlines corrupts blobs containing NULs, CRLF, or no trailing
+    newline. Exact bytes are the whole point: the baseline decides whether a
+    span is already public by `in`, and a single wrong byte flips that.
+    """
+    r = tmp_path / "awkward"
+    r.mkdir()
+    _git(r, "init", "-q", "-b", "main")
+    _git(r, "config", "user.email", "t@example.com")
+    _git(r, "config", "user.name", "T")
+    cases = {
+        "no-trailing-newline.txt": b"ends without a newline",
+        "embedded-nul.bin": b"before\x00after\x00\x00end",
+        "crlf.txt": b"line one\r\nline two\r\n",
+        "empty.txt": b"",
+        "binaryish.bin": bytes(range(256)) * 3,
+        "newline-heavy.txt": b"\n\n\n\n" + b"text\n" * 50,
+    }
+    for name, data in cases.items():
+        (r / name).write_bytes(data)
+    _git(r, "add", "-A")
+    _git(r, "commit", "-qm", "awkward bytes")
+
+    baseline = capture_baseline(r)
+    held = set(baseline.blobs.values())
+    for name, data in cases.items():
+        if data == b"":
+            continue                # git stores it; containment of b"" is never asked
+        assert data in held, f"{name} did not survive the batch read intact"
+        assert baseline.contains_blob(data), f"{name} is not recognised as sink-public"

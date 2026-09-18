@@ -616,6 +616,104 @@ against a predicted failure rather than an observed one.
 | **Operational v2 (0/200)** | **MEASURED, PASS**, with the bound above |
 | **Recall (10/10)** | **MEASURED, PASS** |
 
+### Production and evaluation now share one sink policy — 2026-09-18
+
+**Before.** Scan-side sink provenance existed in scanner semantics but the
+production commit gate did not supply the baseline. `boundary_guard.main` called
+`gitscan.scan_staged(root, repo)`, the parameter defaulted to `None`, and the
+scanner therefore ran with sink provenance disabled on every real commit. The
+0/200 operational result was evidence about the designed scanner, not about the
+gate that shipped.
+
+**After.** `boundary_guard` captures an accepted-sink baseline once per
+invocation and hands it to the same batch session the scanner uses. Production
+and evaluation use the same frozen pre-candidate sink semantics, and that
+equality is asserted rather than assumed.
+
+**Why the 13 sink contracts did not catch it.** Every one of them called
+`scan_bytes` directly. A test that reaches past the caller cannot detect a
+caller that fails to pass an argument. The new suite
+(`tests/test_boundary_gate_policy.py`) enters through `boundary_guard.main` —
+the function a pre-commit hook calls — and one of its tests asserts on the
+argument itself, at the seam that actually broke.
+
+**The baseline the gate uses.**
+
+| property | how |
+| --- | --- |
+| scoped to the protected repository | `provenance.protected_repo_root()`, never the repo being scanned — otherwise `git init && git commit` in a scratch directory manufactures sink evidence |
+| accepted refs only | the same allowlist ingestion uses; `refs/stash`, `refs/original/*` and scratch branches excluded |
+| captured before any candidate | once per invocation, in `boundary_guard.main`, before `scan_staged` |
+| immutable for the batch | one `ScanSession`; candidates are never added to it |
+| transient | handed to the scanner and discarded; never written to `public_origins` |
+| unavailable from tree/index/candidate | tip trees of refs only, so a staged blob is not evidence about itself |
+| fails closed | no protected repo, no accepted refs, or an unreadable one ⇒ empty baseline ⇒ no exemptions |
+
+**Policy equivalence, asserted.** For the same candidates and the same frozen
+baseline, `production_commit_gate_verdicts == evaluation_scanner_verdicts`. This
+is the invariant whose absence let the two drift while every lower-level suite
+stayed green. It is now pinned in three places: a unit test over a mixed staged
+set, and a `--via-gate` mode on **both** frozen harnesses which re-runs the
+frozen corpus through `boundary_guard` and exits non-zero on disagreement.
+
+**Both frozen gates re-measured through the production path** — the corpora were
+not regenerated, reseeded or tuned; only the execution path was added:
+
+| gate | scanner path | production gate path |
+| --- | --- | --- |
+| Operational FP (200 candidates) | 0/200, 6 suppressed by sink publicity | **0/200, exit code 0** |
+| Recall (11 fixtures) | 10/10, controls correct | **10/10, controls correct, 0 missed** |
+
+Recall is the measurement that had to survive this change. A slightly too
+generous exemption — or a baseline reader that mis-framed a blob and returned
+one giant object — would make every span look already-public, suppress every
+leak, and make the false-positive gate look *better*. 10/10 through the shipped
+path is what rules that out.
+
+**A limitation this exposed, pinned rather than hidden.** `d1.confirm` expands a
+match maximally in both directions. If appended bytes begin with the same byte
+the protected source continues with — a trailing blank line, ordinary in
+Markdown — the confirmed span reaches one byte past the public blob,
+`contains_span` is false, and a benign edit still blocks. Measured here as a
+**224-byte span against a 223-byte public blob**. The first draft of the new
+test suite hit this by accident and read as a wiring failure; it is now a
+deliberate test. Residual subtraction remains unbuilt for the same reason as
+before: neither frozen corpus produces a straddling case, so building it would
+be designing against a predicted failure. Note that the operational corpus's
+edit recipe *does* use a leading newline and still scored 0/200 — so that corpus
+does not exercise the straddle either, and the bound is stated rather than
+measured away.
+
+**Cost of the baseline, measured separately from the scanner.** Capture reads
+every blob in the tip trees. One `git cat-file` per object cost **0.92 s for 100
+sink blobs and 3.16 s for this repository's 399** — a fixed per-commit cost that
+dwarfed the 0.075 s it takes to scan a single staged file, and would have erased
+the batching gain. `git cat-file --batch` reads the whole sink in one process,
+framed by declared length so blobs containing NULs, CRLF or no trailing newline
+survive intact:
+
+| | per-object | batched |
+| --- | ---: | ---: |
+| this repository, 399 blobs | 3.16 s | **0.075 s** (42×) |
+| benchmark fixture, 100 blobs | 0.92 s | **0.071 s** (13×) |
+
+Gate latency with the baseline wired, against the scanner alone and against the
+pre-batching model (11 reps, same fixture):
+
+| staged files | pre-batching | scanner only | **full gate** | gate vs pre-batching |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.071 s | 0.071 s | **0.156 s** | 0.46× |
+| 10 | 0.457 s | 0.220 s | **0.299 s** | **1.5×** |
+| 50 | 1.980 s | 0.780 s | **0.884 s** | **2.2×** |
+| 100 | 4.299 s | 1.495 s | **1.552 s** | **2.8×** |
+
+The 2.6× batching gain is preserved: at 100 files the baseline adds ~4% to the
+scanner and the gate still beats the pre-batching path by 2.8× **while
+implementing strictly more policy**. The honest exception is the single-file
+commit, which goes from 0.071 s to 0.156 s — the baseline is a fixed cost and at
+n=1 there is nothing to amortise it against. Peak traced memory rises 2.19 MB →
+2.90 MB at 100 files; the extra is the held sink (2.88 MB on this repository).
+
 ### Commit-gate batching — one scan session per invocation, 2026-09-18
 
 Performance only. `T = 64`, the source×sink matrix, D1/D2/D3 semantics, the sink
@@ -804,6 +902,10 @@ V5  hostile-agent containment (capabilities, runtime IFC, isolated sinks)
 | Scanner trusted but untested | Red-team set frozen; both outcomes recorded |
 
 ## 15. Scorecard (v1, honest)
+
+**v1 is closed as of 2026-09-18.** The threat model, the stated
+bounds and every measured number live in
+[docs/boundary-v1-closure.md](../../boundary-v1-closure.md).
 
 | Axis | Score | What moves it higher |
 | --- | --- | --- |

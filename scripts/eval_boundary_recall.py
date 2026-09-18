@@ -230,6 +230,62 @@ def run(eval_root: Path, fixtures: list[Fixture], baseline=None) -> dict:
     }
 
 
+def run_via_gate(eval_root: Path, fixtures: list) -> dict:
+    """The same fixtures through `boundary_guard` — the real commit gate.
+
+    Recall is the measurement that has to survive the baseline being wired in.
+    An exemption rule that is slightly too generous, or a baseline reader that
+    mis-frames a blob and returns one giant object, would make every span look
+    already-public and suppress every leak — while the false-positive gate got
+    BETTER and reported a clean pass. So the leak fixtures are staged in a
+    throwaway repository and run through the production entry point.
+
+    Staged under `artefacts/` so `sinks_for` yields `PUBLIC_ARTIFACT` alone,
+    matching the sink the scanner path uses.
+    """
+    import subprocess
+    import tempfile
+
+    from scripts import boundary_guard
+    from scripts.boundary import gitscan
+
+    with tempfile.TemporaryDirectory(prefix="boundary-recall-gate-") as tmp:
+        repo = Path(tmp) / "staging"
+        (repo / "artefacts").mkdir(parents=True)
+        for cmd in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "eval@example.invalid"],
+                    ["config", "user.name", "eval"]):
+            subprocess.run(["git", "-C", str(repo), *cmd], check=True,
+                           capture_output=True)
+        (repo / "README.md").write_text("staging ground\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "seed"], check=True,
+                       capture_output=True)
+        for fixture in fixtures:
+            (repo / "artefacts" / fixture.fixture_id).write_bytes(fixture.candidate)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True,
+                       capture_output=True)
+
+        baseline = boundary_guard.gate_baseline()
+        blocked = {Path(path).name for path, _c, _v in
+                   gitscan.scan_staged(eval_root, repo, baseline=baseline)}
+
+    leaks = [f for f in fixtures if f.expected == BLOCK]
+    detected = [f.fixture_id for f in leaks if f.fixture_id in blocked]
+    missed = [f.fixture_id for f in leaks if f.fixture_id not in blocked]
+    controls_ok = all((f.fixture_id in blocked) == (f.expected == BLOCK)
+                      for f in fixtures)
+    return {
+        "leaks": len(leaks),
+        "detected": len(detected),
+        "missed": missed,
+        "controls_correct": controls_ok,
+        "recall": round(len(detected) / len(leaks), 4) if leaks else 0.0,
+        "baseline_blobs": baseline.identity["blobs"] if baseline else 0,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--eval-root", required=True)
@@ -237,6 +293,9 @@ def main(argv=None) -> int:
     parser.add_argument("--private-docs", default="raw")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--via-gate", action="store_true",
+                        help="also run the fixtures through boundary_guard, the "
+                             "production commit gate, and require agreement")
     args = parser.parse_args(argv)
 
     from scripts import boundary
@@ -291,6 +350,18 @@ def main(argv=None) -> int:
     print(f"Frozen recall manifest: {manifest_path}")
 
     result = run(eval_root, fixtures, baseline)
+    if args.via_gate:
+        gate = run_via_gate(eval_root, fixtures)
+        result["via_gate"] = gate
+        if gate["missed"] or not gate["controls_correct"]:
+            raise SystemExit(
+                "RECALL REGRESSION through the production commit gate: "
+                f"missed {gate['missed']}, controls_correct={gate['controls_correct']}. "
+                "Do not treat this as the intended permissive change.")
+        if gate["detected"] != result["detected"]:
+            raise SystemExit(
+                "POLICY MISMATCH: the production gate detected "
+                f"{gate['detected']} leaks, the evaluation scanner {result['detected']}.")
 
     if args.as_json:
         print(json.dumps(result, indent=2))

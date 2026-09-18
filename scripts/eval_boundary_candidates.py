@@ -194,6 +194,63 @@ def measure(eval_root: Path, candidates: list[dict], baseline) -> dict:
     }
 
 
+def measure_via_gate(eval_root: Path, candidates: list[dict]) -> dict:
+    """Run the SAME frozen candidates through `boundary_guard` — the real gate.
+
+    Measuring `scan_bytes` proves things about the scanner. It proves nothing
+    about the gate, and on 2026-09-18 the two had different policies: the gate
+    called `scan_staged` without a baseline, so the 0/200 measured a
+    configuration that never shipped. This path stages every candidate in a
+    throwaway repository and runs the production entry point, baseline and all.
+
+    The corpus is NOT regenerated: same manifest, same bytes, same recipe. Only
+    the execution path changes. Candidates are staged under `artefacts/` so
+    `sinks_for` yields `PUBLIC_ARTIFACT` alone and the two paths are comparable
+    on sink as well as on content.
+    """
+    import subprocess
+    import tempfile
+
+    from scripts import boundary_guard
+    from scripts.boundary import gitscan
+
+    with tempfile.TemporaryDirectory(prefix="boundary-gate-corpus-") as tmp:
+        repo = Path(tmp) / "staging"
+        (repo / "artefacts").mkdir(parents=True)
+        for cmd in (["init", "-q", "-b", "main"],
+                    ["config", "user.email", "eval@example.invalid"],
+                    ["config", "user.name", "eval"]):
+            subprocess.run(["git", "-C", str(repo), *cmd], check=True,
+                           capture_output=True)
+        (repo / "README.md").write_text("staging ground\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "seed"], check=True,
+                       capture_output=True)
+
+        for row in candidates:
+            (repo / "artefacts" / row["candidate_id"]).write_bytes(row["_data"])
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True,
+                       capture_output=True)
+
+        # Exactly what boundary_guard.main composes.
+        baseline = boundary_guard.gate_baseline()
+        blocked = gitscan.scan_staged(eval_root, repo, baseline=baseline)
+        rc = boundary_guard.main(boundary_root=eval_root, repo=repo)
+
+    blocked_ids = {Path(path).name for path, _c, _v in blocked}
+    return {
+        "candidates": len(candidates),
+        "blocked": len(blocked_ids),
+        "blocked_ids": sorted(blocked_ids),
+        "ceiling": FP_CEILING,
+        "passed": len(blocked_ids) <= FP_CEILING,
+        "guard_exit_code": rc,
+        "baseline_blobs": (baseline.identity["blobs"] if baseline else 0),
+        "baseline_refs": (baseline.identity["refs"] if baseline else []),
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--eval-root", required=True)
@@ -202,6 +259,9 @@ def main(argv=None) -> int:
     parser.add_argument("--max-private", type=int, default=300)
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--via-gate", action="store_true",
+                        help="also run the frozen corpus through boundary_guard, "
+                             "the production commit gate, and require agreement")
     args = parser.parse_args(argv)
 
     from scripts import boundary
@@ -258,6 +318,16 @@ def main(argv=None) -> int:
 
     result = measure(eval_root, candidates, baseline)
 
+    gate = measure_via_gate(eval_root, candidates) if args.via_gate else None
+    if gate is not None:
+        result["via_gate"] = gate
+        scanner_blocked = {r["candidate_id"] for r in result["blocked_detail"]}
+        if set(gate["blocked_ids"]) != scanner_blocked:
+            raise SystemExit(
+                "POLICY MISMATCH: the production commit gate and the evaluation "
+                f"scanner disagree.\n  gate blocked:    {sorted(gate['blocked_ids'])}"
+                f"\n  scanner blocked: {sorted(scanner_blocked)}")
+
     if args.as_json:
         print(json.dumps(result, indent=2))
     else:
@@ -275,6 +345,16 @@ def main(argv=None) -> int:
         print(f"VERDICT: {'PASS' if result['passed'] else 'FAIL'}")
         print(f"Matches suppressed by sink publicity: "
               f"{len(result['suppressed_by_sink_publicity'])} candidate(s)")
+        if gate is not None:
+            print("-" * 56)
+            print("Production commit-gate path (boundary_guard):")
+            print(f"  Blocked:   {gate['blocked']} / {gate['candidates']} "
+                  f"(ceiling {FP_CEILING})")
+            print(f"  Exit code: {gate['guard_exit_code']}")
+            print(f"  Baseline:  {gate['baseline_blobs']} blobs from "
+                  f"{gate['baseline_refs']}")
+            print(f"  VERDICT:   {'PASS' if gate['passed'] else 'FAIL'}")
+            print("  Policy equivalence with the evaluation scanner: CONFIRMED")
         for row in result["blocked_detail"]:
             print(f"  BLOCKED {row['candidate_id']} [{row['class']}/{row['stratum']}] "
                   f"{row['matches']} matches"

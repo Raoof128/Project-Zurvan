@@ -94,6 +94,55 @@ def _git(repo_dir: str, *args: str, binary: bool = False):
     return result.stdout if binary else result.stdout.decode("utf-8", "replace").strip()
 
 
+def _cat_file_batch(repo_dir: str, oids: list[str]) -> dict[str, bytes] | None:
+    """Read many objects in ONE git process. Returns None if the batch fails.
+
+    Capturing the baseline is a fixed cost paid on every commit, so it must
+    scale with the number of refs rather than the size of the sink. One
+    `git cat-file blob` per object cost 0.92 s for 100 blobs and 3.16 s for this
+    repository's 399 — against 0.075 s to scan a single staged file, which made
+    the gate's dominant cost the part that does no scanning.
+
+    The `--batch` stream frames each object by a DECLARED LENGTH:
+
+        <oid> SP <type> SP <size> LF <size bytes> LF
+
+    so it is parsed by length and never by newline. A blob containing NULs, CRLF
+    or no trailing newline would be corrupted by line-splitting, and one wrong
+    byte flips the containment test this baseline exists to answer.
+    """
+    if not oids:
+        return {}
+    try:
+        proc = subprocess.run(["git", "-C", repo_dir, "cat-file", "--batch"],
+                              input=("\n".join(oids) + "\n").encode(),
+                              capture_output=True, timeout=_GIT_TIMEOUT)
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+
+    out, pos, end = proc.stdout, 0, len(proc.stdout)
+    blobs: dict[str, bytes] = {}
+    while pos < end:
+        nl = out.find(b"\n", pos)
+        if nl == -1:
+            break
+        header = out[pos:nl].split()
+        pos = nl + 1
+        if len(header) < 3:
+            continue                    # "<oid> missing" — no payload follows
+        oid, otype = header[0].decode(), header[1].decode()
+        try:
+            size = int(header[2])
+        except ValueError:
+            return None                 # unparseable stream: fall back rather than guess
+        if otype == "blob":
+            blobs[oid] = out[pos:pos + size]
+        pos += size + 1                 # payload, then its trailing LF
+    return blobs
+
+
 def capture_baseline(repo_root, refs: list[str] | None = None) -> SinkBaseline:
     """Snapshot the accepted sink. Call this BEFORE the candidate operation.
 
@@ -106,7 +155,8 @@ def capture_baseline(repo_root, refs: list[str] | None = None) -> SinkBaseline:
         from scripts.provenance import protected_refs
         refs = protected_refs(repo_dir)
 
-    blobs: dict[str, bytes] = {}
+    oids: list[str] = []
+    seen: set[str] = set()
     commits: dict[str, str] = {}
     for ref in refs:
         head = _git(repo_dir, "rev-parse", ref)
@@ -120,9 +170,18 @@ def capture_baseline(repo_root, refs: list[str] | None = None) -> SinkBaseline:
             parts = line.split()
             if len(parts) != 2 or parts[1] != "blob":
                 continue
-            oid = parts[0]
-            if oid in blobs:
-                continue
+            if parts[0] not in seen:
+                seen.add(parts[0])
+                oids.append(parts[0])
+
+    blobs = _cat_file_batch(repo_dir, oids)
+    if blobs is None:
+        # One process per object. Slow, and the reason the batch path exists —
+        # but a baseline that fails to load is a baseline that grants no
+        # exemptions, which would silently make the gate stricter rather than
+        # noisier. Correctness first, speed when git cooperates.
+        blobs = {}
+        for oid in oids:
             content = _git(repo_dir, "cat-file", "blob", oid, binary=True)
             if content is not None:
                 blobs[oid] = content
