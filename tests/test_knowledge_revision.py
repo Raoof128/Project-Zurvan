@@ -361,3 +361,54 @@ def test_a_write_outside_the_wiki_touches_no_ledger(root):
     (root / "docs").mkdir(exist_ok=True)
     safe_write.write_file_safely(str(root / "docs" / "x.md"), "x")
     assert kr.current(root).revision == 0
+
+
+def test_the_caller_is_the_real_caller_not_the_plumbing(root):
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "a.md")), "x")
+    caller = kr.implicit_mutations(root)[0].caller
+    # Substring checks are wrong here: this test MODULE is named
+    # `test_knowledge_revision`, so "knowledge_revision" appears in a correct
+    # answer. The property is which FRAME was recorded — the caller, not the
+    # plumbing it went through.
+    assert caller.endswith(":test_the_caller_is_the_real_caller_not_the_plumbing")
+    assert not caller.startswith("scripts.safe_write")
+    assert not caller.startswith("scripts.knowledge_revision")
+
+
+def test_resolving_a_caller_empties_the_inventory_without_deleting_history(root):
+    """The closure gate must be reachable. Counting historical rows forever
+    meant `inventory empty` could only be achieved by erasing evidence."""
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "a.md")), "x")
+    caller = kr.implicit_mutations(root)[0].caller
+    assert len(kr.implicit_mutations(root)) == 1
+
+    resolved = kr.resolve_implicit(caller, actor="local:raouf", root=root)
+
+    assert resolved == 1
+    assert kr.implicit_mutations(root) == []                     # unresolved
+    assert len(kr.implicit_mutations(root, unresolved_only=False)) == 1
+
+
+def test_a_new_implicit_write_from_a_resolved_caller_reopens_the_inventory(root):
+    """Resolution is a claim about a caller, and a claim a later write can
+    falsify. Closure means no UNRESOLVED implicit callers, not 'we looked'."""
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "a.md")), "x")
+    caller = kr.implicit_mutations(root)[0].caller
+    kr.resolve_implicit(caller, actor="local:raouf", root=root)
+    assert kr.implicit_mutations(root) == []
+
+    safe_write.write_file_safely(str(page(root, "b.md")), "y")
+
+    assert len(kr.implicit_mutations(root)) == 1
+
+
+def test_the_caller_summary_is_a_query_not_an_audit(root):
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "a.md")), "x")
+    safe_write.write_file_safely(str(page(root, "b.md")), "y")
+    summary = kr.implicit_callers(root)
+    assert sum(summary.values()) == 2
+    assert all(":" in k for k in summary)

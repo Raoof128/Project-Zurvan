@@ -618,3 +618,33 @@ def implicit_mutations(root=None, unresolved_only=True) -> list:
     finally:
         conn.close()
     return [_row_to_mutation(r) for r in rows]
+
+
+def implicit_callers(root=None) -> dict:
+    """Unresolved implicit callers and how often each one wrote."""
+    summary: dict = {}
+    for m in implicit_mutations(root):
+        key = m.caller or "unknown"
+        summary[key] = summary.get(key, 0) + 1
+    return summary
+
+
+def resolve_implicit(caller, actor, root=None) -> int:
+    """Mark every unresolved implicit mutation from `caller` as migrated.
+
+    A claim about a caller, which a later implicit write from the same caller
+    falsifies by simply appearing in the inventory again.
+    """
+    conn = _connect(root)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        cur = conn.execute(
+            "UPDATE mutations SET resolved_at = ?, resolution_actor = ?,"
+            " resolution_reason = 'migrated to an explicit operation'"
+            " WHERE implicit = 1 AND resolved_at IS NULL AND caller = ?",
+            (_now(), actor, caller))
+        count = cur.rowcount
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    return count
