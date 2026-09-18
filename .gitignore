@@ -121,3 +121,8 @@ data/*.sqlite.*
 data/**/*.sqlite
 data/**/*.sqlite-*
 data/quarantine/
+# Measurement snapshots: hard links to the index, released at gate end.
+data/snapshots/
+# Write attribution sidecar: records WHO wrote each wiki page, so it
+# carries private wiki paths. Local operational state, never tracked.
+data/writes.jsonl

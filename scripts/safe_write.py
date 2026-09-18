@@ -42,6 +42,23 @@ def escape_yaml_string(s: str) -> str:
         return ""
     return yaml.dump(s, default_style='"', width=2**20, allow_unicode=True).strip()
 
+def _stamp(target: Path, action: str) -> None:
+    """Record WHO wrote this, so the session guard can tell a test contaminating
+    production from another repository's session recording a decision.
+
+    The write has ALREADY succeeded by the time this runs, and the whole call is
+    swallowed: a guard that loses someone's decision page in order to record
+    that a decision page was written is worse than no guard. `writelog.record`
+    is defensive too — this is the second layer, because the recorder is a
+    module attribute and can be replaced.
+    """
+    try:
+        from scripts import writelog
+        writelog.record(target, action)
+    except Exception:
+        pass
+
+
 def write_file_safely(file_path: str, content: str) -> bool:
     """
     Writes content to file_path after checking security rules.
@@ -57,7 +74,8 @@ def write_file_safely(file_path: str, content: str) -> bool:
     
     with open(target, 'w', encoding='utf-8') as f:
         f.write(content)
-        
+
+    _stamp(target, "write")
     return True
 
 def append_file_safely(file_path: str, content: str) -> bool:
@@ -73,5 +91,7 @@ def append_file_safely(file_path: str, content: str) -> bool:
     
     with open(target, 'a', encoding='utf-8') as f:
         f.write(content)
+
+    _stamp(target, "append")
         
     return True

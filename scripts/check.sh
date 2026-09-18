@@ -30,6 +30,11 @@ if [ -f data/search.sqlite-journal ]; then
   exit 1
 fi
 
+# Snapshots left by a killed gate hold an index inode alive and cost real disk.
+# Directories owned by a LIVE process are left alone: that is a measurement in
+# progress, and deleting its input mid-run is the failure snapshots prevent.
+PYTHONPATH=. python scripts/measurement_snapshot.py --sweep || true
+
 echo "[0/23] Running Boundary egress gate..."
 # Opt-in: reports NOT CONFIGURED and exits 0 when no store exists, so the gate
 # never blocks a machine that has not set Boundary up. When a store IS present,
@@ -107,8 +112,21 @@ echo "✅ Search index rebuilt and verified healthy."
 echo ""
 
 echo "[6/23] Evaluating Retrieval Harness..."
+# Scored against a SNAPSHOT of the index, not the live one. Zurvan is shared
+# cross-project memory and the MCP server runs with ZURVAN_MCP_READONLY=0, so
+# another project's session can record a decision at any moment — twice
+# (2026-09-17 14:57, 2026-09-18 15:21) one landed mid-gate and aborted a
+# twenty-minute run with nothing wrong in any code under test. The snapshot is
+# a hard link, so this costs no disk and no copy: the rebuild above promoted a
+# new inode with os.replace(), and the link keeps pointing at these bytes while
+# production moves on. Writers are never blocked.
+SNAPSHOT_INDEX="$(PYTHONPATH=. python scripts/measurement_snapshot.py --label check --path-only)"
+SNAPSHOT_DIR="$(dirname "$SNAPSHOT_INDEX")"
+trap 'rm -rf "$SNAPSHOT_DIR"' EXIT
+echo "  measuring against snapshot: $(basename "$SNAPSHOT_DIR")"
 PYTHONPATH=. python scripts/eval_search.py --validate
-PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6
+PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6 --index "$SNAPSHOT_INDEX"
+rm -rf "$SNAPSHOT_DIR"; trap - EXIT
 echo "✅ Retrieval Evaluation passed."
 echo ""
 

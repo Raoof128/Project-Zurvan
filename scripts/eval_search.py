@@ -67,8 +67,17 @@ def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
     return True
 
 def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3: float = 0.0,
-                          as_json: bool = False, max_queries: int | None = None):
+                          as_json: bool = False, max_queries: int | None = None,
+                          index_path: str | None = None):
     """Score retrieval against the gold set.
+
+    ``index_path`` names the index to score. It defaults to the canonical one,
+    so ad-hoc use is unchanged, and it exists so a gate can hand this function a
+    MEASUREMENT SNAPSHOT — a hard link to the index as it was when the gate
+    started. Another project writing to the shared store mid-run then changes
+    the live store and the next rebuild, and changes nothing about the number
+    being computed here. The index is reported alongside the metrics, because a
+    result that cannot name its input is not a measurement.
 
     ``max_queries`` runs only the first N queries. It exists for LIVENESS
     checks, not for measurement: the MCP e2e smoke called this tool with the
@@ -78,6 +87,9 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
     truncated run labels itself as one in its output.
     """
     gold_file = gold_file or _default_gold()
+    if index_path is None:
+        from scripts.config import get_search_db_path
+        index_path = str(get_search_db_path())
     validate_gold_dataset(gold_file, quiet=as_json)
     dataset = load_gold_dataset(gold_file)
     if not dataset:
@@ -115,7 +127,7 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
         # Let's just use search_hybrid for now, as it serves the eval purpose and is robust.
         
         if hybrid:
-            results = search_hybrid(query, limit=10)
+            results = search_hybrid(query, limit=10, db_path=index_path)
             retrieved_paths = [r['source_path'] for r in results]
         else:
             # Basic keyword search using FTS5 (since search_hybrid relies on FTS5 anyway)
@@ -163,6 +175,8 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
         "failing_queries": failing_queries,
         "min_top3": min_top3,
         "passed": top3_accuracy >= min_top3,
+        "index_path": index_path,
+        "index_identity": _identity_of(index_path),
     }
 
     if as_json:
@@ -177,10 +191,16 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
         print(f"Top-3 accuracy: {top3_accuracy * 100:.0f}%")
         print(f"Mean reciprocal rank: {mrr:.2f}")
         print(f"Failures: {failures}")
+        ident = metrics["index_identity"]
+        if ident:
+            print(f"Index: {index_path}")
+            print(f"  {ident.get('chunks')} chunks / {ident.get('sources')} sources"
+                  f"  chunk-set {str(ident.get('chunk_id_set_sha'))[:12]}"
+                  f"  space {','.join(ident.get('embedding_space') or [])}")
         print("=========================")
 
     if top3_accuracy < min_top3:
-        if _index_uses_mock_embeddings():
+        if _index_uses_mock_embeddings(index_path):
             # Retrieval quality cannot be judged against deterministic-hash
             # vectors: the semantic half of the score is noise, so the number
             # measures nothing. The smoke test runs under the mock provider,
@@ -202,13 +222,23 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
     return metrics
 
 
-def _index_uses_mock_embeddings() -> bool:
+def _identity_of(index_path: str) -> dict:
+    """What produced this number. Never fatal: identity is reporting, not a gate."""
+    try:
+        from scripts.measurement_snapshot import index_identity
+        return index_identity(index_path)
+    except Exception:
+        return {}
+
+
+def _index_uses_mock_embeddings(index_path: str | None = None) -> bool:
     """True when the search index holds deterministic-hash vectors."""
     import sqlite3
     from scripts.config import get_search_db_path
 
     try:
-        conn = sqlite3.connect(f"file:{get_search_db_path()}?mode=ro", uri=True)
+        target = index_path or get_search_db_path()
+        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
         row = conn.execute("SELECT provider FROM embeddings LIMIT 1").fetchone()
         conn.close()
         return bool(row) and row[0] == "mock"
@@ -223,6 +253,10 @@ if __name__ == "__main__":
     parser.add_argument("--max-queries", type=int, default=None,
                         help="Run only the first N queries (liveness check, not a measurement)")
     parser.add_argument("--min-top3", type=float, default=0.0)
+    parser.add_argument("--index", default=None, dest="index_path",
+                        help="Score this index instead of the canonical one — "
+                             "point it at a measurement snapshot so an external "
+                             "write mid-run cannot change the number")
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json",
                         help="Emit a single machine-parseable JSON object instead of the text report")
@@ -232,4 +266,4 @@ if __name__ == "__main__":
         validate_gold_dataset(args.gold or _default_gold())
     else:
         run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json,
-                              max_queries=args.max_queries)
+                              max_queries=args.max_queries, index_path=args.index_path)

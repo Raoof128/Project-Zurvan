@@ -16,6 +16,8 @@ A test that legitimately exercises live-state mutation should redirect the store
 with `ZURVAN_ROOT` rather than being exempted here.
 """
 import os
+import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -57,6 +59,24 @@ def _snapshot() -> dict:
     return counts
 
 
+def _report(config, message: str) -> None:
+    """Emit a notice that survives a PASSING run.
+
+    pytest captures file descriptor 2 wholesale, so neither `print` nor
+    `sys.__stderr__` reaches anyone unless the test fails — and this notice
+    exists precisely for runs that pass. The terminal reporter writes to the
+    real output stream. `test_conftest_guard_behaviour` caught the first two
+    attempts at this; a diagnostic nobody sees is not a diagnostic.
+    """
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:                       # -p no:terminal, or an odd harness
+        print(message, file=sys.__stderr__, flush=True)
+        return
+    reporter.write_sep("-", "live store")
+    for line in message.splitlines():
+        reporter.write_line(line)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def live_search_index_is_not_a_test_fixture():
     """Fail the session if the tests touched the real `data/search.sqlite`.
@@ -90,20 +110,70 @@ def live_search_index_is_not_a_test_fixture():
 
 
 @pytest.fixture(scope="session", autouse=True)
-def live_store_is_not_a_test_fixture():
-    """Fail the session if the tests changed the real `wiki/`."""
+def live_store_is_not_a_test_fixture(pytestconfig):
+    """Fail the session if THE TESTS changed the real `wiki/`.
+
+    The emphasis moved on 2026-09-18. This guard used to fail on any change,
+    which cannot distinguish the defect it exists to catch — a test writing into
+    production — from the product working, because Zurvan is shared
+    cross-project memory and another repository's session may record a decision
+    at any moment. Twice (2026-09-17 14:57, 2026-09-18 15:21) the second case
+    aborted a twenty-minute gate with nothing wrong in any code under test.
+
+    Writes are now stamped at the choke point with the pid and an inherited
+    session token (`scripts/writelog.py`), so the guard can ask whose write it
+    was. It still fails for anything from its OWN process tree, including
+    subprocesses — that is the 48-stray-pages failure, unchanged.
+
+    It fails CLOSED: a change with no attribution at all is treated as ours,
+    because an un-stamped writer is exactly the case we cannot reason about.
+    Adding a write path without stamping it makes this stricter, never weaker.
+
+    Attribution is evidence, not an excuse. It never declares a measurement
+    valid — `scripts/measurement_snapshot.py` already removed that dependency by freezing
+    the index a measurement reads.
+    """
     # If the whole run is already redirected, there is nothing to protect.
     if os.environ.get("ZURVAN_ROOT"):
         yield
         return
 
+    from scripts import writelog
+
+    # Stamped onto every write this process or its children make, so they can be
+    # told apart from everyone else's without inspecting the text.
+    token = f"pytest-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    previous = os.environ.get(writelog.SESSION_ENV)
+    os.environ[writelog.SESSION_ENV] = token
+    window_start = writelog.now()
+
     before = _snapshot()
     before_log_length = before["log.md lines"]
-    yield
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(writelog.SESSION_ENV, None)
+        else:
+            os.environ[writelog.SESSION_ENV] = previous
     after = _snapshot()
 
     moved = {k: (before[k], after[k]) for k in before if before[k] != after[k]}
     if moved:
+        records = writelog.entries(root=LIVE_ROOT, since=window_start)
+        if writelog.all_external(records, session=token):
+            # The store moved and none of it was us. Reported, never silent —
+            # and no measurement in this run depended on it holding still.
+            _report(
+                pytestconfig,
+                "[live store] changed during the suite, and every write was "
+                "EXTERNAL — another Zurvan client, not this run:\n"
+                + "\n".join(f"  {k}: {b} -> {a} ({a - b:+d})"
+                             for k, (b, a) in sorted(moved.items()))
+                + "\n" + writelog.describe(records)
+                + "\n  Not a failure: retrieval is measured against a frozen "
+                  "snapshot (scripts/measurement_snapshot.py), so this changed nothing.")
+            return
         detail = "\n".join(
             f"  {k}: {b} -> {a} ({a - b:+d})" for k, (b, a) in sorted(moved.items())
         )
@@ -113,7 +183,13 @@ def live_store_is_not_a_test_fixture():
             "whatever wrote it:\n"
             f"{detail}\n"
             f"{_log_lines_appended_during(before_log_length)}"
-            "If a TEST wrote it, point that test at a throwaway store with "
+            + ("  Attributed to THIS run (pid, or a session token this process "
+               "set and its children inherited):\n"
+               + writelog.describe(writelog.classify(records, session=token)[0])
+               + "\n" if records else
+               "  No write was stamped at all, so this is treated as ours: an "
+               "un-stamped writer is the case attribution cannot reason about.\n")
+            + "If a TEST wrote it, point that test at a throwaway store with "
             "ZURVAN_ROOT (see tests/test_cli.py::test_cli_remember) rather than "
             "deleting the files afterwards — a crash mid-test leaves them behind.\n"
             "If ANOTHER Zurvan client wrote it (the MCP server runs with "

@@ -1,6 +1,6 @@
 # Measurement snapshots — freeze the input, not the store
 
-**Status:** Design, awaiting a decision on §6 before implementation
+**Status:** IMPLEMENTED 2026-09-18 (see §8); §6 answered there
 **Date:** 2026-09-17
 **Scope:** `scripts/eval_search.py`, `scripts/check.sh`, `tests/conftest.py`, a new
 `scripts/snapshot.py`. No change to retrieval ranking, and none to the frozen
@@ -129,3 +129,84 @@ forward a baseline gains a snapshot identity, which makes "the same measurement"
 a checkable claim rather than an assumption — the 184,002 / 184,231 / 184,241
 chunk counts attached to three different baselines are exactly the ambiguity
 this removes.
+
+---
+
+## 8. Implemented — 2026-09-18
+
+`scripts/measurement_snapshot.py`, `scripts/writelog.py`, `scripts/eval_search.py --index`,
+`scripts/check.sh` gate 6, `tests/conftest.py`.
+
+**Naming deviation, stated.** §4 proposed `scripts/snapshot.py`. That module
+already exists and builds the `.tar.gz` export behind `zurvan snapshot`; writing
+the new one there broke `zurvan snapshot` and was caught by the full suite as an
+ImportError. The measurement snapshot lives in `measurement_snapshot.py` and the
+export module is untouched.
+
+**§3 was right and it made the fix small.** `eval_search --hybrid` reads only the
+index, so freezing one file freezes the measurement. `capture()` hard-links it;
+`os.replace()` promotion then gives production a new inode and the link keeps
+pointing at the frozen bytes.
+
+Measured on the production index (738 MB, 184,516 chunks):
+
+| | |
+| --- | --- |
+| `os.link` alone | 0.26 ms |
+| corpus manifest, 4,467 files (stat only) | 54.8 ms |
+| index identity (chunk-id-set hash) | 386 ms |
+| **`capture()` end to end** | **485 ms** |
+| `deep=True`, hashes all 738 MB of vectors | +743 ms — opt-in for that reason |
+| disk cost | none; `nlink` 1 → 2, same inode |
+| peak traced memory | 1.20 MB |
+| retrieval overhead | none measurable — identical ranked results |
+
+Retrieval scored against canonical and against a snapshot gives the same
+numbers: top-1 0.72, top-3 0.76, MRR 0.7423, 12 failures, same failing queries,
+same `chunk_id_set_sha`. An early sequential comparison suggested +62% snapshot
+overhead; interleaved it is −2.5% with an 84%-of-median spread within each
+condition, so the honest statement is **no detectable difference**, which is
+what the same inode predicts.
+
+**§5's regression** passes through the real rebuild path, including repeated
+rebuilds inside one open snapshot. Five mutants — snapshot pointing at the live
+path, identity re-read live, copy instead of link, release deleting the
+canonical index, sweep ignoring process liveness — five caught.
+
+### §6 is answered: the guard stays, and asks a better question
+
+The recommendation was "attribute by process ancestry, after §4 ships". §4 has
+shipped, and the evidence changed the urgency: **both real aborts were in gate 2,
+pytest** (2026-09-17 14:57, 2026-09-18 15:21), not in the retrieval evaluation.
+Pytest is not scoring retrieval — it is asserting the suite did not contaminate
+the corpus — so snapshots alone would have prevented neither.
+
+Writes to `wiki/` are now stamped at the `safe_write` choke point with pid, ppid
+and a session token inherited through the environment. The guard fails for
+writes from its **own process tree**, including subprocesses, which is the
+48-stray-pages defect unchanged. It records external writes and passes.
+
+Three properties keep it honest:
+
+- **Fails closed.** `all_external([])` is `False`. A change with no attribution
+  is treated as ours, so a new write path that forgets to stamp makes the guard
+  stricter, never weaker.
+- **Not by text.** "Does this look like a test note?" gets it wrong in both
+  directions; an ordinary decision whose title contains "test" walks through it.
+- **Evidence, not an excuse.** It never declares a measurement valid — §4
+  already removed that dependency.
+
+The guard's behaviour is pinned by `tests/test_conftest_guard_behaviour.py`,
+which runs a nested pytest over a **copy** of `conftest.py` in a temp directory
+so `LIVE_ROOT` resolves there and production is never in scope: ours → fails,
+external → passes with a visible notice, unattributed → fails.
+
+That meta-test earned its place immediately. The external-write notice was
+invisible in the first two attempts, because pytest captures **file descriptor
+2** — neither `print` nor `sys.__stderr__` survives a passing run. It now goes
+through the terminal reporter.
+
+### Not done, deliberately
+
+A write lease. Still the right tool for an operation that needs a stationary
+store and still the wrong one for a test run.
