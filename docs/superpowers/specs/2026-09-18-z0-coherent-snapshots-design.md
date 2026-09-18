@@ -160,6 +160,14 @@ safe_write(B)   → implicit mutation commits, revision 102
 That is precisely the half-operation §3.1 exists to eliminate, reintroduced
 through the compatibility door.
 
+**An inherited mutation id is honoured only in the store that issued it.**
+The barrier is announced to subprocesses through the environment, and
+`zurvan --project X` re-invokes the CLI against a *different* store. An id that
+names no row in the registry being written is treated as no active mutation, so
+the write opens an implicit one and is recorded. Trusting the inherited value
+would make cross-project writes silently untracked — failing open, in the one
+place this design cannot afford it.
+
 **Implicit mutation is a migration mechanism, not the Z0 contract:**
 
 ```
@@ -337,7 +345,7 @@ benefit.
 
 | Store | Mechanism | Legal because | Measured cost |
 |---|---|---|---|
-| `wiki/` (135 MB, 4,425 files) | clonefile, else copy | COW clone gets its own inode | 0.55–0.59 s, **0 blocks** |
+| `wiki/` (135 MB, 4,430 files) | clonefile, else copy | COW clone gets its own inode | 0.55–0.59 s, **0 blocks** |
 | `data/search.sqlite` (738 MB) | hardlink | published inode never modified in place | 0.26 ms, 0 blocks |
 | `data/graph.sqlite` (13 MB) | clonefile, else copy | see §4.4 | < 10 ms, 0 blocks |
 | manifest (stat walk) | — | — | 15–17 ms warm, 116 ms cold |
@@ -346,6 +354,16 @@ Bound: measured on one APFS volume on one machine. `cp -c` fails across volumes
 and does not exist off APFS, which is why the fallback is a first-class path.
 Snapshots live under `data/snapshots/`, on the same volume as the stores, so the
 fast path applies by construction.
+
+**The clone is a superset of the manifest.** Everything under `wiki/` is
+captured, because a snapshot that excluded something cannot answer questions
+asked of it later and the clone costs zero blocks either way. But **derived
+subtrees do not define a revision**: `wiki/traces/` is generated output that
+`scripts/trace_writer.py:20` writes with `write_text`, bypassing `safe_write`
+and therefore the mutation barrier. Including it in the authoritative manifest
+would make Zurvan's own tracing register as external tampering — the mechanism
+of §5.2 firing on the thing it exists to detect. Traces are captured for
+forensics and excluded from the manifest. Measured: 25 of 4,430 files, 0.6%.
 
 ### 4.2 The hardlink invariant, made explicit
 
@@ -430,6 +448,10 @@ it did. Z0 promotes this function from diagnostic to correctness mechanism
 **and extends it with `st_ino`**, which the same `stat` call already returns, so
 the measured cost is unchanged.
 
+The authoritative manifest covers `wiki/` **excluding derived subtrees**
+(§4.1). Measured on the live store: 19/19/18 ms over 4,405 files excluding
+traces, against 26/20/19 ms over all 4,430.
+
 ### 5.2 The completed edit — revision/manifest binding
 
 The double manifest catches nothing here:
@@ -483,6 +505,15 @@ stable observed filesystem state; it does **not** claim one logical user
 transaction, and no consumer may treat it as one. A measurement snapshot
 surfaces the atomicity of the revision it pins, so an evaluation can record what
 kind of input it actually had.
+
+**Second bound, on concurrent mutations.** If A and B are in flight together
+and A commits first, the manifest A records already contains B's half-written
+files. This is benign for drift detection — B's commit overwrites the digest
+moments later, and capture refuses while any mutation is ACTIVE — but revision
+A's `MANAGED` label is not a faithful record of "the state after A alone".
+Stated rather than engineered away: serialising every logical operation across
+a shared cross-project store would reintroduce the global lock this design
+exists to avoid.
 
 **Bound, stated rather than engineered away:** size + `mtime_ns` + inode is not
 a content hash. An in-place same-size write within one nanosecond tick is
