@@ -360,6 +360,11 @@ in-place production mutation and fails loudly.**
 
 ### 4.3 Published stores must be self-contained SQLite
 
+> **A SQLite store may be published as an immutable snapshot component only when
+> the published database file is self-contained. Publication must fail if
+> committed state depends on WAL, SHM, rollback-journal, or other mutable
+> sidecar state.**
+
 A hardlink pins one file. If committed state lived in a `-wal` sidecar, the
 pinned file would not be the whole database.
 
