@@ -309,3 +309,55 @@ def test_no_observer_sees_a_half_completed_logical_operation(root):
     observe()
 
     assert observed == [0, "BUSY", 1]
+
+
+def test_safe_write_records_intent_before_publishing(root, monkeypatch):
+    """If the ledger cannot record the intent, the bytes must not land."""
+    from scripts import safe_write
+
+    def refuse(*a, **k):
+        raise kr.LedgerError("ledger down")
+
+    monkeypatch.setattr(kr, "plan_write", refuse)
+    target = page(root, "a.md")
+    with pytest.raises(kr.LedgerError):
+        safe_write.write_file_safely(str(target), "alpha\n")
+    assert not target.exists()
+
+
+def test_safe_write_joins_the_active_operation(root):
+    from scripts import safe_write
+    with kr.operation(writer="cli", root=root):
+        safe_write.write_file_safely(str(page(root, "a.md")), "alpha\n")
+        safe_write.append_file_safely(str(page(root, "log.md")), "line\n")
+        actives = kr.mutations_in(kr.ACTIVE, root)
+        assert len(actives) == 1
+        assert len(actives[0].completed_paths) == 2
+    assert kr.current(root).revision == 1
+
+
+def test_a_write_outside_any_operation_is_one_implicit_mutation(root):
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "a.md")), "alpha\n")
+    assert kr.current(root).revision == 1
+    assert len(kr.implicit_mutations(root)) == 1
+
+
+def test_two_unwrapped_writes_are_two_implicit_mutations(root):
+    """The compatibility door, and its limit. An observer sampling between
+    them sees no ACTIVE mutation and a coherent-looking revision over a
+    half-finished operation. Z0 may detect and report this shape; it may not
+    claim atomicity for it."""
+    from scripts import safe_write
+    safe_write.write_file_safely(str(page(root, "decisions/foo.md")), "page\n")
+    between = (kr.mutations_in(kr.ACTIVE, root), kr.current(root).revision)
+    safe_write.append_file_safely(str(page(root, "log.md")), "line\n")
+    assert between == ([], 1)
+    assert len(kr.implicit_mutations(root)) == 2
+
+
+def test_a_write_outside_the_wiki_touches_no_ledger(root):
+    from scripts import safe_write
+    (root / "docs").mkdir(exist_ok=True)
+    safe_write.write_file_safely(str(root / "docs" / "x.md"), "x")
+    assert kr.current(root).revision == 0

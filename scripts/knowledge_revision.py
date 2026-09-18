@@ -600,3 +600,21 @@ def operation(project=None, writer=None, caller=None, root=None):
             _finish(op, ok=True)
     finally:
         _CTX.reset(token)
+
+
+def implicit_mutations(root=None, unresolved_only=True) -> list:
+    """Implicit mutations, unresolved by default.
+
+    The migration gate is "no unresolved implicit callers", not "no historical
+    implicit rows": counting history made closure reachable only by deleting
+    evidence, which this project does not do.
+    """
+    clause = " AND resolved_at IS NULL" if unresolved_only else ""
+    conn = _connect(root)
+    try:
+        rows = conn.execute(
+            f"SELECT {_MUTATION_COLS} FROM mutations"
+            f" WHERE implicit = 1{clause} ORDER BY started_at").fetchall()
+    finally:
+        conn.close()
+    return [_row_to_mutation(r) for r in rows]
