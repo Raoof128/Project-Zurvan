@@ -36,9 +36,12 @@ Two properties of the shipped piece *are* correct and are carried forward:
   a temp path and promotes with one `os.replace()`, so the published inode is
   never modified in place. That argument is store-specific. It does **not**
   transfer to `wiki/` or to `data/graph.sqlite`.
-- `_corpus_manifest_sha` (`measurement_snapshot.py:95`) already computes a
-  `(relpath, size, mtime_ns)` manifest and is documented there as diagnostic.
-  Amendment 3 promotes it to a correctness mechanism.
+- `_corpus_manifest_sha` (`measurement_snapshot.py:95`) computes a
+  `(relpath, size, mtime_ns)` manifest — **no inode field** — and is documented
+  there as diagnostic. Z0 promotes it to a correctness mechanism **and extends
+  it with `st_ino`**, which the same `stat` call already returns, so the
+  measured cost is unchanged. The extension is new behaviour, not existing
+  behaviour.
 
 ---
 
@@ -125,11 +128,18 @@ Zurvan 2.0 exists to remove — better numbers measured on uncertain state.
 Z0 is renamed **"Coherent snapshot and derived-store lifecycle"** and its build
 list becomes:
 
-- knowledge revisions, with `CLEAN` / `SUSPECT` state;
-- a **logical mutation barrier** (transactions, not a per-write counter);
-- double wiki manifest verification;
+- knowledge revisions, with `CLEAN` / `SUSPECT` state and
+  `MANAGED` / `EXTERNAL_OBSERVED` atomicity;
+- a **logical mutation barrier** (transactions, not a per-write counter), with
+  implicit mutation as a migration mechanism only;
+- **two capture purposes** — an *authoritative* snapshot that pins inputs and
+  requires nothing of derived stores, and a *measurement* snapshot that requires
+  the capabilities its caller declares;
+- double manifest verification, **plus a revision↔manifest binding** so a
+  completed unmanaged edit is detected rather than only a racing one;
 - COW snapshot capture behind a portable abstraction;
-- orphan detection and `knowledge reconcile`;
+- orphan detection and `knowledge reconcile`, which reaches `CLEAN` without
+  rebuilding;
 - snapshot leases and GC;
 - **snapshot-backed search rebuild**;
 - **snapshot-backed graph rebuild**;
@@ -143,6 +153,14 @@ revision; stamping either number is false. Only a rebuild that reads a snapshot
 can stamp a revision it can prove. Without them, §30.16's verification step has
 nothing truthful to compare against and Z0 would close on a partial claim for a
 second time.
+
+**Rev 2 of the Z0 design added the two-purpose capture split.** Design review
+found that a single capture contract deadlocks: capture verified derived stamps
+unconditionally while rebuild began by capturing, so a stale search index could
+never be rebuilt. The same conflation deadlocked reconciliation, because
+reaching `CLEAN` required a rebuild that refuses `SUSPECT` input. Separating
+authoritative from measurement capture, and defining `CLEAN` as a property of
+authoritative state rather than of derived currency, dissolves both.
 
 **Consequence, recorded because it changes a standing rule:** the CLAUDE.md
 prohibition on running `check.sh` during an index rebuild becomes a
@@ -234,7 +252,7 @@ arriving later and being silently invisible to Z0's coherence proof.
 | # | Date | Amends | Summary |
 |---|---|---|---|
 | 1 | 2026-09-18 | §26, §11.2 | Z1V phase inserted for the measured 83% vector scan |
-| 2 | 2026-09-18 | §26 Z0 | Z0 widened to the derived-store lifecycle; snapshot-backed rebuilds |
+| 2 | 2026-09-18 | §26 Z0 | Z0 widened to the derived-store lifecycle; snapshot-backed rebuilds; authoritative/measurement capture split (rev 2) |
 | 3 | 2026-09-18 | §5, §8.4 | `data/generations/` replaced by a portable snapshot abstraction |
 | 4 | 2026-09-18 | §8.2 | Claim-ledger component declared unsupported, with a fail-closed guard |
 
