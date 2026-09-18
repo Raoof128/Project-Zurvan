@@ -54,7 +54,7 @@ Copied verbatim from `AGENTS.md`, `CLAUDE.md` and the spec. Every task's require
 
 ---
 
-### Task 1: One authority predicate
+## Task 1 — One authority predicate
 
 **Files:**
 - Create: `scripts/knowledge_scope.py`
@@ -256,7 +256,7 @@ git commit -m "zurvan: one predicate decides what is authoritative knowledge"
 
 ---
 
-### Task 2: The manifest, failing closed
+## Task 2 — The manifest, failing closed
 
 **Files:**
 - Create: `scripts/knowledge_manifest.py`
@@ -518,7 +518,7 @@ git commit -m "zurvan: manifests over one scope, failing closed"
 
 ---
 
-### Task 3: Ledger schema and reads
+## Task 3 — Ledger schema and reads
 
 **Files:**
 - Create: `scripts/knowledge_revision.py`
@@ -864,7 +864,7 @@ git commit -m "zurvan: the revision ledger, with checked states and a fingerprin
 
 ---
 
-### Task 4: Process liveness has three states
+## Task 4 — Process liveness has three states
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -990,7 +990,7 @@ git commit -m "zurvan: liveness is ALIVE, DEAD or UNKNOWN; only DEAD orphans"
 ```
 
 ---
-### Task 5: Compare-and-set transitions
+## Task 5 — Compare-and-set transitions
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -1138,7 +1138,7 @@ git commit -m "zurvan: ledger transitions are compare-and-set"
 
 ---
 
-### Task 6: The two-phase write lifecycle
+## Task 6 — The two-phase write lifecycle
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -1619,7 +1619,7 @@ git commit -m "zurvan: two-phase writes, lazy activation, operations that nest"
 
 ---
 
-### Task 7: `safe_write` participates around the bytes
+## Task 7 — `safe_write` participates around the bytes
 
 **Files:**
 - Modify: `scripts/safe_write.py:62-95`
@@ -1775,7 +1775,7 @@ git commit -m "zurvan: safe_write records intent before the bytes and success af
 ```
 
 ---
-### Task 8: An implicit inventory that can actually reach zero
+## Task 8 — An implicit inventory that can actually reach zero
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -1913,7 +1913,7 @@ git commit -m "zurvan: the implicit inventory names its callers and can reach ze
 
 ---
 
-### Task 9: Manifest binding, bootstrap, and atomic drift observation
+## Task 9 — Manifest binding, bootstrap, and atomic drift observation
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -2170,7 +2170,7 @@ git commit -m "zurvan: bootstrap the manifest baseline; observe drift atomically
 
 ---
 
-### Task 10: Orphans are found by death, not by silence
+## Task 10 — Orphans are found by death, not by silence
 
 **Files:**
 - Modify: `scripts/knowledge_revision.py`
@@ -2388,7 +2388,7 @@ git commit -m "zurvan: orphans are found by death and by intent, not by silence"
 
 ---
 
-### Task 11: Reconciliation mints a real revision and leaves a record
+## Task 11 — Reconciliation mints a real revision and leaves a record
 
 **Files:**
 - Create: `scripts/knowledge_reconcile.py`
@@ -2836,7 +2836,7 @@ git commit -m "zurvan: reconciliation mints a new CLEAN revision and records who
 ```
 
 ---
-### Task 12: One CLI invocation is one logical operation
+## Task 12 — One CLI invocation is one logical operation
 
 **Files:**
 - Modify: `scripts/cli.py:40` (rename `main` → `_main`), end of module (new `main`), and the subparser/dispatch blocks for `knowledge`
@@ -3081,7 +3081,7 @@ git commit -m "zurvan: one CLI invocation is one logical operation"
 
 ---
 
-### Task 13: The guard watches the whole ledger
+## Task 13 — The guard watches the whole ledger
 
 **Files:**
 - Modify: `tests/conftest.py:18-23` (imports), `:49-58` (`_snapshot`)
@@ -3225,7 +3225,7 @@ git commit -m "zurvan: the session guard watches the ledger, not just the wiki"
 
 ---
 
-### Task 14: The full gate, and an honest status entry
+## Task 14 — The full gate, and an honest status entry
 
 **Files:**
 - Modify: `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`
@@ -3283,7 +3283,7 @@ Gate items covered: §10.1.1 (Task 6), .2 and .3 (Tasks 7, 8), .4 (Task 10), .5 
 
 Gate items **deliberately not covered**, deferred to Plans 2 and 3: §10.2.8–11, §10.3.14–19. Task 14 requires this stated in the change entry rather than left implicit.
 
-**Placeholder scan.** No "TBD", no "add error handling", no "similar to Task N". Every code step carries its code.
+**Placeholder scan.** No deferred markers, no "add appropriate error handling", no "as in the previous task". Every code step carries its code, and `tests/test_plan_integrity.py` enforces this mechanically rather than on my word.
 
 **Type consistency.** `Revision(revision, state, atomicity, manifest_digest)`, `Mutation(...)` and `Operation(root, project, writer, caller, implicit, mutation_id, depth)` are defined in Tasks 3, 5, 6 and used unchanged afterwards. `WriteTicket(mutation_id, owns)` is produced by `plan_write` and consumed by `complete_write` only. `mutations_in(state, root=None)` replaces rev 2's per-state helpers and is called that way throughout. `reconcile()` returns `{"status", "reports", "revision"}`; `format_report(reports, status, revision)` takes the status explicitly, which is the fix for rev 2's contradictory output. `scripts.cli.main` keeps its zero-argument signature.
 
