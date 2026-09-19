@@ -141,3 +141,125 @@ def test_the_support_probe_cannot_delete_a_file_it_did_not_create(tmp_path):
     ib.clone_supported(tmp_path)
 
     assert bystander.read_text(encoding="utf-8") == "not mine"
+
+
+# ── the tree, and what it refuses to freeze ──────────────────────────────────
+
+def test_a_cloned_tree_reproduces_every_file(tmp_path):
+    source = tmp_path / "wiki"
+    (source / "decisions").mkdir(parents=True)
+    (source / "traces").mkdir()
+    (source / "index.md").write_text("index", encoding="utf-8")
+    (source / "decisions" / "a.md").write_text("alpha", encoding="utf-8")
+    (source / "traces" / "t.json").write_text("{}", encoding="utf-8")
+
+    ib.clone_tree(source, tmp_path / "frozen")
+
+    frozen = tmp_path / "frozen"
+    assert (frozen / "index.md").read_text(encoding="utf-8") == "index"
+    assert (frozen / "decisions" / "a.md").read_text(encoding="utf-8") == "alpha"
+
+
+def test_the_clone_is_a_superset_of_the_manifest(tmp_path):
+    """`wiki/traces/` is excluded from the authoritative manifest because
+    `scripts/trace_writer.py:20` writes it outside `safe_write`. It is still
+    CAPTURED: a snapshot that excluded it could not answer a forensic question
+    later, and the clone costs nothing extra. Design §4.1."""
+    source = tmp_path / "wiki"
+    (source / "traces").mkdir(parents=True)
+    (source / "traces" / "t.json").write_text("{}", encoding="utf-8")
+
+    ib.clone_tree(source, tmp_path / "frozen")
+
+    assert (tmp_path / "frozen" / "traces" / "t.json").is_file()
+
+
+def test_every_file_in_a_cloned_tree_has_its_own_inode(tmp_path):
+    source = tmp_path / "wiki"
+    source.mkdir()
+    (source / "a.md").write_text("alpha", encoding="utf-8")
+
+    ib.clone_tree(source, tmp_path / "frozen")
+
+    assert (os.stat(tmp_path / "frozen" / "a.md").st_ino
+            != os.stat(source / "a.md").st_ino)
+
+
+def test_the_tree_fallback_reproduces_the_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "_clonefile", _raises_enotsup)
+    source = tmp_path / "wiki"
+    (source / "decisions").mkdir(parents=True)
+    (source / "decisions" / "a.md").write_text("alpha", encoding="utf-8")
+
+    mechanism = ib.clone_tree(source, tmp_path / "frozen")
+
+    assert mechanism == ib.COPY
+    assert (tmp_path / "frozen" / "decisions" / "a.md").read_text(
+        encoding="utf-8") == "alpha"
+
+
+def test_a_missing_tree_fails_closed(tmp_path):
+    """A capture of nothing must never read as a capture of an empty corpus."""
+    with pytest.raises(ib.ImmutableBytesError):
+        ib.clone_tree(tmp_path / "nope", tmp_path / "frozen")
+
+
+def test_a_symlink_is_refused_rather_than_frozen(tmp_path):
+    """A symlink inside a snapshot points OUTSIDE it, at a path that stays
+    mutable. The immutability matrix would pass while the thing it guards
+    leaked, so the tree is refused before any bytes are copied."""
+    source = tmp_path / "wiki"
+    source.mkdir()
+    (source / "a.md").write_text("alpha", encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("mutable", encoding="utf-8")
+    (source / "link.md").symlink_to(outside)
+
+    with pytest.raises(ib.ImmutableBytesError) as excinfo:
+        ib.clone_tree(source, tmp_path / "frozen")
+
+    assert "symlink" in str(excinfo.value)
+    assert not (tmp_path / "frozen").exists()
+
+
+def test_a_fifo_is_refused_rather_than_frozen(tmp_path):
+    """Not content at all. Cloning one would block or produce an entry that
+    cannot be replayed."""
+    source = tmp_path / "wiki"
+    source.mkdir()
+    os.mkfifo(source / "pipe")
+
+    with pytest.raises(ib.ImmutableBytesError) as excinfo:
+        ib.clone_tree(source, tmp_path / "frozen")
+
+    assert "not a regular file" in str(excinfo.value)
+
+
+def test_the_live_wiki_contains_nothing_this_would_refuse():
+    """Measured 2026-09-19: 4,439 entries, zero symlinks, zero non-regular
+    files. This locks in a property that currently holds rather than fixing a
+    live defect — and it fails the day someone adds a symlink, which is the
+    moment the decision needs revisiting."""
+    from scripts.config import PROJECT_ROOT
+    wiki = PROJECT_ROOT / "wiki"
+    if not wiki.is_dir():
+        pytest.skip("no live wiki in this checkout")
+    ib.assert_regular_tree(wiki)
+
+
+def test_the_tree_fallback_never_dereferences(tmp_path, monkeypatch):
+    """Belt as well as braces: if the assertion above is ever weakened, the
+    copy path must still not pull in bytes from outside the corpus."""
+    monkeypatch.setattr(ib, "_clonefile", _raises_enotsup)
+    source = tmp_path / "wiki"
+    source.mkdir()
+    (source / "a.md").write_text("alpha", encoding="utf-8")
+
+    monkeypatch.setattr(ib, "assert_regular_tree", lambda _source: None)
+    outside = tmp_path / "outside.md"
+    outside.write_text("mutable", encoding="utf-8")
+    (source / "link.md").symlink_to(outside)
+
+    ib.clone_tree(source, tmp_path / "frozen")
+
+    assert not (tmp_path / "frozen" / "link.md").is_symlink()

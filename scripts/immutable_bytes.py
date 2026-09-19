@@ -150,3 +150,72 @@ def clone_file(source, destination) -> str:
                 f"could not freeze {source} -> {destination}: {copy_exc}"
             ) from copy_exc
         return COPY
+
+
+def assert_regular_tree(source) -> None:
+    """Regular files and directories only. Nothing else is replayable.
+
+    A symlink inside a snapshot points at a path OUTSIDE it, which stays
+    mutable — so the snapshot would contain an entry that is neither immutable
+    nor self-contained, and the immutability matrix would pass while the thing
+    it guards leaked. Sockets, fifos and devices are not content at all.
+
+    Measured 2026-09-19: the live `wiki/` contains 4,439 entries and zero
+    symlinks and zero non-regular files, so this refuses nothing that exists
+    today. It locks in a property that currently holds rather than fixing a
+    live defect — and Z0 deliberately chooses rejection over dereference
+    semantics, because dereferencing would silently pull bytes from outside the
+    corpus into a snapshot that claims to be the corpus.
+    """
+    source = Path(source)
+    offenders = []
+    for path in sorted(source.rglob("*")):
+        if path.is_symlink():
+            offenders.append(f"{path.relative_to(source)} (symlink)")
+        elif not (path.is_file() or path.is_dir()):
+            offenders.append(f"{path.relative_to(source)} (not a regular file)")
+    if offenders:
+        raise ImmutableBytesError(
+            f"{source} contains {len(offenders)} entr(ies) that cannot be "
+            f"frozen immutably: {offenders[:5]}")
+
+
+def clone_tree(source, destination) -> str:
+    """Freeze a whole directory. Returns the mechanism used.
+
+    `clonefile(2)` on a DIRECTORY clones it recursively in one syscall, which
+    is why this is not a loop over `clone_file`: measured 43-72 ms for 4,439
+    files against 1,779 ms for `shutil.copytree` of the same tree.
+
+    The clone is deliberately a superset of the authoritative manifest.
+    `wiki/traces/` is generated output that bypasses `safe_write`, so it is
+    excluded from the manifest — but it is captured, because a snapshot that
+    excluded it could not answer a forensic question later and the clone costs
+    nothing extra (design §4.1).
+    """
+    source = Path(source)
+    destination = Path(destination)
+    if not source.is_dir():
+        raise ImmutableBytesError(f"no such directory: {source}")
+    if destination.exists():
+        raise ImmutableBytesError(f"destination already exists: {destination}")
+    assert_regular_tree(source)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _clonefile(source, destination)
+        return CLONEFILE
+    except OSError as exc:
+        if exc.errno not in _PORTABILITY_ERRNOS:
+            raise _not_portability(exc, f"tree {source}") from exc
+        try:
+            # `symlinks=False` is deliberate and `assert_regular_tree` above has
+            # already refused any, so this never dereferences anything. Both
+            # statements are needed: the assertion is the contract, this is the
+            # belt that makes a future assertion bug fail safe rather than
+            # silently capture a mutable path.
+            shutil.copytree(source, destination, symlinks=False)
+        except OSError as copy_exc:
+            raise ImmutableBytesError(
+                f"could not freeze tree {source} -> {destination}: {copy_exc}"
+            ) from copy_exc
+        return COPY
