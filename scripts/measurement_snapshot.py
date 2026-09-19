@@ -172,6 +172,16 @@ class SnapshotComponentError(RuntimeError):
     missing a component it claimed would describe a corpus that never was."""
 
 
+class MissingComponentError(SnapshotComponentError, FileNotFoundError):
+    """A component's source does not exist.
+
+    Inherits `FileNotFoundError` deliberately. `capture` has raised that for a
+    missing index since 2026-09-17 and a contract pins it; the invariant is
+    that the failure is LOUD, not which class carries it, so widening the type
+    keeps every existing caller working while the new code can catch one thing.
+    """
+
+
 @dataclass
 class Component:
     """One frozen store: how it was frozen, how much of it, and how much of
@@ -275,7 +285,7 @@ def capture_wiki(root, into) -> Component:
     from scripts.immutable_bytes import ImmutableBytesError, clone_tree
     source = Path(root) / "wiki"
     if not source.is_dir():
-        raise SnapshotComponentError(f"no wiki to capture at {source}")
+        raise MissingComponentError(f"no wiki to capture at {source}")
     destination = Path(into) / "wiki"
     try:
         mechanism = clone_tree(source, destination)
@@ -300,7 +310,7 @@ def capture_graph(root, into) -> Component:
     from scripts.immutable_bytes import ImmutableBytesError, clone_file
     source = Path(root) / "data" / "graph.sqlite"
     if not source.is_file():
-        raise SnapshotComponentError(f"no graph to capture at {source}")
+        raise MissingComponentError(f"no graph to capture at {source}")
     destination = Path(into) / "graph.sqlite"
     try:
         with read_locked(source):
@@ -325,7 +335,7 @@ def capture_search(root, into) -> Component:
     from scripts.immutable_bytes import COPY, HARDLINK
     source = _canonical_index(root)
     if not source.is_file():
-        raise SnapshotComponentError(
+        raise MissingComponentError(
             f"no search index to snapshot at {source}; build one before measuring")
     assert_self_contained(source)
     destination = Path(into) / INDEX_NAME
@@ -377,45 +387,105 @@ class Snapshot:
         return self._released
 
 
-def capture(root=None, label: str = "measurement", deep: bool = False) -> Snapshot:
-    """Freeze the current index by hard-linking it. O(1).
+_COMPONENTS = {
+    "wiki": capture_wiki,
+    "search": capture_search,
+    "graph": capture_graph,
+}
 
-    Raises `FileNotFoundError` if there is no index. Failing closed matters
-    here: a snapshot of nothing must never read as a snapshot of a clean store.
+DEFAULT_COMPONENTS = ("search",)
+
+
+def _fsync_dir(directory) -> None:
+    """Make the rename durable. Bounds the crash window; does not remove it.
+
+    Stated honestly because "atomic" invites more confidence than a rename
+    deserves on its own: without this, a crash shortly after the rename can
+    still lose it. With it, a snapshot that is visible has been published.
+    """
+    fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def capture(root=None, label="measurement", deep=False, components=None) -> Snapshot:
+    """Freeze the declared components. Returns a `Snapshot`.
+
+    `components=None` means `DEFAULT_COMPONENTS`, which is today's behaviour
+    exactly: `check.sh` gate 6 calls this on every run and reads only the
+    index, so cloning 135 MB of wiki would be a 47 ms tax on bytes nobody
+    opens.
+
+    This is NOT Step 6's `required`. `components` says which bytes to freeze;
+    `required` will add coherence verification and `SNAPSHOT_NOT_READY` on top.
+    They are kept apart so the seam is reviewable.
+
+    Captured into `<id>.building-<pid>` and published with one rename. Python
+    cleanup handles an exception; it cannot handle SIGKILL or power loss, and
+    those would otherwise leave a directory under the FINAL name holding some
+    of the components — indistinguishable from a whole snapshot to every later
+    reader. Any failure discards the partial capture (design §7.1).
     """
     base = _root(root)
-    index = _canonical_index(root)
-    if not index.is_file():
-        raise FileNotFoundError(
-            f"no search index to snapshot at {index}; build one before measuring")
+    names = tuple(components) if components is not None else DEFAULT_COMPONENTS
+    unknown = [n for n in names if n not in _COMPONENTS]
+    if unknown:
+        raise SnapshotComponentError(
+            f"no capture adapter registered for {unknown}; refusing rather "
+            "than silently omitting a component the caller believes it froze")
+    if len(set(names)) != len(names):
+        # Otherwise the second capture of the same name fails deep inside
+        # `clone_tree` with "destination already exists", which reads as a
+        # filesystem problem rather than a caller mistake.
+        raise SnapshotComponentError(f"duplicate component names in {names}")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     snapshot_id = f"{label}-{stamp}-{os.getpid()}"
-    directory = snapshots_dir(base) / snapshot_id
-    directory.mkdir(parents=True, exist_ok=False)
-    linked = directory / INDEX_NAME
+    final = snapshots_dir(base) / snapshot_id
+    working = snapshots_dir(base) / f"{snapshot_id}.building-{os.getpid()}"
+    working.mkdir(parents=True, exist_ok=False)
+    index_path = None
     try:
-        os.link(index, linked)
-    except OSError:
-        # Cross-device, or a filesystem without hard links. Copying is the
-        # correct fallback and is honestly slower; it is never silent, because
-        # `link` in the identity records which one happened.
-        shutil.copy2(index, linked)
-        linked_by = "copy"
-    else:
-        linked_by = "hardlink"
-
-    identity = {
-        "snapshot_id": snapshot_id,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
-        "index_path": str(index),
-        "index_inode": linked.stat().st_ino,
-        "link": linked_by,
-        "corpus_manifest_sha": _corpus_manifest_sha(base),
-    }
-    identity.update(index_identity(linked, deep=deep))
-    return Snapshot(snapshot_id=snapshot_id, path=directory,
-                    index_path=linked, identity=identity)
+        captured = {}
+        for name in names:
+            captured[name] = _COMPONENTS[name](base, working)
+        # A component's ABSENCE from this mapping means it was not captured.
+        # Recording only the names that were frozen is what stops a later
+        # reader treating a missing key as "captured and verified".
+        identity = {
+            "snapshot_id": snapshot_id,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "components": {
+                name: {
+                    "capture_backend": component.backend,
+                    "captured_scope": component.captured_scope,
+                    "authoritative_scope": component.authoritative_scope,
+                    "coherence_verified": component.coherence_verified,
+                    "logical_bytes": component.logical_bytes,
+                }
+                for name, component in captured.items()
+            },
+            "corpus_manifest_sha": _corpus_manifest_sha(base),
+        }
+        if "search" in captured:
+            index_path = captured["search"].path
+            identity["index_path"] = str(_canonical_index(root))
+            identity["index_inode"] = index_path.stat().st_ino
+            identity["link"] = captured["search"].backend
+            identity.update(index_identity(index_path, deep=deep))
+        (working / "manifest.json").write_text(
+            json.dumps(identity, indent=2, default=str), encoding="utf-8")
+        os.rename(working, final)
+        _fsync_dir(final.parent)
+    except BaseException:
+        shutil.rmtree(working, ignore_errors=True)
+        raise
+    if index_path is not None:
+        index_path = final / INDEX_NAME
+    return Snapshot(snapshot_id=snapshot_id, path=final,
+                    index_path=index_path, identity=identity)
 
 
 def sweep_abandoned(root=None) -> list:

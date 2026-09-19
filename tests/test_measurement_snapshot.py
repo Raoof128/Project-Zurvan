@@ -309,3 +309,114 @@ def test_eval_search_scores_against_the_index_it_is_given(store, tmp_path, capsy
     assert metrics["queries"] == 1
     assert metrics["index_path"] == str(s.index_path), (
         "the scorer did not report which index produced the number")
+
+
+# ── components: which bytes get frozen ───────────────────────────────────────
+
+def _graph(root: Path) -> Path:
+    """A small graph store, so a full capture has all three components."""
+    path = root / "data" / "graph.sqlite"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY)")
+    conn.execute("INSERT INTO nodes VALUES (1)")
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_the_default_capture_is_unchanged(store):
+    """The contracts above must not move. A step that silently changed what
+    every caller captures would be a behaviour change wearing a refactor's
+    clothes — and `check.sh` gate 6 calls this on every run."""
+    with snap.capture(root=store, label="default") as s:
+        assert set(s.identity["components"]) == {"search"}
+        # Absence is the record. A default capture froze no wiki, and nothing
+        # in the manifest may let that be read as "captured and verified".
+        assert "wiki" not in s.identity["components"]
+        assert not (s.path / "wiki").exists()
+
+
+def test_an_authoritative_capture_freezes_the_wiki(store):
+    with snap.capture(root=store, label="auth", components=("wiki",)) as s:
+        record = s.identity["components"]["wiki"]
+        assert record["capture_backend"] in ("clonefile", "copy")
+        assert record["captured_scope"] == "full_tree"
+        assert record["authoritative_scope"] == "excludes_derived_subtrees"
+        assert record["coherence_verified"] is False
+        assert (s.path / "wiki" / "citation.md").is_file()
+
+
+def test_a_full_capture_freezes_all_three(store):
+    _graph(store)
+    with snap.capture(root=store, label="full",
+                      components=("wiki", "search", "graph")) as s:
+        assert set(s.identity["components"]) == {"wiki", "search", "graph"}
+        assert (s.path / "wiki").is_dir()
+        assert (s.path / "graph.sqlite").is_file()
+
+
+def test_an_unknown_component_fails_closed(store):
+    """Silently skipping an unrecognised name would let a caller believe it had
+    frozen something it had not."""
+    with pytest.raises(snap.SnapshotComponentError):
+        snap.capture(root=store, label="bad", components=("claims",))
+
+
+def test_duplicate_component_names_are_refused(store):
+    with pytest.raises(snap.SnapshotComponentError):
+        snap.capture(root=store, label="dupe", components=("wiki", "wiki"))
+
+
+def test_release_removes_every_component(store):
+    """A cloned wiki is real directory entries. Leaking one per capture would
+    fill the disk with metadata even though the data blocks are shared."""
+    s = snap.capture(root=store, label="rel", components=("wiki", "search"))
+    path = s.path
+    s.release()
+
+    assert not path.exists()
+    assert (store / "wiki" / "citation.md").is_file()
+
+
+def test_a_snapshot_is_published_by_rename_not_filled_in_place(store):
+    """A crash mid-capture must not leave a directory under the FINAL name
+    holding some of the components — indistinguishable from a whole snapshot.
+    Captured into `.building-<pid>`, published with one rename."""
+    seen = {}
+    real = snap.capture_wiki
+
+    def _observe(root, into):
+        seen["directory"] = Path(into).name
+        return real(root, into)
+
+    snap._COMPONENTS["wiki"] = _observe
+    try:
+        s = snap.capture(root=store, label="pub", components=("wiki",))
+    finally:
+        snap._COMPONENTS["wiki"] = real
+    try:
+        assert ".building-" in seen["directory"]
+        assert ".building-" not in s.path.name
+    finally:
+        s.release()
+
+
+def test_the_manifest_is_written_into_the_snapshot(store):
+    """A snapshot that cannot describe itself without the process that made it
+    is not replayable."""
+    import json as _json
+    with snap.capture(root=store, label="man", components=("search",)) as s:
+        manifest = _json.loads((s.path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["snapshot_id"] == s.snapshot_id
+    assert set(manifest["components"]) == {"search"}
+
+
+def test_a_partial_capture_leaves_nothing_behind(store):
+    """Design §7.1: any failure discards the partial capture. A half-captured
+    snapshot directory that survived would be indistinguishable from a whole
+    one — and would be published under the final name."""
+    with pytest.raises(snap.SnapshotComponentError):
+        snap.capture(root=store, label="partial", components=("wiki", "graph"))
+
+    leftovers = list((store / "data" / "snapshots").glob("*"))
+    assert leftovers == [], leftovers
