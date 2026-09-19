@@ -54,9 +54,11 @@ it froze, and the evaluation reports it alongside the number.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -148,6 +150,195 @@ def index_identity(index_path, deep: bool = False) -> dict:
         return ident
     finally:
         conn.close()
+
+
+# ── components ────────────────────────────────────────────────────────────────
+
+FULL_TREE = "full_tree"
+SINGLE_FILE = "single_file"
+EXCLUDES_DERIVED = "excludes_derived_subtrees"
+WHOLE_COMPONENT = "whole_component"
+
+_SIDECARS = ("-journal", "-wal", "-shm")
+
+#: How long a capture waits for an in-flight writer before refusing. Bounded on
+#: purpose: an unbounded wait against a continuously written store is a hang,
+#: and a hang is worse than a refusal (design §7.1).
+_LOCK_TIMEOUT_S = 5.0
+
+
+class SnapshotComponentError(RuntimeError):
+    """A component could not be frozen honestly. Fails closed: a snapshot
+    missing a component it claimed would describe a corpus that never was."""
+
+
+@dataclass
+class Component:
+    """One frozen store: how it was frozen, how much of it, and how much of
+    that counts.
+
+    `backend` is DIAGNOSTIC. It decides whether the bytes cost anything and it
+    makes a snapshot auditable, but no correctness path may branch on it — that
+    is what keeps "portable-first" from decaying into "APFS-first with a
+    decorative fallback".
+
+    `captured_scope` and `authoritative_scope` are deliberately two fields. The
+    wiki clone is a full tree; the authoritative manifest excludes derived
+    subtrees. Collapsing them into one would let a reader assume all 4,439
+    captured files participated in the revision-coherence proof, when 25 trace
+    files do not.
+
+    `coherence_verified` is False for everything this step produces. Step 6
+    verifies; until then, saying so is the honest record.
+    """
+
+    name: str
+    path: Path
+    backend: str
+    logical_bytes: int
+    captured_scope: str
+    authoritative_scope: str
+    coherence_verified: bool = False
+
+
+@contextmanager
+def read_locked(db_path):
+    """Hold a SQLite SHARED lock for the duration of a capture.
+
+    Without this, `assert_self_contained` inspects one moment and the clone
+    copies a different one: the graph is still written in place in this step,
+    so a writer may begin after the check and during the copy, and the frozen
+    bytes would be a state that never committed.
+
+    A SHARED lock closes that window. In rollback-journal mode a writer must
+    hold EXCLUSIVE before it modifies the database FILE, and it cannot while any
+    reader holds SHARED — so the bytes cannot move under the clone. `BEGIN`
+    alone is deferred and takes no lock; the `SELECT` is what acquires it.
+
+    Opening `mode=ro` is a second, free check: a database with a hot journal
+    needs rollback before it can be read, rollback needs write access, and a
+    read-only connection therefore FAILS rather than silently reading a
+    mid-transaction state.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                           timeout=_LOCK_TIMEOUT_S, isolation_level=None)
+    try:
+        conn.execute("BEGIN")
+        conn.execute("SELECT count(*) FROM sqlite_master")   # acquires SHARED
+        yield conn
+    finally:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        conn.close()
+
+
+def assert_self_contained(db_path) -> None:
+    """The published file must BE the database (design §4.3).
+
+    A capture-time guard, not Step 4's publication assertion. A clone pins one
+    file; if committed state lives in a sidecar, that file is not the whole
+    database and freezing it would capture a state that never committed.
+
+    Measured 2026-09-19: every live store reports `journal_mode=delete` with no
+    sidecar on disk, so this locks in a property that currently holds rather
+    than fixing a live defect.
+    """
+    db_path = Path(db_path)
+    for suffix in _SIDECARS:
+        sidecar = db_path.with_name(db_path.name + suffix)
+        if sidecar.exists():
+            raise SnapshotComponentError(
+                f"{db_path.name} has a mutable {suffix.lstrip('-')} sidecar; "
+                "its committed state is not in the file, so freezing the file "
+                "would capture a state that never committed")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    finally:
+        conn.close()
+    if str(mode).lower() == "wal":
+        raise SnapshotComponentError(
+            f"{db_path.name} is in WAL mode; committed state can live outside "
+            "the file, which would silently invalidate every snapshot taken")
+
+
+def capture_wiki(root, into) -> Component:
+    """Freeze the authoritative corpus.
+
+    Deliberately a superset of the authoritative manifest: `wiki/traces/` is
+    excluded from the manifest because it bypasses `safe_write`, and captured
+    anyway because the clone costs nothing and a snapshot that excluded it
+    could not answer a forensic question later (design §4.1).
+    """
+    from scripts.immutable_bytes import ImmutableBytesError, clone_tree
+    source = Path(root) / "wiki"
+    if not source.is_dir():
+        raise SnapshotComponentError(f"no wiki to capture at {source}")
+    destination = Path(into) / "wiki"
+    try:
+        mechanism = clone_tree(source, destination)
+    except ImmutableBytesError as exc:
+        raise SnapshotComponentError(f"wiki capture failed: {exc}") from exc
+    total = sum(p.stat().st_size for p in destination.rglob("*") if p.is_file())
+    return Component(name="wiki", path=destination, backend=mechanism,
+                     logical_bytes=total,
+                     captured_scope=FULL_TREE,
+                     authoritative_scope=EXCLUDES_DERIVED)
+
+
+def capture_graph(root, into) -> Component:
+    """Freeze the graph by CLONE, never by hardlink, under a read lock.
+
+    `scripts/graph_build.py:186` mutates the canonical inode in place, so a
+    hardlink would make snapshot and live store the same bytes — the illegal
+    case of design §4.2. Step 4 makes the graph atomic; until then the clone is
+    what makes capturing it legal at all, and the read lock is what makes the
+    cloned bytes coherent rather than merely separate.
+    """
+    from scripts.immutable_bytes import ImmutableBytesError, clone_file
+    source = Path(root) / "data" / "graph.sqlite"
+    if not source.is_file():
+        raise SnapshotComponentError(f"no graph to capture at {source}")
+    destination = Path(into) / "graph.sqlite"
+    try:
+        with read_locked(source):
+            assert_self_contained(source)
+            mechanism = clone_file(source, destination)
+    except sqlite3.Error as exc:
+        raise SnapshotComponentError(
+            f"graph is not readable as a committed database: {exc}") from exc
+    except ImmutableBytesError as exc:
+        raise SnapshotComponentError(f"graph capture failed: {exc}") from exc
+    return Component(name="graph", path=destination, backend=mechanism,
+                     logical_bytes=destination.stat().st_size,
+                     captured_scope=SINGLE_FILE,
+                     authoritative_scope=WHOLE_COMPONENT)
+
+
+def capture_search(root, into) -> Component:
+    """Freeze the search index by HARDLINK — legal only because
+    `rebuild_search_index` builds to a temp file and promotes with one
+    `os.replace()`, so the published inode is never modified in place.
+    """
+    from scripts.immutable_bytes import COPY, HARDLINK
+    source = _canonical_index(root)
+    if not source.is_file():
+        raise SnapshotComponentError(
+            f"no search index to snapshot at {source}; build one before measuring")
+    assert_self_contained(source)
+    destination = Path(into) / INDEX_NAME
+    try:
+        os.link(source, destination)
+        mechanism = HARDLINK
+    except OSError:
+        shutil.copy2(source, destination)
+        mechanism = COPY
+    return Component(name="search", path=destination, backend=mechanism,
+                     logical_bytes=destination.stat().st_size,
+                     captured_scope=SINGLE_FILE,
+                     authoritative_scope=WHOLE_COMPONENT)
 
 
 # ── the snapshot ──────────────────────────────────────────────────────────────
