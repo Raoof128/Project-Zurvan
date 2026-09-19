@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.12 stdlib only — `ctypes` for the `clonefile(2)` syscall, `shutil`/`os` for the fallback, `sqlite3` for store validation. No new dependency.
 
-**Spec:** [docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md](../specs/2026-09-18-z0-coherent-snapshots-design.md) (rev 2) §4, §4.1–§4.5, §9.2 step 3, gate items 14 and 16, plus [the amendments](../specs/2026-09-18-zurvan-2-amendments.md) §8.
+**Spec:** [docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md](../specs/2026-09-18-z0-coherent-snapshots-design.md) (rev 2) §4, §4.1–§4.5, §9.2 step 3, gate item 16, plus [the amendments](../specs/2026-09-18-zurvan-2-amendments.md) §8. Gate item 14 is touched but **not closed** — see Task 5.
 
 ## Global Constraints
 
@@ -29,7 +29,7 @@ Copied verbatim from the governing documents. Every task's requirements implicit
 
 ## Scope
 
-**In:** the immutable-bytes abstraction; `wiki/` capture; `data/graph.sqlite` capture; the five-pattern wiki immutability matrix (gate 16); the hardlink-invariant regression (gate 14); the backend-equivalence contract that keeps portable-first honest; captured scope recorded separately from authoritative scope; a measurement of what capture actually costs on the live store.
+**In:** the immutable-bytes abstraction; `wiki/` capture; `data/graph.sqlite` capture; the five-pattern wiki immutability matrix (gate 16); a reproduction of the hardlink hazard (gate 14 stays OPEN — see Task 5); the backend-equivalence contract that keeps portable-first honest; captured scope recorded separately from authoritative scope; a measurement of what capture actually costs on the live store.
 
 **Two contracts this step must not ship without**, because both protect decisions already made rather than code already written:
 
@@ -104,6 +104,47 @@ These are one machine, one APFS volume, warm cache. The fallback is not decorati
 
 ---
 
+## Task 0 — Preflight: take the baseline before anything changes
+
+**Files:** none modified. This task produces evidence, not code.
+
+Z0 must be provably ranking-neutral (design §11). "Identical to the pre-change run" is uncheckable without a pre-change run, and by Task 8 the answer is seven tasks too late. This runs first, and nothing in Task 1 starts until it has.
+
+- [ ] **Step 1: Confirm the store is quiet and the index is fresh**
+
+```bash
+cd /Users/dev/Desktop/Raouf/Zurvan
+PYTHONPATH=. python -c "
+from scripts.agent_workflow import _index_staleness
+from scripts.knowledge_revision import current, mutations_in, ACTIVE
+print('index    :', _index_staleness())
+r = current(); print('ledger   :', r.state, 'revision', r.revision, '/', r.atomicity)
+print('in flight:', [m.mutation_id for m in mutations_in(ACTIVE)] or 'none')
+"
+```
+
+Expected: index `fresh`; ledger `CLEAN`; no mutation in flight. A stale index or a SUSPECT ledger means the baseline would describe a corpus nobody will compare against — stop and resolve that first. Never run a rebuild and `check.sh` together.
+
+- [ ] **Step 2: Record the retrieval baseline**
+
+```bash
+PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6 \
+  | tee /tmp/z0-step3-eval-before.txt
+tail -5 /tmp/z0-step3-eval-before.txt
+```
+
+Keep that file. Task 8 diffs against it. Nothing in this step touches retrieval, ranking, chunking, indexing or embedding, so any difference at the end is a defect and not a tuning result.
+
+- [ ] **Step 3: Record the regression floor**
+
+```bash
+PYTHONPATH=. python -m pytest -q 2>&1 | tail -3 | tee /tmp/z0-step3-pytest-before.txt
+```
+
+Expected: `0 failed`. A suite that is already red cannot tell you whether this step broke anything.
+
+---
+
 ## Task 1 — `clone_file`: the syscall, and a fallback that is exercised rather than assumed
 
 **Files:**
@@ -112,7 +153,7 @@ These are one machine, one APFS volume, warm cache. The fallback is not decorati
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `CLONEFILE`, `COPY`, `HARDLINK` constants; `ImmutableBytesError`; `def clone_file(source, destination)` returning the mechanism string; `def clone_supported(directory)` returning `bool`.
+- Produces: `CLONEFILE`, `COPY`, `HARDLINK` constants; `ImmutableBytesError`; `_PORTABILITY_ERRNOS`; `def clone_file(source, destination)` returning the mechanism string; `def clone_supported(destination_directory)` returning `bool`; `def assert_regular_tree(source)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -254,11 +295,26 @@ import ctypes.util
 import errno
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 CLONEFILE = "clonefile"
 COPY = "copy"
 HARDLINK = "hardlink"
+
+#: The ONLY failures that justify falling back to a byte copy. `except OSError`
+#: would turn every failure into permission to copy — ENOSPC, EIO, EACCES and
+#: anything corruption-shaped included — so a disk filling up or a read error
+#: would quietly become a slow success instead of a loud failure. Portability is
+#: a reason to copy; a broken disk is not.
+_PORTABILITY_ERRNOS = frozenset(
+    e for e in (
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+        getattr(errno, "EXDEV", None),
+        getattr(errno, "ENOSYS", None),
+    ) if e is not None
+)
 
 
 class ImmutableBytesError(RuntimeError):
@@ -296,25 +352,65 @@ def _clonefile(source, destination) -> None:
         raise OSError(code, os.strerror(code), str(source))
 
 
-def clone_supported(directory) -> bool:
-    """Probe, never guess: support belongs to the filesystem the destination
-    lands on, and one machine can host several."""
+def assert_regular_tree(source) -> None:
+    """Regular files and directories only. Nothing else is replayable.
+
+    A symlink inside a snapshot points at a path OUTSIDE it, which stays
+    mutable — so the snapshot would contain an entry that is neither immutable
+    nor self-contained, and the immutability matrix would pass while the thing
+    it guards leaked. Sockets, fifos and devices are not content at all.
+
+    Measured 2026-09-19: the live `wiki/` contains 4,439 entries and **zero**
+    symlinks and zero non-regular files, so this refuses nothing that exists
+    today. It locks in a property that currently holds rather than fixing a
+    live defect — and Z0 deliberately chooses rejection over dereference
+    semantics, because dereferencing would silently pull bytes from outside the
+    corpus into a snapshot that claims to be the corpus.
+    """
+    source = Path(source)
+    offenders = []
+    for path in sorted(source.rglob("*")):
+        if path.is_symlink():
+            offenders.append(f"{path.relative_to(source)} (symlink)")
+        elif not (path.is_file() or path.is_dir()):
+            offenders.append(f"{path.relative_to(source)} (not a regular file)")
+    if offenders:
+        raise ImmutableBytesError(
+            f"{source} contains {len(offenders)} entr(ies) that cannot be "
+            f"frozen immutably: {offenders[:5]}")
+
+
+def clone_supported(destination_directory) -> bool:
+    """Probe the DESTINATION filesystem, never guess.
+
+    Support belongs to where the bytes land, and one machine can host several
+    filesystems. Never probe inside the authoritative corpus: a probe file
+    appearing under `wiki/` would register as a corpus change in the manifest.
+
+    `tempfile.mkstemp` creates exclusively, so this can never unlink a
+    pre-existing file left by an earlier crash — a predictable pid-based name
+    could, and the cleanup would then destroy someone else's data.
+    """
     if _CLONEFILE is None:
         return False
-    probe = Path(directory) / f".clone-probe-{os.getpid()}"
-    target = Path(directory) / f".clone-probe-{os.getpid()}-clone"
+    directory = Path(destination_directory)
+    probe = clone = None
     try:
-        probe.write_bytes(b"probe")
-        _clonefile(probe, target)
+        handle, name = tempfile.mkstemp(dir=directory, prefix=".clone-probe-")
+        os.close(handle)
+        probe = Path(name)
+        clone = probe.with_name(probe.name + ".clone")
+        _clonefile(probe, clone)
         return True
     except OSError:
         return False
     finally:
-        for path in (probe, target):
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        for path in (probe, clone):
+            if path is not None:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
 
 def clone_file(source, destination) -> str:
@@ -334,12 +430,17 @@ def clone_file(source, destination) -> str:
     try:
         _clonefile(source, destination)
         return CLONEFILE
-    except OSError:
+    except OSError as exc:
+        if exc.errno not in _PORTABILITY_ERRNOS:
+            raise ImmutableBytesError(
+                f"clone of {source} failed with {errno.errorcode.get(exc.errno, exc.errno)}"
+                f" ({exc.strerror}); this is not a portability failure, so it is"
+                " not grounds to copy") from exc
         try:
             shutil.copy2(source, destination)
-        except OSError as exc:
+        except OSError as copy_exc:
             raise ImmutableBytesError(
-                f"could not freeze {source} -> {destination}: {exc}") from exc
+                f"could not freeze {source} -> {destination}: {copy_exc}") from copy_exc
         return COPY
 ```
 
@@ -457,15 +558,26 @@ def clone_tree(source, destination) -> str:
     if destination.exists():
         raise ImmutableBytesError(f"destination already exists: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    assert_regular_tree(source)
     try:
         _clonefile(source, destination)
         return CLONEFILE
-    except OSError:
-        try:
-            shutil.copytree(source, destination, symlinks=True)
-        except OSError as exc:
+    except OSError as exc:
+        if exc.errno not in _PORTABILITY_ERRNOS:
             raise ImmutableBytesError(
-                f"could not freeze tree {source} -> {destination}: {exc}") from exc
+                f"clone of tree {source} failed with "
+                f"{errno.errorcode.get(exc.errno, exc.errno)} ({exc.strerror}); this"
+                " is not a portability failure, so it is not grounds to copy") from exc
+        try:
+            # `symlinks=False` is deliberate and `assert_regular_tree` above has
+            # already refused any, so this never dereferences anything. Both
+            # statements are needed: the assertion is the contract, this is the
+            # belt that makes a future assertion bug fail safe rather than
+            # silently capture a mutable path.
+            shutil.copytree(source, destination, symlinks=False)
+        except OSError as copy_exc:
+            raise ImmutableBytesError(
+                f"could not freeze tree {source} -> {destination}: {copy_exc}") from copy_exc
         return COPY
 ```
 
@@ -629,7 +741,9 @@ git commit -m "zurvan: gate 16 — snapshot bytes survive all five live edit pat
 
 **Interfaces:**
 - Consumes: `clone_file`, `clone_tree`, `CLONEFILE`, `COPY`, `HARDLINK` from Tasks 1–2.
-- Produces: `Component` dataclass with fields `name`, `path`, `backend`, `logical_bytes`, `captured_scope`, `authoritative_scope`, `coherence_verified`; `def capture_wiki(root, into)`; `def capture_graph(root, into)`; `def capture_search(root, into)`; `def assert_self_contained(db_path)`. Each `capture_*` returns a `Component`.
+- Produces: `Component` dataclass with fields `name`, `path`, `backend`, `logical_bytes`, `captured_scope`, `authoritative_scope`, `coherence_verified`; `def capture_wiki(root, into)`; `def capture_graph(root, into)`; `def capture_search(root, into)`; `def assert_self_contained(db_path)`; `def read_locked(db_path)` (context manager). Each `capture_*` returns a `Component`.
+
+**The check and the clone are one critical section.** The graph is still written in place in this step, so verifying self-containment and then cloning leaves a window in which a writer can start. `read_locked` holds a SQLite SHARED lock across both, which a writer cannot pass while it needs EXCLUSIVE to touch the database file. Without it the guard proves only that the store was coherent at one instant, not that the frozen bytes are.
 
 **Captured scope and authoritative scope are separate fields, never one.** The clone takes all of `wiki/`; the authoritative manifest excludes derived subtrees such as `wiki/traces/`. If a snapshot records only "wiki: captured", a future reader will reasonably assume every byte in it participated in the revision-coherence proof, and 25 trace files did not. Two fields make that unassumable.
 
@@ -707,6 +821,36 @@ def test_a_graph_in_wal_mode_is_refused(store, tmp_path):
     conn.execute("INSERT INTO nodes VALUES (2)")
     conn.commit()
     conn.close()
+    into = tmp_path / "snap"
+    into.mkdir()
+
+    with pytest.raises(ms.SnapshotComponentError):
+        ms.capture_graph(store, into)
+
+
+def test_a_writer_cannot_change_the_graph_during_capture(store, tmp_path):
+    """The window the read lock closes: check, then clone, with a writer in
+    between. The capture must either hold the writer off or refuse — what it
+    must never do is freeze a state that never committed."""
+    import sqlite3 as _sqlite3
+    into = tmp_path / "snap"
+    into.mkdir()
+    graph = store / "data" / "graph.sqlite"
+
+    with ms.read_locked(graph):
+        writer = _sqlite3.connect(graph, timeout=0.1)
+        with pytest.raises(_sqlite3.OperationalError):
+            writer.execute("INSERT INTO nodes VALUES (99)")
+            writer.commit()
+        writer.close()
+
+
+def test_a_graph_with_a_hot_journal_is_unreadable_rather_than_captured(
+        store, tmp_path):
+    """A read-only connection cannot roll back a hot journal, so it fails —
+    which is the honest outcome. Capturing the file anyway would freeze a
+    mid-transaction state and call it a snapshot."""
+    (store / "data" / "graph.sqlite-journal").write_bytes(b"\xd9\xd5\x05\xf9 hot")
     into = tmp_path / "snap"
     into.mkdir()
 
@@ -795,7 +939,14 @@ Expected: FAIL, `AttributeError: module 'scripts.measurement_snapshot' has no at
 
 - [ ] **Step 3: Write the implementation**
 
-Add to `scripts/measurement_snapshot.py`:
+Add to `scripts/measurement_snapshot.py`. **The module's existing imports are not enough** — it imports `hashlib`, `os`, `shutil`, `sqlite3`, `dataclass`/`field`, `datetime` and `Path`, and uses `json` only inside its `__main__` block. Add these two at module scope first, or the file will not import:
+
+```python
+import json
+from contextlib import contextmanager
+```
+
+Then:
 
 ```python
 class SnapshotComponentError(RuntimeError):
@@ -839,6 +990,11 @@ class Component:
 
 
 _SIDECARS = ("-journal", "-wal", "-shm")
+
+#: How long a capture waits for an in-flight writer before refusing. Bounded on
+#: purpose: an unbounded wait against a continuously written store is a hang,
+#: and a hang is worse than a refusal (design §7.1).
+_LOCK_TIMEOUT_S = 5.0
 
 
 def assert_self_contained(db_path) -> None:
@@ -895,22 +1051,60 @@ def capture_wiki(root, into) -> Component:
                      authoritative_scope=EXCLUDES_DERIVED)
 
 
+@contextmanager
+def read_locked(db_path):
+    """Hold a SQLite SHARED lock for the duration of a capture.
+
+    Without this, `assert_self_contained` inspects one moment and the clone
+    copies a different one: the graph is still written in place in this step,
+    so a writer may begin after the check and during the copy, and the frozen
+    bytes would be a state that never committed.
+
+    A SHARED lock closes that window. In rollback-journal mode a writer must
+    hold EXCLUSIVE before it modifies the database FILE, and it cannot while any
+    reader holds SHARED — so the bytes cannot move under the clone. `BEGIN`
+    alone is deferred and takes no lock; the `SELECT` is what acquires it.
+
+    Opening `mode=ro` is a second, free check: a database with a hot journal
+    needs rollback before it can be read, rollback needs write access, and a
+    read-only connection therefore FAILS rather than silently reading a
+    mid-transaction state.
+    """
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                           timeout=_LOCK_TIMEOUT_S, isolation_level=None)
+    try:
+        conn.execute("BEGIN")
+        conn.execute("SELECT count(*) FROM sqlite_master")   # acquires SHARED
+        yield conn
+    finally:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        conn.close()
+
+
 def capture_graph(root, into) -> Component:
-    """Freeze the graph by CLONE, never by hardlink.
+    """Freeze the graph by CLONE, never by hardlink, under a read lock.
 
     `scripts/graph_build.py:186` mutates the canonical inode in place, so a
     hardlink would make snapshot and live store the same bytes — the illegal
     case of design §4.2. Step 4 makes the graph atomic; until then the clone is
-    what makes capturing it legal at all.
+    what makes capturing it legal at all, and the read lock is what makes the
+    cloned bytes coherent rather than merely separate.
     """
     from scripts.immutable_bytes import ImmutableBytesError, clone_file
     source = Path(root) / "data" / "graph.sqlite"
     if not source.is_file():
         raise SnapshotComponentError(f"no graph to capture at {source}")
-    assert_self_contained(source)
     destination = Path(into) / "graph.sqlite"
     try:
-        mechanism = clone_file(source, destination)
+        with read_locked(source):
+            assert_self_contained(source)
+            mechanism = clone_file(source, destination)
+    except sqlite3.Error as exc:
+        raise SnapshotComponentError(
+            f"graph is not readable as a committed database: {exc}") from exc
     except ImmutableBytesError as exc:
         raise SnapshotComponentError(f"graph capture failed: {exc}") from exc
     return Component(name="graph", path=destination, backend=mechanism,
@@ -948,7 +1142,7 @@ def capture_search(root, into) -> Component:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_snapshot_components.py -v`
-Expected: 7 passed
+Expected: 11 passed
 
 - [ ] **Step 5: Commit**
 
@@ -959,24 +1153,29 @@ git commit -m "zurvan: capture wiki and graph as components, refusing a store wi
 
 ---
 
-## Task 5 — The hardlink invariant, made to fail loudly
+## Task 5 — The hardlink hazard, reproduced and recorded (gate 14 stays OPEN)
 
 **Files:**
 - Modify: `tests/test_snapshot_components.py`
 
 **Interfaces:**
 - Consumes: `capture_search` from Task 4.
-- Produces: nothing importable. This task's deliverable is gate item 14.
+- Produces: nothing importable.
 
-Design §4.2 owes a regression that *attempts* the illegal in-place mutation. The point is not that today's code is careful; it is that the day someone opens the canonical path for writing, every snapshot ever taken silently stops being one — and a test is the only thing that will say so.
+**This task does NOT close gate 14, and the plan must not claim it does.** Design §4.2 asks for a regression that attempts the illegal in-place mutation and **fails loudly**. What this task delivers is a test that *reproduces* the hazard — it asserts the snapshot silently changes — plus a capture-time sidecar refusal. Neither makes a later direct `sqlite3` write to the published inode fail. Demonstrating a failure mode is not preventing it, and awarding a gate for the demonstration is exactly the retroactive redefinition this project forbids.
+
+Enforcement needs a publication invariant: the promoted file must be provably the one that was built, and any writer that opens the canonical path must be refused. That belongs with atomic publication, which is Step 4 for the graph and Step 5 for snapshot-backed rebuilds. **Gate 14 is recorded as OPEN at the end of this step.**
+
+What the two tests below are worth in the meantime: the first pins the hazard so that if someone changes the mechanism and it stops leaking, the change is visible rather than silent; the second refuses a capture taken while a writer holds a journal.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 def test_an_in_place_write_to_the_published_index_reaches_every_snapshot(
         store, tmp_path):
-    """Gate 14. This test DOCUMENTS the hazard by reproducing it, then pins the
-    guard that refuses it.
+    """The hazard, reproduced. NOT gate 14 — this proves the danger is real,
+    it does not prevent it, and gate 14 stays OPEN until a publication
+    invariant makes the offending write fail.
 
     A hardlink is legal only because `rebuild_search_index` builds to
     `data/search.sqlite.building-<pid>` and promotes with one `os.replace()`.
@@ -1034,11 +1233,20 @@ def test_capture_refuses_an_index_whose_inode_is_shared_with_a_writer(
 Run: `PYTHONPATH=. python -m pytest tests/test_snapshot_components.py -k hardlink -v`
 Expected: both PASS with Task 4's `assert_self_contained` in place. The first documents the hazard; the second pins the guard.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Record gate 14 as OPEN**
+
+Add one line to the closing section of this plan and to the entry Task 8 writes, so no later reader infers closure from the presence of a test named after the invariant:
+
+```text
+gate 14 (hardlink invariant)   OPEN — hazard reproduced, enforcement deferred
+                                      to atomic publication (steps 4-5)
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tests/test_snapshot_components.py
-git commit -m "zurvan: gate 14 — the hardlink invariant fails loudly when violated"
+git commit -m "zurvan: reproduce the hardlink hazard; gate 14 stays open until publication enforces it"
 ```
 
 ---
@@ -1144,6 +1352,41 @@ def test_release_removes_every_component(tmp_path, monkeypatch):
     assert (tmp_path / "wiki" / "decisions" / "a.md").is_file()
 
 
+def test_a_snapshot_is_published_by_rename_not_filled_in_place(
+        tmp_path, monkeypatch):
+    """A crash mid-capture must not leave a directory under the FINAL name
+    holding some of the components — that is indistinguishable from a whole
+    snapshot. Captured into `.building-<pid>`, published with one rename."""
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    _build_store(tmp_path)
+    seen = {}
+
+    real_capture_graph = ms.capture_graph
+
+    def _observe(root, into):
+        seen["directory"] = Path(into).name
+        return real_capture_graph(root, into)
+
+    monkeypatch.setattr(ms, "capture_graph", _observe)
+    monkeypatch.setitem(ms._COMPONENTS, "graph", _observe)
+
+    snapshot = ms.capture(root=tmp_path, components=("graph",))
+    try:
+        assert ".building-" in seen["directory"]
+        assert ".building-" not in snapshot.path.name
+        assert (snapshot.path / "manifest.json").is_file()
+    finally:
+        snapshot.release()
+
+
+def test_duplicate_component_names_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    _build_store(tmp_path)
+
+    with pytest.raises(ms.SnapshotComponentError):
+        ms.capture(root=tmp_path, components=("wiki", "wiki"))
+
+
 def test_a_partial_capture_leaves_nothing_behind(tmp_path, monkeypatch):
     """Design §7.1: any failure discards the partial capture. A half-captured
     snapshot directory that survives is indistinguishable from a whole one."""
@@ -1199,15 +1442,29 @@ def capture(root=None, label="measurement", deep=False, components=None):
         raise SnapshotComponentError(
             f"no capture adapter registered for {unknown}; refusing rather "
             "than silently omitting a component the caller believes it froze")
+    if len(set(names)) != len(names):
+        # Otherwise the second capture of the same name fails deep inside
+        # `clone_tree` with "destination already exists", which reads as a
+        # filesystem problem rather than a caller mistake.
+        raise SnapshotComponentError(
+            f"duplicate component names in {names}")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     snapshot_id = f"{label}-{stamp}-{os.getpid()}"
-    directory = snapshots_dir(base) / snapshot_id
-    directory.mkdir(parents=True, exist_ok=False)
+    final = snapshots_dir(base) / snapshot_id
+    # Capture into a name that cannot be mistaken for a finished snapshot, and
+    # publish with one rename. Python-level cleanup handles an exception; it
+    # cannot handle SIGKILL or power loss, and those would otherwise leave a
+    # directory under the FINAL name holding some of the components — which is
+    # indistinguishable from a whole snapshot to every later reader. The
+    # `.building-<pid>` shape is the one `rebuild_search_index` already uses,
+    # and `sweep_abandoned` recognises the trailing pid.
+    working = snapshots_dir(base) / f"{snapshot_id}.building-{os.getpid()}"
+    working.mkdir(parents=True, exist_ok=False)
     try:
         captured = {}
         for name in names:
-            captured[name] = _COMPONENTS[name](base, directory)
+            captured[name] = _COMPONENTS[name](base, working)
         # A component's ABSENCE from this mapping means it was not captured.
         # Recording only the names that were frozen is what stops a later
         # reader treating a missing key as "captured and verified".
@@ -1232,17 +1489,37 @@ def capture(root=None, label="measurement", deep=False, components=None):
             identity["index_inode"] = index_path.stat().st_ino
             identity["link"] = captured["search"].backend
             identity.update(index_identity(index_path, deep=deep))
+        (working / "manifest.json").write_text(
+            json.dumps(identity, indent=2, default=str), encoding="utf-8")
+        os.rename(working, final)
+        _fsync_dir(final.parent)
     except BaseException:
-        shutil.rmtree(directory, ignore_errors=True)
+        shutil.rmtree(working, ignore_errors=True)
         raise
-    return Snapshot(snapshot_id=snapshot_id, path=directory,
+    if index_path is not None:
+        index_path = final / INDEX_NAME
+    return Snapshot(snapshot_id=snapshot_id, path=final,
                     index_path=index_path, identity=identity)
+
+
+def _fsync_dir(directory) -> None:
+    """Make the rename durable. Bounds the crash window; does not remove it.
+
+    Stated honestly because "atomic" invites more confidence than a rename
+    deserves on its own: without this, a crash shortly after the rename can
+    still lose it. With it, a snapshot that is visible has been published.
+    """
+    fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 ```
 
 - [ ] **Step 4: Run the whole snapshot suite**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_measurement_snapshot.py tests/test_snapshot_components.py -v`
-Expected: all pass, including the 14 pre-existing contracts unchanged
+Expected: all pass, including the 14 pre-existing contracts unchanged. If any pre-existing contract needs editing to pass, stop: the default capture was supposed to be unchanged, and an edited contract is the evidence that it was not.
 
 - [ ] **Step 5: Commit**
 
@@ -1346,7 +1623,7 @@ def test_both_backends_capture_the_same_component_set(equivalence_store, monkeyp
 
 
 def test_both_backends_produce_the_same_paths_and_the_same_bytes(
-        store, monkeypatch):
+        equivalence_store, monkeypatch):
     cloned, copied = _capture_both(equivalence_store, monkeypatch)
     try:
         a = _hash_tree(cloned.path / "wiki")
@@ -1396,12 +1673,17 @@ def test_both_backends_survive_the_same_live_edits(equivalence_store, monkeypatc
 
 
 def test_no_correctness_path_branches_on_the_capture_backend():
-    """The decay this prevents: "portable-first" quietly becoming "APFS-first
-    with a decorative fallback".
+    """A LINT, not a proof, and worth keeping only because it is cheap.
 
-    Walks the AST for a comparison against a backend constant. Assigning one is
-    fine — that is how the mechanism gets recorded. COMPARING one means some
-    behaviour depends on which filesystem happened to be underneath.
+    It walks one module's AST for a comparison against a backend constant.
+    Assigning one is fine — that is how the mechanism gets recorded. Comparing
+    one means behaviour depends on which filesystem happened to be underneath.
+
+    What it cannot see: a string literal comparison (`== "clonefile"`), a
+    branch in any other module, or a dict lookup keyed on the backend. The REAL
+    contract is the behavioural equivalence above — same paths, same bytes,
+    same semantics, same immutability. If this lint and those tests ever
+    disagree, the behavioural tests are the ones that matter.
     """
     tree = ast.parse(inspect.getsource(ms))
     constants = {"CLONEFILE", "COPY", "HARDLINK"}
@@ -1464,7 +1746,9 @@ try:
     print(f"full capture   : {elapsed*1000:.0f} ms")
     print(f"peak RSS delta : {(after - before) / 1e6:.2f} MB")
     print(f"mechanisms     : {snapshot.identity['components']}")
-    print(f"logical bytes  : {snapshot.identity['logical_bytes']}")
+    total = sum(c["logical_bytes"] for c in snapshot.identity["components"].values())
+    print(f"logical bytes  : {total / 1e6:.1f} MB across "
+          f"{len(snapshot.identity['components'])} components")
 finally:
     snapshot.release()
     print("released:", snapshot.released)
@@ -1539,13 +1823,16 @@ git commit -m "zurvan: Z0 step 3 measured on the live store, and the design corr
 
 ## What this step does NOT close
 
-Z0's gate (design §10) has twenty items. This step demonstrates **two**: item 14 (hardlink invariant) and item 16 (wiki immutability matrix). It also builds the mechanism several others will need.
+Z0's gate (design §10) has twenty items. This step closes **one**: item 16, the wiki immutability matrix. It also builds the mechanism several others will need.
+
+**Item 14 is explicitly NOT closed.** Task 5 reproduces the hardlink hazard and refuses a capture taken over a journal, but nothing yet makes a direct in-place write to the published inode fail. Enforcement needs a publication invariant and arrives with atomic publication in steps 4–5. A test named after an invariant is not the invariant.
 
 Still open after this step, and none of it should be claimed:
 
 - Items 1–7, mutation semantics against real snapshots — need Step 6's capture algorithm.
 - Items 8–13, coherence — need `purpose`/`required`, `built_from_revision`, and the bounded retry.
-- Item 15, self-contained SQLite as a *publication* assertion — Step 4. Task 4 adds a capture-time guard, which is a different question asked at a different moment.
+- Item 14, the hardlink invariant, as ENFORCEMENT rather than demonstration — steps 4–5.
+- Item 15, self-contained SQLite as a *publication* assertion — Step 4. Task 4 adds a capture-time guard under a read lock, which is a different question asked at a different moment.
 - Items 17–18, truthful stamps and SUSPECT refusal on rebuild — Step 5.
 - Item 19, the claims guard — Step 6.
 - Item 20, the regression floor, is re-run by Task 8 but is not closure by itself.
