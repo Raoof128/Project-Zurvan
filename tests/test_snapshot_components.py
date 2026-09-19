@@ -222,3 +222,74 @@ def test_nothing_this_step_produces_claims_to_be_coherence_verified(store, into)
     mistakable for a verified one."""
     assert ms.capture_wiki(store, into).coherence_verified is False
     assert ms.capture_graph(store, into).coherence_verified is False
+
+
+# ── the hardlink hazard: reproduced, NOT enforced (gate 14 stays OPEN) ───────
+
+def _make_index(store):
+    index = store / "data" / "search.sqlite"
+    conn = sqlite3.connect(index)
+    conn.execute("CREATE TABLE chunks (chunk_id INTEGER PRIMARY KEY)")
+    conn.execute("INSERT INTO chunks VALUES (1)")
+    conn.commit()
+    conn.close()
+    return index
+
+
+def test_an_in_place_write_to_the_published_index_reaches_every_snapshot(
+        store, into, monkeypatch):
+    """The hazard, reproduced. NOT gate 14.
+
+    A hardlink is legal only because `rebuild_search_index` builds to
+    `data/search.sqlite.building-<pid>` and promotes with one `os.replace()`.
+    If anyone opens the canonical path for writing instead, the snapshot and
+    the live store are the same inode, and every existing snapshot silently
+    stops being one.
+
+    This proves the danger is real. It does not prevent it: nothing here makes
+    the offending write fail, so **gate 14 remains OPEN** until a publication
+    invariant enforces it in steps 4-5.
+    """
+    monkeypatch.delenv("ZURVAN_SEARCH_DB", raising=False)
+    index = _make_index(store)
+    component = ms.capture_search(store, into)
+
+    conn = sqlite3.connect(index)
+    conn.execute("INSERT INTO chunks VALUES (2)")
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(f"file:{component.path}?mode=ro", uri=True)
+    try:
+        leaked = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+    finally:
+        conn.close()
+    assert leaked == 2, (
+        "a hardlink shares the inode, so this MUST leak; if it did not, the "
+        "mechanism changed and this test is no longer describing reality")
+
+
+def test_the_index_is_captured_by_hardlink_which_is_why_the_hazard_exists(
+        store, into, monkeypatch):
+    """The mechanism is the hazard's precondition. Recorded so that if the
+    index ever stops being hardlinked, the test above is revisited rather than
+    left asserting a leak that can no longer happen."""
+    monkeypatch.delenv("ZURVAN_SEARCH_DB", raising=False)
+    _make_index(store)
+
+    component = ms.capture_search(store, into)
+
+    assert component.backend == ib.HARDLINK
+
+
+def test_capture_refuses_an_index_whose_committed_state_is_not_in_the_file(
+        store, into, monkeypatch):
+    """What IS enforced today: a capture taken while a writer holds a journal
+    is refused. That is narrower than gate 14, which asks for the offending
+    write itself to fail loudly."""
+    monkeypatch.delenv("ZURVAN_SEARCH_DB", raising=False)
+    index = _make_index(store)
+    index.with_name(index.name + "-journal").write_bytes(b"mid-write")
+
+    with pytest.raises(ms.SnapshotComponentError):
+        ms.capture_search(store, into)
