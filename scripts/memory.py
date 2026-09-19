@@ -108,12 +108,22 @@ def current_project_name() -> str:
 def add_decision(title: str, reason: str, status: str, tags: List[str],
                  project: str | None = None):
     filepath = _unique_path("wiki/decisions", _make_note_slug(title))
+    subject = resolve_project(project)
+
+    # The ledger takes the SUBJECT from here — the same value, from the same
+    # call, at the same moment the page is stamped with it. They previously
+    # disagreed: the page resolved the working directory and the mutation row
+    # took the globally selected workspace, so one `decision add` produced a
+    # page saying `zurvan` and a ledger row saying `otherproj`. Resolving it once
+    # and declaring it makes that class of disagreement unrepresentable.
+    from scripts.knowledge_revision import declare_store_project
+    declare_store_project(subject)
 
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
     content = f"""---
 title: {escape_yaml_string(title)}
 type: decision
-project: {escape_yaml_string(resolve_project(project))}
+project: {escape_yaml_string(subject)}
 status: {escape_yaml_string(status)}
 tags:
 {tags_yaml}

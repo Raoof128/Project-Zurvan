@@ -29,7 +29,7 @@ def root(tmp_path, monkeypatch):
 
 
 def _orphan(root, planned, completed=()):
-    op = kr.Operation(root=root, project="instagram", writer="test")
+    op = kr.Operation(root=root, store_project="instagram", writer="test")
     mid = kr._insert_mutation(op)
     for p in planned:
         kr._append_path(mid, "planned_paths", p, root)

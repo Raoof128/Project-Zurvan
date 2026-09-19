@@ -6,16 +6,24 @@ from scripts.mcp_tools import (
     tool_zurvan_graph_stats_struct,
 )
 
-def test_tool_zurvan_search():
-    # Write a test file
-    os.makedirs("wiki", exist_ok=True)
-    with open("wiki/test_mcp_search.md", "w") as f:
-        f.write("unique_mcp_search_term")
-        
+def test_tool_zurvan_search(monkeypatch, tmp_path):
+    # This wrote `wiki/test_mcp_search.md` into the LIVE store and `os.remove`d
+    # it, the pattern `test_tool_zurvan_remember` below was already fixed for.
+    # A count-based guard sees nothing while the run completes — but the name is
+    # FIXED, so a run killed between the write and the remove leaves the page
+    # behind, and the NEXT run then overwrites it and deletes it, netting -1
+    # against a store that never gained one. Observed 2026-09-19: the session
+    # guard failed a gate with `wiki pages: 120 -> 119` and no write attribution.
+    # Redirect the store; cleanup is not isolation.
+    import scripts.context_export as context_export
+    monkeypatch.setattr(context_export, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "test_mcp_search.md").write_text(
+        "unique_mcp_search_term", encoding="utf-8")
+
     result = tool_zurvan_search("unique_mcp_search_term", hybrid=False)
+
     assert "test_mcp_search.md" in result
-    
-    os.remove("wiki/test_mcp_search.md")
 
 def test_tool_zurvan_graph_stats_struct():
     stats = tool_zurvan_graph_stats_struct()

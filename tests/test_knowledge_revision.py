@@ -530,7 +530,7 @@ def _orphan(root, planned, completed=()):
 
     Every path is absolute and under this test's root.
     """
-    op = kr.Operation(root=root, project="other", writer="test")
+    op = kr.Operation(root=root, store_project="other", writer="test")
     mid = kr._insert_mutation(op)
     for p in planned:
         kr._append_path(mid, "planned_paths", p, root)

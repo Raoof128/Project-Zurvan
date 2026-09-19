@@ -118,7 +118,16 @@ def format_report(reports, status, revision) -> str:
     for r in reports:
         m = r.mutation
         lines.append("Orphaned mutation:")
-        lines.append(f"  project: {m.project or '(unknown)'}")
+        # Three separate facts, never merged into one word. An operator reading
+        # "zurvan / zurvan / otherproj" learns that the mutation targeted Zurvan,
+        # ran in the Zurvan workspace, and that the global selector was stale —
+        # which is evidence. One field holding whichever of those happened to
+        # be written was fiction.
+        lines.append(f"  store:     {m.store_project or '(unknown)'}")
+        lines.append(f"  execution: {m.execution_project or '(unknown)'}")
+        lines.append(f"  selected:  {m.selected_project or '(none)'}"
+                     "   [diagnostic only]")
+        lines.append(f"  writer:  {m.writer or '(unknown)'}")
         lines.append(f"  caller:  {m.caller or '(unknown)'}")
         lines.append(f"  owner:   pid {m.owner_pid} / {m.owner_identity}")
         lines.append(f"  planned:   {', '.join(m.planned_paths) or '(none)'}")

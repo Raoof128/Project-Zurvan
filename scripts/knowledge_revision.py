@@ -111,10 +111,53 @@ class Revision:
     manifest_digest: str
 
 
+def _migrate_attribution(conn) -> None:
+    """Split the overloaded `project` column into four named facts.
+
+    The shipped column was filled from `project_registry.get_current_project()`
+    — the registry's `current`, one file shared by every concurrent session on
+    the machine. It was therefore never a subject and never a caller, and on
+    2026-09-19 a `decision add` run inside the Zurvan repo recorded `otherproj`
+    while the page it wrote stamped `zurvan`.
+
+    The recorded values ARE selections, so they move to `selected_project`
+    verbatim. `store_project`, `execution_project` and `caller_project` stay
+    NULL on historical rows: nothing in the old row records those facts, and a
+    backfill would be a guess wearing the authoritative field's name.
+    """
+    def _columns():
+        return {row[1] for row in conn.execute("PRAGMA table_info(mutations)")}
+
+    if "project" not in _columns():
+        return                       # fresh, or another process already did it
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        # Re-read INSIDE the transaction. `ensure_schema` runs on every mutation
+        # insert, so two processes can both see the old shape, and the loser of
+        # the `BEGIN IMMEDIATE` race would otherwise RENAME a column the winner
+        # had already renamed — failing the write that triggered it.
+        columns = _columns()
+        if "project" in columns:
+            conn.execute("ALTER TABLE mutations RENAME COLUMN project"
+                         " TO selected_project")
+            for name in ("store_project", "execution_project", "caller_project"):
+                if name not in columns:
+                    conn.execute(
+                        f"ALTER TABLE mutations ADD COLUMN {name} TEXT")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def ensure_schema(root=None) -> None:
-    """Create the three tables if absent. Additive: `sources` is untouched."""
+    """Create the three tables if absent, and migrate an older shape in place.
+
+    Additive: `sources` is untouched.
+    """
     conn = _connect(root)
     try:
+        _migrate_attribution(conn)
         conn.executescript(
             f"""
             CREATE TABLE IF NOT EXISTS knowledge_state (
@@ -132,21 +175,24 @@ def ensure_schema(root=None) -> None:
                 state            TEXT NOT NULL
                                  CHECK (state IN ('{ACTIVE}','{COMMITTED}',
                                                   '{ABORTED}','{ORPHANED}','{RESOLVED}')),
-                project          TEXT,
-                writer           TEXT,
-                implicit         INTEGER NOT NULL DEFAULT 0,
-                caller           TEXT,
-                owner_pid        INTEGER,
-                owner_identity   TEXT NOT NULL,
-                started_at       TEXT NOT NULL,
-                committed_at     TEXT,
-                last_heartbeat   TEXT,
-                planned_paths    TEXT NOT NULL DEFAULT '[]',
-                completed_paths  TEXT NOT NULL DEFAULT '[]',
-                orphan_reason    TEXT,
-                orphaned_at      TEXT,
-                resolved_at      TEXT,
-                resolution_actor TEXT,
+                store_project       TEXT,
+                execution_project   TEXT,
+                selected_project    TEXT,
+                caller_project      TEXT,
+                writer              TEXT,
+                implicit            INTEGER NOT NULL DEFAULT 0,
+                caller              TEXT,
+                owner_pid           INTEGER,
+                owner_identity      TEXT NOT NULL,
+                started_at          TEXT NOT NULL,
+                committed_at        TEXT,
+                last_heartbeat      TEXT,
+                planned_paths       TEXT NOT NULL DEFAULT '[]',
+                completed_paths     TEXT NOT NULL DEFAULT '[]',
+                orphan_reason       TEXT,
+                orphaned_at         TEXT,
+                resolved_at         TEXT,
+                resolution_actor    TEXT,
                 resolution_reason TEXT,
                 resolution_revision INTEGER
             );
@@ -289,7 +335,20 @@ class Mutation:
     mutation_id: str
     base_revision: int
     state: str
-    project: str | None
+    #: The SUBJECT written: the `project:` field stamped on the page, which is
+    #: the publication control `public_repo_guard` reads. Whose knowledge moved.
+    store_project: str | None
+    #: The registered project containing the working directory. WHERE execution
+    #: happened — for an MCP server that is its own workspace, which is why this
+    #: is not called `caller_project`.
+    execution_project: str | None
+    #: The registry's `current`. Diagnostic only: never consulted for ownership,
+    #: orphan attribution or routing. Recording it makes a stale selection
+    #: visible instead of letting it masquerade as an attribution.
+    selected_project: str | None
+    #: Reserved. Populated only from a caller that supplies a trustworthy
+    #: project identity of its own; nothing does yet, so it is always NULL.
+    caller_project: str | None
     writer: str | None
     implicit: bool
     caller: str | None
@@ -306,7 +365,8 @@ class Mutation:
 
 
 _MUTATION_COLS = (
-    "mutation_id, base_revision, state, project, writer, implicit, caller,"
+    "mutation_id, base_revision, state, store_project, execution_project,"
+    " selected_project, caller_project, writer, implicit, caller,"
     " owner_pid, owner_identity, started_at, committed_at,"
     " planned_paths, completed_paths, orphan_reason, orphaned_at,"
     " resolved_at, resolution_revision"
@@ -315,13 +375,15 @@ _MUTATION_COLS = (
 
 def _row_to_mutation(row) -> Mutation:
     return Mutation(
-        mutation_id=row[0], base_revision=row[1], state=row[2], project=row[3],
-        writer=row[4], implicit=bool(row[5]), caller=row[6], owner_pid=row[7],
-        owner_identity=row[8], started_at=row[9], committed_at=row[10],
-        planned_paths=json.loads(row[11] or "[]"),
-        completed_paths=json.loads(row[12] or "[]"),
-        orphan_reason=row[13], orphaned_at=row[14],
-        resolved_at=row[15], resolution_revision=row[16],
+        mutation_id=row[0], base_revision=row[1], state=row[2],
+        store_project=row[3], execution_project=row[4],
+        selected_project=row[5], caller_project=row[6],
+        writer=row[7], implicit=bool(row[8]), caller=row[9], owner_pid=row[10],
+        owner_identity=row[11], started_at=row[12], committed_at=row[13],
+        planned_paths=json.loads(row[14] or "[]"),
+        completed_paths=json.loads(row[15] or "[]"),
+        orphan_reason=row[16], orphaned_at=row[17],
+        resolved_at=row[18], resolution_revision=row[19],
     )
 
 
@@ -379,7 +441,12 @@ def mutations_in(state, root=None) -> list:
 @dataclass
 class Operation:
     root: Path
-    project: str | None = None
+    #: May be None at open and declared later: `main()` wraps before argparse
+    #: runs, so the CLI cannot know the subject until the page resolves it.
+    store_project: str | None = None
+    execution_project: str | None = None
+    selected_project: str | None = None
+    caller_project: str | None = None
     writer: str | None = None
     caller: str | None = None
     implicit: bool = False
@@ -427,6 +494,84 @@ def _describe_caller() -> str:
     return "unknown"
 
 
+def _clean(value):
+    """`"unknown"` is not a project name; NULL is how a column says so.
+
+    `memory.resolve_project` answers `"unknown"` deliberately — it is a
+    publication control and fails closed, and `"unknown"` is not in
+    `PUBLIC_PROJECTS`. A ledger column has a real representation for absence,
+    and carrying two spellings of it would mean every reader has to know both.
+
+    Stated bound: a project actually REGISTERED as `unknown` would be erased to
+    NULL here. `is_safe_slug` permits that name, and `resolve_project` already
+    cannot distinguish the two either — this inherits that collision rather
+    than introducing it.
+    """
+    return None if value in (None, "", "unknown") else value
+
+
+def _ambient_attribution() -> tuple:
+    """(execution_project, selected_project) for the process, best effort.
+
+    Deliberately NOT fail-closed, unlike everything else in this module. These
+    two are diagnostics: an absent one is honestly NULL, and a coherence ledger
+    that refused a write because the project registry was unreadable would be
+    trading a real guarantee for a label.
+    """
+    execution = selected = None
+    try:
+        from scripts.memory import resolve_project
+        execution = resolve_project()
+    except Exception:
+        pass
+    try:
+        from scripts.project_registry import get_current_project
+        selected = get_current_project()[0]
+    except Exception:
+        pass
+    return _clean(execution), _clean(selected)
+
+
+def declare_store_project(name, op=None) -> None:
+    """Record the SUBJECT this operation is writing, from the write path.
+
+    Called where a page stamps its `project:` field, with the value that page
+    stamped, so the ledger and the page cannot disagree — which is the entire
+    defect this replaces. Declaring works before or after the mutation row
+    exists, because the row is created lazily on the first planned write while
+    `add_decision` resolves its subject in the middle of writing.
+
+    A second, DIFFERENT subject raises: one mutation, one subject. If a command
+    ever writes two projects' pages then the operation boundary is drawn in the
+    wrong place, and mis-attributing that quietly is worse than stopping.
+    Outside any operation this is a no-op — library code stays callable, and
+    the write becomes an implicit mutation recorded as such.
+    """
+    name = _clean(name)
+    if name is None:
+        return
+    if op is None:
+        op = _CTX.get()
+    if op is None:
+        return
+    if op.store_project is not None and op.store_project != name:
+        raise LedgerError(
+            f"operation already writing {op.store_project!r}; refusing to also "
+            f"attribute it to {name!r}. One mutation has one subject — split "
+            "the operation instead.")
+    op.store_project = name
+    if op.mutation_id is not None:
+        conn = _connect(op.root)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE mutations SET store_project = ? WHERE mutation_id = ?",
+                (name, op.mutation_id))
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
+
+
 def _insert_mutation(op: Operation) -> str:
     mutation_id = f"m{uuid.uuid4().hex[:12]}"
     pid = os.getpid()
@@ -438,10 +583,14 @@ def _insert_mutation(op: Operation) -> str:
             "SELECT current_revision FROM knowledge_state WHERE id = 1"
         ).fetchone()[0]
         conn.execute(
-            "INSERT INTO mutations (mutation_id, base_revision, state, project,"
-            " writer, implicit, caller, owner_pid, owner_identity, started_at,"
-            " last_heartbeat) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (mutation_id, base, ACTIVE, op.project, op.writer,
+            "INSERT INTO mutations (mutation_id, base_revision, state,"
+            " store_project, execution_project, selected_project,"
+            " caller_project, writer, implicit, caller, owner_pid,"
+            " owner_identity, started_at, last_heartbeat)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (mutation_id, base, ACTIVE, _clean(op.store_project),
+             _clean(op.execution_project), _clean(op.selected_project),
+             _clean(op.caller_project), op.writer,
              int(bool(op.implicit)), op.caller, pid, own_identity(),
              _now(), _now()))
         conn.execute("COMMIT")
@@ -491,8 +640,11 @@ def plan_write(path, root=None):
     op = _CTX.get()
     owns = False
     if op is None or op.root != base:
+        execution_project, selected_project = _ambient_attribution()
         op = Operation(root=base, writer="implicit", implicit=True,
-                       caller=_describe_caller())
+                       caller=_describe_caller(),
+                       execution_project=execution_project,
+                       selected_project=selected_project)
         owns = True
     if op.mutation_id is None:
         op.mutation_id = _insert_mutation(op)
@@ -604,12 +756,21 @@ def _finish(op: Operation, ok: bool, reason: str = "") -> None:
 
 
 @contextmanager
-def operation(project=None, writer=None, caller=None, root=None):
+def operation(writer=None, caller=None, root=None, store_project=None,
+              execution_project=None, selected_project=None):
     """Scope one logical operation. Joins an enclosing one on the same store.
 
     No database row is created here. The mutation activates on the first
     planned write, so a read-only command leaves the ledger untouched and
     cannot make a snapshot capture report BUSY.
+
+    There is no `project=` parameter. The one this replaces was filled from the
+    registry's globally selected workspace, which is neither the subject of the
+    write nor an identity of the caller; passing it recorded `otherproj` for work
+    done in the Zurvan repo. A boundary that knows its subject passes
+    `store_project`; one that does not leaves it for `declare_store_project`.
+    `execution_project` and `selected_project` are captured from the process
+    unless given, so every boundary gets them without repeating itself.
     """
     base = ks.store_root(root)
     existing = _CTX.get()
@@ -624,7 +785,12 @@ def operation(project=None, writer=None, caller=None, root=None):
             existing.depth -= 1
         return
 
-    op = Operation(root=base, project=project, writer=writer, caller=caller)
+    if execution_project is None and selected_project is None:
+        execution_project, selected_project = _ambient_attribution()
+    op = Operation(root=base, store_project=store_project,
+                   execution_project=execution_project,
+                   selected_project=selected_project,
+                   writer=writer, caller=caller)
     token = _CTX.set(op)
     try:
         try:

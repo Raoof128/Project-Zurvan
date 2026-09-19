@@ -312,7 +312,11 @@ def _main():
         "--project",
         help="Subject project for the `project:` field, which public_repo_guard "
              "uses as a publication control. Defaults to the registered project "
-             "containing the working directory, NOT the globally selected one.",
+             "containing the working directory, NOT the globally selected one. "
+             "KNOWN DEFECT: this flag never arrives — `_main` scans sys.argv for "
+             "`--project` anywhere and pops it as the global workspace switch "
+             "before argparse runs. Use the MCP tool's `project` argument, or "
+             "run from inside the subject's workspace, until that is fixed.",
     )
     
     # zurvan boundary <...>
@@ -1128,14 +1132,17 @@ def main():
     dispatch body closes over `trace_parser`, `boundary_parser`, `graph_parser`
     and `snapshot_parser`, locals created before `parse_args`, so splitting
     dispatch into its own function would raise `NameError`.
+
+    Attribution is not passed here. This wrapper used to hand the ledger
+    `get_current_project()` — the registry's globally selected workspace — as
+    the mutation's project, and a `decision add` run inside the Zurvan repo was
+    recorded as `otherproj` because another session had left that selected. The
+    subject now arrives from the write path (`memory.add_decision` declares the
+    value it stamps on the page), and the ambient facts are captured inside
+    `operation()` where every boundary gets them the same way.
     """
     from scripts import knowledge_revision as _kr
-    try:
-        from scripts.project_registry import get_current_project
-        project = get_current_project()[0]
-    except Exception:
-        project = None
-    with _kr.operation(writer="cli", project=project):
+    with _kr.operation(writer="cli"):
         return _main()
 
 

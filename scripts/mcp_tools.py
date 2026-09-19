@@ -12,6 +12,42 @@ from scripts.graph_context import expand_graph_context
 from scripts.memory import add_decision, add_note, add_claim, add_question
 
 
+def mcp_operation(func):
+    """An MCP tool call is one logical operation, exactly like a CLI invocation.
+
+    Found live in the production ledger on 2026-09-19 at revision 8: four
+    mutations for two decisions, every one of them `implicit`, alternating
+    `scripts.memory:add_decision` and `scripts.memory:append_to_log`. These
+    tools called `memory` directly, so the page and the log append each
+    activated their own mutation and a revision was minted BETWEEN them —
+    naming a state in which a decision page exists that `wiki/log.md` does not
+    mention. That is the half-operation the mutation barrier exists to forbid.
+
+    The boundary belongs HERE and not inside `memory.add_decision`: making a
+    library function its own operation would give every caller an independent
+    boundary and simply move the split one level down. The hierarchy is
+
+        CLI command / MCP tool / agent operation   <- operation boundary
+                        |
+                  memory functions
+                        |
+            safe_write two-phase participant
+
+    and a memory function called with no boundary above it still becomes an
+    implicit mutation, recorded as such for the migration inventory.
+
+    Inside `enforce_read_only`, never outside it: a refused write must not open
+    an operation. It plans nothing so no row would be created either way, but
+    relying on that would make the ordering load-bearing by accident.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        from scripts import knowledge_revision as kr
+        with kr.operation(writer="mcp", caller=f"mcp:{func.__name__}"):
+            return func(*args, **kwargs)
+    return wrapper
+
+
 # Every tool result lands in an agent's context window, so results are bounded
 # in two ways: by ITEM COUNT (pagination, with a cursor so nothing is
 # unreachable) and by CHARACTERS (a final budget, so one pathological item
@@ -256,6 +292,7 @@ def tool_zurvan_validate_gold() -> str:
 
 @_protocol_safe
 @enforce_read_only
+@mcp_operation
 def tool_zurvan_remember(type: str, title: str, body: str, tags: List[str]) -> str:
     """Remembers a project note. The `type` label is preserved as the first tag
     so it is not silently discarded (use zurvan_decision_add / zurvan_claim_add /
@@ -269,6 +306,7 @@ def tool_zurvan_remember(type: str, title: str, body: str, tags: List[str]) -> s
 
 @_protocol_safe
 @enforce_read_only
+@mcp_operation
 def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[str],
                              project: str | None = None) -> str:
     """Manages decisions.
@@ -283,6 +321,7 @@ def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[st
 
 @_protocol_safe
 @enforce_read_only
+@mcp_operation
 def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str, tags: List[str]) -> str:
     """Manages claims."""
     allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
@@ -295,6 +334,7 @@ def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str
 
 @_protocol_safe
 @enforce_read_only
+@mcp_operation
 def tool_zurvan_question_add(question: str, reason: str, tags: List[str]) -> str:
     """Manages open questions."""
     if add_question(question, reason, tags):

@@ -250,6 +250,116 @@ arriving later and being silently invisible to Z0's coherence proof.
 
 ---
 
+## 8. Mutation attribution: four named facts, not one overloaded field
+
+**Date:** 2026-09-19. **Amends:** Z0 step 1 (`mutations` schema).
+**Forced by:** two defects found in the LIVE production ledger, not in review.
+
+### 8.1 What was wrong
+
+Z0 step 1 shipped a single `project` column on `mutations`, filled by the CLI
+wrapper from `project_registry.get_current_project()`. That value is the
+registry's `current`: one file, shared by every concurrent session on the
+machine. It is therefore neither the subject of the write nor an identity of
+the caller, and it cannot name a session at all — two sessions in two repos
+read the same value.
+
+Observed at revision 8:
+
+```
+mfc9e4ccdd1d0  COMMITTED  otherproj  cli     <- written from inside the Zurvan repo
+```
+
+while the decision page that same mutation wrote stamped `project: zurvan`.
+The ledger and the page disagreed about one write. `memory.resolve_project`
+already existed precisely to stop that class of error — its docstring records
+the 2026-09-15 incident in which four decisions written from inside the Zurvan
+repo were stamped with an unrelated project because another session had left
+that workspace selected — and the ledger reintroduced it one layer down.
+
+### 8.2 The model
+
+One column cannot hold two facts, so the column is replaced by four, each
+named for what its value can actually support:
+
+| field | source | meaning |
+|---|---|---|
+| `store_project` | `memory.resolve_project(explicit)`, declared by the write path | the SUBJECT stamped on the page; the publication control `public_repo_guard` reads. Whose knowledge moved. |
+| `execution_project` | the registered project containing the working directory | WHERE execution happened. For an MCP server this is its own workspace, **not** the requester's. |
+| `selected_project` | the registry's `current` | diagnostic only. Never consulted for ownership, orphan attribution or routing. |
+| `caller_project` | nothing, yet | reserved for a caller that supplies a trustworthy project identity of its own. Always NULL until then. |
+
+`caller_project` is deliberately empty rather than absent: naming the
+cwd-derived value "caller" would plant the next attribution bug the first time
+a request crosses a process boundary.
+
+`store_project` is declared from the write path — `memory.add_decision`
+resolves the subject once and both stamps the page and declares it — so the
+page and the ledger take the same value from the same call and cannot
+disagree. A second, different subject inside one operation raises: one
+mutation, one subject; if a command ever writes two projects' pages the
+operation boundary is drawn in the wrong place.
+
+`"unknown"` is normalised to NULL. `resolve_project` answers `"unknown"`
+because it is a publication control and fails closed; a ledger column has a
+real representation for absence and does not need a second spelling.
+
+`execution_project` and `selected_project` are captured **best effort** — the
+one place in `knowledge_revision` that does not fail closed. They are
+diagnostics, and a coherence ledger that refused a write because the project
+registry was unreadable would trade a real guarantee for a label.
+
+### 8.3 Migration of the live ledger
+
+Recorded values ARE selections, so they move to `selected_project` verbatim.
+The other three stay NULL on historical rows: nothing in the old row records
+those facts, and a backfill would be a guess wearing the authoritative field's
+name.
+
+### 8.4 The MCP boundary (the more urgent defect)
+
+The same inspection found four implicit mutations for two decisions:
+
+```
+m99e68f36fdf3  COMMITTED  implicit  scripts.memory:add_decision
+m625b81a185fa  COMMITTED  implicit  scripts.memory:append_to_log
+me499f76dea52  COMMITTED  implicit  scripts.memory:add_decision
+mb9fa67565fd7  COMMITTED  implicit  scripts.memory:append_to_log
+```
+
+`scripts/mcp_tools.py` called `memory` directly, so the page and the
+`wiki/log.md` append each activated their own implicit mutation and a revision
+was minted **between** them — naming a state in which a decision page exists
+that the log does not mention. That is the half-operation §3 of the Z0 design
+forbids, and it was live, not hypothetical.
+
+An MCP tool is now a top-level operation boundary, parallel to a CLI
+invocation. The boundary belongs at the tool and **not** inside
+`memory.add_decision`: making a library function its own operation would give
+every caller an independent boundary and move the split one level down.
+
+```
+CLI command / MCP tool / agent operation   <- operation boundary
+                  |
+            memory functions
+                  |
+      safe_write two-phase participant
+```
+
+A memory function called with no boundary above it still becomes an implicit
+mutation, recorded as such for the migration inventory.
+
+### 8.5 Not fixed here, deliberately
+
+`zurvan decision add --project X` cannot reach `add_decision(project=X)`:
+`cli.py:42` scans `sys.argv` for `--project` anywhere and pops it as the global
+workspace switch before argparse runs, then re-execs the CLI in that project's
+directory. The subcommand's documented subject flag is shadowed. Measured
+2026-09-19; the flag's help now says so, and the fix is a separate change
+because it alters CLI argument semantics.
+
+---
+
 ## 7. Amendment log
 
 | # | Date | Amends | Summary |
@@ -258,6 +368,8 @@ arriving later and being silently invisible to Z0's coherence proof.
 | 2 | 2026-09-18 | §26 Z0 | Z0 widened to the derived-store lifecycle; snapshot-backed rebuilds; authoritative/measurement capture split (rev 2) |
 | 3 | 2026-09-18 | §5, §8.4 | `data/generations/` replaced by a portable snapshot abstraction |
 | 4 | 2026-09-18 | §8.2 | Claim-ledger component declared unsupported, with a fail-closed guard |
+| 5 | 2026-09-19 | Z0 step 1 `mutations` | `project` split into `store_project` / `execution_project` / `selected_project` / `caller_project` (§8) |
+| 6 | 2026-09-19 | Z0 step 1 boundaries | MCP tools made top-level operation boundaries; live half-operation defect (§8.4) |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
 policy), §30 (success definition) or §34 (acceptance gate).

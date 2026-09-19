@@ -12,19 +12,23 @@ def _patch_roots(monkeypatch, tmp_path):
     monkeypatch.setattr(_context_export, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
 
-def test_search_memory(capsys):
-    # Ensure there's a file to find
-    test_file = "wiki/test_search.md"
-    os.makedirs("wiki", exist_ok=True)
-    with open(test_file, "w") as f:
-        f.write("unique_search_term_123")
-        
+def test_search_memory(capsys, monkeypatch, tmp_path):
+    # Was a FIXED-name page written into the LIVE store and `os.remove`d. The
+    # count comes back even when the run finishes, so a count-based guard sees
+    # nothing — but a run killed between the write and the remove leaves the
+    # page behind, and the NEXT run deletes a page it never created. That is how
+    # the session guard came to report `wiki pages: 120 -> 119` with no write
+    # attribution on 2026-09-19. `_patch_roots` was already in this file.
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "test_search.md").write_text(
+        "unique_search_term_123", encoding="utf-8")
+
     search_memory("unique_search_term_123")
+
     captured = capsys.readouterr()
     assert "Found" in captured.out
     assert "test_search.md" in captured.out
-    
-    os.remove(test_file)
 
 def test_keyword_search_includes_docs_and_returns_relative_paths(tmp_path):
     # Regression: keyword mode globbed only wiki/, so `zurvan search <term>`
@@ -44,17 +48,17 @@ def test_keyword_search_includes_docs_and_returns_relative_paths(tmp_path):
     assert all(not os.path.isabs(r["source_path"]) for r in results)
 
 
-def test_export_context(capsys):
-    test_file = "wiki/test_context.md"
-    os.makedirs("wiki", exist_ok=True)
-    with open(test_file, "w") as f:
-        f.write("export_target_keyword")
-        
+def test_export_context(capsys, monkeypatch, tmp_path):
+    # Same fixed-name live-store write as `test_search_memory` above.
+    _patch_roots(monkeypatch, tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "test_context.md").write_text(
+        "export_target_keyword", encoding="utf-8")
+
     output = export_context("export_target_keyword")
+
     assert "Zurvan Context Bundle" in output
     assert "test_context.md" in output
-
-    os.remove(test_file)
 
 
 def test_save_writes_synthesis_file(tmp_path, monkeypatch):
