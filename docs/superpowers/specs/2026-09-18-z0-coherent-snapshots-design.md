@@ -345,13 +345,36 @@ benefit.
 
 | Store | Mechanism | Legal because | Measured cost |
 |---|---|---|---|
-| `wiki/` (135 MB, 4,430 files) | clonefile, else copy | COW clone gets its own inode | 0.55–0.59 s, **0 blocks** |
-| `data/search.sqlite` (738 MB) | hardlink | published inode never modified in place | 0.26 ms, 0 blocks |
-| `data/graph.sqlite` (13 MB) | clonefile, else copy | see §4.4 | < 10 ms, 0 blocks |
+| `wiki/` (135 MB, 4,439 files) | clonefile, else copy | COW clone gets its own inode | **43–72 ms**, ~4 MB metadata |
+| `data/search.sqlite` (739 MB) | hardlink | published inode never modified in place | 0.26 ms, no new blocks |
+| `data/graph.sqlite` (13.2 MB) | clonefile, else copy | see §4.4 | **0.33 ms**, no new blocks |
 | authoritative manifest (`os.walk`) | — | — | 31 ms over 4,405 files |
+
+**Corrected 2026-09-19 by Z0 step 3's measurement.** The wiki row previously
+read `0.55–0.59 s, 0 blocks`. Both were wrong:
+
+- **Timing.** One recursive `clonefile(2)` syscall on the directory measures
+  43–72 ms (median 47.3, n=5) — roughly ten times faster. The old figure is
+  consistent with per-file `cp -c`, which forks once per file.
+- **"Zero disk" is retired.** A directory clone allocates about 4 MB of
+  metadata for 4,439 new inodes. The claim that survives measurement is:
+  **no additional file-data blocks were observed on APFS copy-on-write
+  capture; filesystem metadata allocation is non-zero.** Use that wording;
+  a claim of "zero" invites a reviewer to find the 4 MB and distrust the rest.
+
+The portable fallback, measured on the same tree: `shutil.copytree` takes
+1,779 ms and really allocates 147 MB — 25–37x the clone. It is an honest
+portability path, not a decoration, and a test asserts the two backends produce
+indistinguishable snapshots.
 
 Bound: measured on one APFS volume on one machine. `cp -c` fails across volumes
 and does not exist off APFS, which is why the fallback is a first-class path.
+EXDEV itself was **NOT MEASURED** — this machine has no second volume:
+
+```text
+clone failure -> fallback path            TESTED (fault injection)
+real EXDEV on a second filesystem         NOT MEASURED
+```
 Snapshots live under `data/snapshots/`, on the same volume as the stores, so the
 fast path applies by construction.
 
@@ -795,6 +818,37 @@ Plus a measurement, reported whatever it says: end-to-end capture cost and peak
 RSS on the live store, against today's 485 ms baseline. The estimate from §4.1's
 components is ~1.1 s and zero disk. **An estimate is not a result.**
 
+**Measured 2026-09-19 (Z0 step 3), and the estimate was wrong by 5x.**
+
+```text
+full capture, 3 components   5,904 ms      estimate was ~1.1 s
+peak RSS delta                 8.34 MB     §12.1 asked if it stays near 1.20 MB
+frozen                       884.1 MB      wiki 131.6 / search 739.2 / graph 13.2
+```
+
+The estimate was not wrong about bytes. Freezing them costs ~120 ms, near
+enough what §4.1 now records. It was wrong because it counted only the cost of
+FREEZING bytes and omitted the cost of DESCRIBING them. `index_identity`
+dominates at ~6.7 s:
+
+```text
+COUNT(DISTINCT source_path)                     4,014 ms   full scan of chunks
+DISTINCT provider, model, dimension FROM embeddings  2,956 ms   SCAN + temp B-tree
+chunk_id_set_sha                                  418 ms   matches its docstring
+COUNT(*)                                          524 ms
+```
+
+This is **pre-existing**: `capture` has called `index_identity` since
+2026-09-17, so every snapshot has always paid it and `check.sh` gate 6 pays it
+on every run. Step 3 did not introduce it; step 3's measurement is simply the
+first time anyone looked. It is **not fixed here**, because the obvious remedy
+is an index on `embeddings` and §11 forbids any index-format change in Z0.
+
+Worth carrying to Z1: the embeddings query scans 739 MB to return one row, and
+it cannot be replaced by `LIMIT 1`, because the DISTINCT **is** the correctness
+check — it exists to catch a second embedding space, where cosine scores stop
+being comparable. A real guarantee at a real cost, now measured.
+
 ---
 
 ## 11. Explicitly not built in Z0
@@ -815,8 +869,10 @@ components is ~1.1 s and zero disk. **An estimate is not a result.**
 
 ## 12. Open questions, to be answered by measurement
 
-1. What does a full coherent capture cost on the live store, and does peak RSS
-   stay near the current 1.20 MB?
+1. ~~What does a full coherent capture cost on the live store, and does peak RSS
+   stay near the current 1.20 MB?~~ **ANSWERED 2026-09-19 (§10.4):** 5,904 ms,
+   and peak RSS delta is 8.34 MB — about 7x the 1.20 MB it asked about, still
+   trivial in absolute terms. The cost is ~98% identity computation, not bytes.
 2. Does the manifest need to become a content hash? Only an observed missed-edit
    case justifies the cost.
 3. Is the bounded capture retry ever exhausted by ordinary cross-project write
