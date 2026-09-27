@@ -61,6 +61,35 @@ class NestedMutationError(LedgerError):
     """A second operation was opened inside one that already owns this store."""
 
 
+class KnowledgeOperationRequired(LedgerError):
+    """An authoritative write was attempted with no operation above it.
+
+    Raised before any byte lands and before any ledger row exists. Until
+    2026-09-28 such a write was accepted and recorded as an implicit mutation;
+    on 2026-09-23 an agent in another repository imported `scripts.memory`
+    directly and turned three logical writes into six revisions, each page and
+    its log line committing separately. Implicit mode was always a migration
+    mechanism, and one reachable by importing a module is the production path.
+    """
+
+
+def operation_required_message(what: str) -> str:
+    return (
+        f"{what} cannot change knowledge outside an operation: every "
+        "authoritative write must belong to one logical operation, or a "
+        "snapshot can observe half of it.\n"
+        "Use the CLI, which opens one per command:\n"
+        "  scripts/zurvan decision add --title ... --reason ... --status "
+        "accepted --project <slug>\n"
+        "  (also: remember / claim add / question add)\n"
+        "or, from Python, declare the boundary yourself:\n"
+        "  from scripts import knowledge_revision as kr\n"
+        "  with kr.operation(writer=\"<who>\"):\n"
+        "      ...\n"
+        "Implicit writes are reserved for migrations: "
+        "kr.allow_implicit_for_migration(reason=...).")
+
+
 def db_path(root=None) -> Path:
     return ks.store_root(root) / "data" / "registry.sqlite"
 
@@ -150,6 +179,28 @@ def _migrate_attribution(conn) -> None:
         raise
 
 
+def _migrate_implicit_reason(conn) -> None:
+    """Add `implicit_reason` to a ledger that predates it. Rows are untouched.
+
+    Historical implicit rows keep NULL: nobody gave a reason for them, and the
+    column exists to record reasons, not to reconstruct them.
+    """
+    def _columns():
+        return {row[1] for row in conn.execute("PRAGMA table_info(mutations)")}
+
+    cols = _columns()
+    if not cols or "implicit_reason" in cols:
+        return                       # fresh store, or already migrated
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if "implicit_reason" not in _columns():   # re-read inside, as above
+            conn.execute("ALTER TABLE mutations ADD COLUMN implicit_reason TEXT")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def ensure_schema(root=None) -> None:
     """Create the three tables if absent, and migrate an older shape in place.
 
@@ -158,6 +209,7 @@ def ensure_schema(root=None) -> None:
     conn = _connect(root)
     try:
         _migrate_attribution(conn)
+        _migrate_implicit_reason(conn)
         conn.executescript(
             f"""
             CREATE TABLE IF NOT EXISTS knowledge_state (
@@ -194,7 +246,8 @@ def ensure_schema(root=None) -> None:
                 resolved_at         TEXT,
                 resolution_actor    TEXT,
                 resolution_reason TEXT,
-                resolution_revision INTEGER
+                resolution_revision INTEGER,
+                implicit_reason     TEXT
             );
             CREATE INDEX IF NOT EXISTS mutations_state ON mutations(state);
             CREATE TABLE IF NOT EXISTS reconciliations (
@@ -362,6 +415,10 @@ class Mutation:
     orphaned_at: str | None
     resolved_at: str | None
     resolution_revision: int | None
+    #: Why an implicit write was permitted — the argument to
+    #: `allow_implicit_for_migration`. NULL on every row written before
+    #: 2026-09-28, when implicit writes needed no permission.
+    implicit_reason: str | None = None
 
 
 _MUTATION_COLS = (
@@ -369,7 +426,7 @@ _MUTATION_COLS = (
     " selected_project, caller_project, writer, implicit, caller,"
     " owner_pid, owner_identity, started_at, committed_at,"
     " planned_paths, completed_paths, orphan_reason, orphaned_at,"
-    " resolved_at, resolution_revision"
+    " resolved_at, resolution_revision, implicit_reason"
 )
 
 
@@ -384,6 +441,7 @@ def _row_to_mutation(row) -> Mutation:
         completed_paths=json.loads(row[15] or "[]"),
         orphan_reason=row[16], orphaned_at=row[17],
         resolved_at=row[18], resolution_revision=row[19],
+        implicit_reason=row[20],
     )
 
 
@@ -450,6 +508,7 @@ class Operation:
     writer: str | None = None
     caller: str | None = None
     implicit: bool = False
+    implicit_reason: str | None = None
     mutation_id: str | None = None
     depth: int = 0          # nesting depth; join-only, never used to commit
 
@@ -471,9 +530,48 @@ class WriteTicket:
 #: own operation in its own store, which is the honest answer.
 _CTX: ContextVar = ContextVar("zurvan_operation", default=None)
 
+#: The reason an implicit write is permitted, or None. A context variable for
+#: the same reason as `_CTX`, and deliberately not an environment variable
+#: either: an exported permission would follow a subprocess into whatever it
+#: ran, which is how a migration's licence becomes everybody's.
+_IMPLICIT_OK: ContextVar = ContextVar("zurvan_implicit_ok", default=None)
+
 
 def active_operation():
     return _CTX.get()
+
+
+def require_active_operation(what: str, root=None) -> None:
+    """Refuse up front, in a library writer, with a message naming `what`.
+
+    `plan_write` is the backstop and would refuse anyway; this makes the error
+    name the function the caller actually called, and lets a writer refuse
+    before doing any work — `add_claim` reads its source file first.
+    """
+    op = _CTX.get()
+    if op is not None and op.root == ks.store_root(root):
+        return
+    if op is None and _IMPLICIT_OK.get() is not None:
+        return
+    raise KnowledgeOperationRequired(operation_required_message(what))
+
+
+@contextmanager
+def allow_implicit_for_migration(reason):
+    """Permit writes outside an operation, for a migration, with a reason.
+
+    Each such write is its own implicit mutation — the old behaviour, with the
+    split it implies — and `reason` is recorded on its row. There is no boolean
+    form and no default: a reason is the price of the exemption, and it is what
+    makes the exemption greppable in code and auditable in the ledger.
+    """
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("allow_implicit_for_migration needs a non-empty reason")
+    token = _IMPLICIT_OK.set(reason.strip())
+    try:
+        yield
+    finally:
+        _IMPLICIT_OK.reset(token)
 
 
 def _describe_caller() -> str:
@@ -544,8 +642,8 @@ def declare_store_project(name, op=None) -> None:
     A second, DIFFERENT subject raises: one mutation, one subject. If a command
     ever writes two projects' pages then the operation boundary is drawn in the
     wrong place, and mis-attributing that quietly is worse than stopping.
-    Outside any operation this is a no-op — library code stays callable, and
-    the write becomes an implicit mutation recorded as such.
+    Outside any operation this is a no-op; the write that follows is refused
+    by `plan_write` unless a migration has permitted it.
     """
     name = _clean(name)
     if name is None:
@@ -586,13 +684,13 @@ def _insert_mutation(op: Operation) -> str:
             "INSERT INTO mutations (mutation_id, base_revision, state,"
             " store_project, execution_project, selected_project,"
             " caller_project, writer, implicit, caller, owner_pid,"
-            " owner_identity, started_at, last_heartbeat)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " owner_identity, started_at, last_heartbeat, implicit_reason)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (mutation_id, base, ACTIVE, _clean(op.store_project),
              _clean(op.execution_project), _clean(op.selected_project),
              _clean(op.caller_project), op.writer,
              int(bool(op.implicit)), op.caller, pid, own_identity(),
-             _now(), _now()))
+             _now(), _now(), op.implicit_reason))
         conn.execute("COMMIT")
     finally:
         conn.close()
@@ -640,8 +738,14 @@ def plan_write(path, root=None):
     op = _CTX.get()
     owns = False
     if op is None or op.root != base:
+        reason = _IMPLICIT_OK.get()
+        if reason is None:
+            # Before the row, before the bytes: a refused write leaves no trace.
+            raise KnowledgeOperationRequired(operation_required_message(
+                f"a write to {path} (from {_describe_caller()})"))
         execution_project, selected_project = _ambient_attribution()
         op = Operation(root=base, writer="implicit", implicit=True,
+                       implicit_reason=reason,
                        caller=_describe_caller(),
                        execution_project=execution_project,
                        selected_project=selected_project)
@@ -845,20 +949,24 @@ def implicit_callers(root=None) -> dict:
     return summary
 
 
-def resolve_implicit(caller, actor, root=None) -> int:
-    """Mark every unresolved implicit mutation from `caller` as migrated.
+def resolve_implicit(caller, actor, root=None,
+                     reason="migrated to an explicit operation") -> int:
+    """Mark every unresolved implicit mutation from `caller` as resolved.
 
     A claim about a caller, which a later implicit write from the same caller
-    falsifies by simply appearing in the inventory again.
+    falsifies by simply appearing in the inventory again. `reason` says what
+    made it true; the default was the only answer until 2026-09-28, when the
+    honest one for an external caller was "the path was closed", not
+    "the caller was migrated".
     """
     conn = _connect(root)
     try:
         conn.execute("BEGIN IMMEDIATE")
         cur = conn.execute(
             "UPDATE mutations SET resolved_at = ?, resolution_actor = ?,"
-            " resolution_reason = 'migrated to an explicit operation'"
+            " resolution_reason = ?"
             " WHERE implicit = 1 AND resolved_at IS NULL AND caller = ?",
-            (_now(), actor, caller))
+            (_now(), actor, reason, caller))
         count = cur.rowcount
         conn.execute("COMMIT")
     finally:

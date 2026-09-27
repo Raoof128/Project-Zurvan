@@ -124,4 +124,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract knowledge from source")
     parser.add_argument("--source", required=True, help="Path to the source markdown file")
     args = parser.parse_args()
-    extract_source(args.source)
+    # One extraction is one logical operation: the merged pages and the log
+    # line commit as a single revision, and `safe_write` refuses them without
+    # a boundary (2026-09-28).
+    from scripts import knowledge_revision as _kr
+    with _kr.operation(writer="extract", caller="scripts.extract:__main__"):
+        extract_source(args.source)

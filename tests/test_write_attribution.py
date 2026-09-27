@@ -51,7 +51,12 @@ def store(tmp_path, monkeypatch):
     (tmp_path / "wiki").mkdir()
     (tmp_path / "data").mkdir()
     monkeypatch.setenv("ZURVAN_WRITE_SESSION", "test-session-token")
-    return tmp_path
+    # An authoritative write needs an operation above it (2026-09-28). These
+    # tests are about stamping, not about operation boundaries, so each runs
+    # inside one — the shape every production writer now has.
+    from scripts import knowledge_revision as kr
+    with kr.operation(writer="test", root=tmp_path):
+        yield tmp_path
 
 
 # ── stamping ─────────────────────────────────────────────────────────────────
@@ -123,7 +128,9 @@ def test_a_write_from_a_child_process_is_ours(store):
         "from scripts import config\n"
         "config.PROJECT_ROOT = __import__('pathlib').Path(%r)\n"
         "from scripts.safe_write import write_file_safely\n"
-        "write_file_safely(%r, '# From a child\\n')\n"
+        "from scripts import knowledge_revision as kr\n"
+        "with kr.operation(writer='test-child'):\n"
+        "    write_file_safely(%r, '# From a child\\n')\n"
         % (str(Path(__file__).resolve().parents[1]), str(store),
            str(store / "wiki" / "child.md"))
     )

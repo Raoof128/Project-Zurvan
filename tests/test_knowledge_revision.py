@@ -336,24 +336,28 @@ def test_safe_write_joins_the_active_operation(root):
     assert kr.current(root).revision == 1
 
 
-def test_a_write_outside_any_operation_is_one_implicit_mutation(root):
+def test_a_permitted_write_outside_any_operation_is_one_implicit_mutation(root):
+    """Only a migration may write outside an operation (2026-09-28); what it
+    writes is still recorded as one implicit mutation per write."""
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "a.md")), "alpha\n")
-    assert kr.current(root).revision == 1
-    assert len(kr.implicit_mutations(root)) == 1
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "a.md")), "alpha\n")
+        assert kr.current(root).revision == 1
+        assert len(kr.implicit_mutations(root)) == 1
 
 
 def test_two_unwrapped_writes_are_two_implicit_mutations(root):
-    """The compatibility door, and its limit. An observer sampling between
+    """The migration door, and its limit. An observer sampling between
     them sees no ACTIVE mutation and a coherent-looking revision over a
     half-finished operation. Z0 may detect and report this shape; it may not
     claim atomicity for it."""
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "decisions/foo.md")), "page\n")
-    between = (kr.mutations_in(kr.ACTIVE, root), kr.current(root).revision)
-    safe_write.append_file_safely(str(page(root, "log.md")), "line\n")
-    assert between == ([], 1)
-    assert len(kr.implicit_mutations(root)) == 2
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "decisions/foo.md")), "page\n")
+        between = (kr.mutations_in(kr.ACTIVE, root), kr.current(root).revision)
+        safe_write.append_file_safely(str(page(root, "log.md")), "line\n")
+        assert between == ([], 1)
+        assert len(kr.implicit_mutations(root)) == 2
 
 
 def test_a_write_outside_the_wiki_touches_no_ledger(root):
@@ -365,53 +369,57 @@ def test_a_write_outside_the_wiki_touches_no_ledger(root):
 
 def test_the_caller_is_the_real_caller_not_the_plumbing(root):
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "a.md")), "x")
-    caller = kr.implicit_mutations(root)[0].caller
-    # Substring checks are wrong here: this test MODULE is named
-    # `test_knowledge_revision`, so "knowledge_revision" appears in a correct
-    # answer. The property is which FRAME was recorded — the caller, not the
-    # plumbing it went through.
-    assert caller.endswith(":test_the_caller_is_the_real_caller_not_the_plumbing")
-    assert not caller.startswith("scripts.safe_write")
-    assert not caller.startswith("scripts.knowledge_revision")
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "a.md")), "x")
+        caller = kr.implicit_mutations(root)[0].caller
+        # Substring checks are wrong here: this test MODULE is named
+        # `test_knowledge_revision`, so "knowledge_revision" appears in a correct
+        # answer. The property is which FRAME was recorded — the caller, not the
+        # plumbing it went through.
+        assert caller.endswith(":test_the_caller_is_the_real_caller_not_the_plumbing")
+        assert not caller.startswith("scripts.safe_write")
+        assert not caller.startswith("scripts.knowledge_revision")
 
 
 def test_resolving_a_caller_empties_the_inventory_without_deleting_history(root):
     """The closure gate must be reachable. Counting historical rows forever
     meant `inventory empty` could only be achieved by erasing evidence."""
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "a.md")), "x")
-    caller = kr.implicit_mutations(root)[0].caller
-    assert len(kr.implicit_mutations(root)) == 1
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "a.md")), "x")
+        caller = kr.implicit_mutations(root)[0].caller
+        assert len(kr.implicit_mutations(root)) == 1
 
-    resolved = kr.resolve_implicit(caller, actor="local:raouf", root=root)
+        resolved = kr.resolve_implicit(caller, actor="local:raouf", root=root)
 
-    assert resolved == 1
-    assert kr.implicit_mutations(root) == []                     # unresolved
-    assert len(kr.implicit_mutations(root, unresolved_only=False)) == 1
+        assert resolved == 1
+        assert kr.implicit_mutations(root) == []                     # unresolved
+        assert len(kr.implicit_mutations(root, unresolved_only=False)) == 1
 
 
 def test_a_new_implicit_write_from_a_resolved_caller_reopens_the_inventory(root):
     """Resolution is a claim about a caller, and a claim a later write can
     falsify. Closure means no UNRESOLVED implicit callers, not 'we looked'."""
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "a.md")), "x")
-    caller = kr.implicit_mutations(root)[0].caller
-    kr.resolve_implicit(caller, actor="local:raouf", root=root)
-    assert kr.implicit_mutations(root) == []
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "a.md")), "x")
+        caller = kr.implicit_mutations(root)[0].caller
+        kr.resolve_implicit(caller, actor="local:raouf", root=root)
+        assert kr.implicit_mutations(root) == []
 
-    safe_write.write_file_safely(str(page(root, "b.md")), "y")
+        safe_write.write_file_safely(str(page(root, "b.md")), "y")
 
-    assert len(kr.implicit_mutations(root)) == 1
+        assert len(kr.implicit_mutations(root)) == 1
 
 
 def test_the_caller_summary_is_a_query_not_an_audit(root):
     from scripts import safe_write
-    safe_write.write_file_safely(str(page(root, "a.md")), "x")
-    safe_write.write_file_safely(str(page(root, "b.md")), "y")
-    summary = kr.implicit_callers(root)
-    assert sum(summary.values()) == 2
-    assert all(":" in k for k in summary)
+    with kr.allow_implicit_for_migration("test: implicit inventory mechanics"):
+        safe_write.write_file_safely(str(page(root, "a.md")), "x")
+        safe_write.write_file_safely(str(page(root, "b.md")), "y")
+        summary = kr.implicit_callers(root)
+        assert sum(summary.values()) == 2
+        assert all(":" in k for k in summary)
 
 
 def test_committing_records_the_manifest_the_revision_represents(root):

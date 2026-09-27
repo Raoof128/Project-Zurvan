@@ -4,6 +4,21 @@ import os
 from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import subprocess
+try:
+    import yaml  # noqa: F401 — the first dependency a bare interpreter lacks
+except ImportError:
+    # 2026-09-23: `python3 scripts/cli.py` under Homebrew's python3 died here
+    # with a traceback, and the agent that hit it went on to import
+    # `scripts.memory` directly. Name the launcher instead.
+    sys.stderr.write(
+        f"Zurvan's dependencies (PyYAML) are not installed for {sys.executable}.\n"
+        "Run the CLI through the launcher, which picks an interpreter that has "
+        "them:\n"
+        f"  {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'zurvan')} "
+        "<command> ...\n"
+        "(it lives at scripts/zurvan; set ZURVAN_PYTHON to override the choice),"
+        " or `uv run python scripts/cli.py ...`.\n")
+    sys.exit(2)
 from scripts.memory import add_decision, add_note, add_claim, add_question
 from scripts.context_export import search_memory, export_context
 from scripts.config import PROJECT_ROOT
@@ -37,16 +52,28 @@ def _resolved_gold(value):
     return str(gold_path())
 
 
+def _split_global_project(args_list):
+    """(workspace, remaining args): `--project X` switches workspace only when
+    it comes BEFORE the subcommand.
+
+    It used to be popped from anywhere, which shadowed `decision add
+    --project`, the subject flag: the subcommand never saw it and the CLI
+    re-executed itself in another workspace. On 2026-09-23 an agent that needed
+    that flag imported `scripts.memory` instead, and three logical writes
+    became six revisions. After the subcommand, `--project` is the
+    subcommand's.
+    """
+    i = 0
+    while i < len(args_list) and args_list[i].startswith("--"):
+        if args_list[i] == "--project" and i + 1 < len(args_list):
+            return args_list[i + 1], args_list[:i] + args_list[i + 2:]
+        i += 2 if args_list[i] == "--project-root" else 1
+    return None, args_list
+
+
 def _main():
-    args_list = sys.argv[1:]
-    project_name = None
+    project_name, args_list = _split_global_project(sys.argv[1:])
     project_root_override = None
-    if "--project" in args_list:
-        idx = args_list.index("--project")
-        if idx + 1 < len(args_list):
-            project_name = args_list[idx + 1]
-            args_list.pop(idx)
-            args_list.pop(idx)
     if "--project-root" in args_list:
         idx = args_list.index("--project-root")
         if idx + 1 < len(args_list):
@@ -313,10 +340,9 @@ def _main():
         help="Subject project for the `project:` field, which public_repo_guard "
              "uses as a publication control. Defaults to the registered project "
              "containing the working directory, NOT the globally selected one. "
-             "KNOWN DEFECT: this flag never arrives — `_main` scans sys.argv for "
-             "`--project` anywhere and pops it as the global workspace switch "
-             "before argparse runs. Use the MCP tool's `project` argument, or "
-             "run from inside the subject's workspace, until that is fixed.",
+             "Must be a registered-style slug (lowercase, digits, '-', '_'); "
+             "anything else is refused and nothing is written. Only a "
+             "`--project` BEFORE the subcommand switches workspace.",
     )
     
     # zurvan boundary <...>
@@ -920,8 +946,14 @@ def _main():
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
     elif args.command == "decision" and args.action == "add":
-        if add_decision(args.title, args.reason, args.status, args.tags,
-                        project=getattr(args, "project", None)) is False:
+        from scripts.memory import InvalidProjectError
+        try:
+            ok = add_decision(args.title, args.reason, args.status, args.tags,
+                              project=getattr(args, "project", None))
+        except InvalidProjectError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
+        if ok is False:
             sys.exit(1)
     elif args.command == "claim" and args.action == "add":
         if add_claim(args.text, args.source, args.evidence, args.confidence, args.tags) is False:

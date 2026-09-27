@@ -15,6 +15,7 @@ PYTHONPATH=. python -m pytest -q          # full test suite (must be 0 failed)
 bash scripts/check.sh                     # full quality gate, 24 gates (gate 0 = Boundary)
 PYTHONPATH=. python scripts/public_repo_guard.py  # must pass before any commit
 PYTHONPATH=. python scripts/cli.py <cmd>  # the `zurvan` CLI (search, context, graph, trace, eval, boundary, ...)
+scripts/zurvan <cmd>                      # same CLI; picks a python that HAS the deps (bare python3 may not)
 PYTHONPATH=. python scripts/cli.py index search   # rebuild search index (data/search.sqlite)
 PYTHONPATH=. python scripts/cli.py graph rebuild  # rebuild graph (data/graph.sqlite)
 PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6   # retrieval gate
@@ -41,9 +42,15 @@ individual file write. `decision add` writes a page and then appends
   commands leave the ledger untouched.
 - **A CLI command and an MCP tool are each one operation boundary.** Library
   functions in `memory.py` are not — wrapping them would give every caller an
-  independent boundary and split one logical operation into several. A write
-  with no boundary above it becomes an `implicit` mutation and lands in the
-  migration inventory (`zurvan knowledge callers`).
+  independent boundary and split one logical operation into several.
+- **A write with no operation above it is REFUSED** (`KnowledgeOperationRequired`,
+  2026-09-28), before any byte lands. Never `import scripts.memory` and call
+  `add_decision` from a script — on 2026-09-23 an agent did exactly that and
+  three writes became six revisions. Use the CLI, or `with kr.operation(...)`.
+  Implicit writes need `kr.allow_implicit_for_migration(reason=...)`.
+- `decision add --project <slug>` works (only a `--project` BEFORE the
+  subcommand switches workspace). A malformed slug (`ClientX`) is refused, never
+  stamped `unknown` and never lowercased for you.
 - A crash mid-mutation leaves the store **SUSPECT**. Only
   `zurvan knowledge reconcile` clears it, and it mints a NEW clean revision
   rather than flipping a flag — reaching CLEAN by editing the old row is

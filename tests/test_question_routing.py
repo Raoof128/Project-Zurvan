@@ -44,6 +44,15 @@ def test_routing_picks_the_matching_file(tmp_path, monkeypatch):
     assert qr.questions_path([]).endswith("open-questions.private.md")
 
 
+def _op(tmp_path, monkeypatch):
+    """`add_question` refuses to write outside an operation (2026-09-28), so
+    each test declares one over its throwaway store, as the CLI and MCP do."""
+    from scripts import knowledge_revision as kr
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir(exist_ok=True)
+    return kr.operation(writer="test", root=tmp_path)
+
+
 def test_add_question_writes_to_the_private_file_for_a_private_tag(tmp_path, monkeypatch):
     import scripts.memory as memory
 
@@ -55,7 +64,8 @@ def test_add_question_writes_to_the_private_file_for_a_private_tag(tmp_path, mon
     monkeypatch.setattr(sw, "get_project_root", lambda: tmp_path.resolve())
     (tmp_path / "wiki").mkdir()
 
-    assert memory.add_question("private q", "because", ["acme-private"]) is True
+    with _op(tmp_path, monkeypatch):
+        assert memory.add_question("private q", "because", ["acme-private"]) is True
 
     private = (tmp_path / "wiki" / "open-questions.private.md")
     assert private.exists() and "private q" in private.read_text(encoding="utf-8")
@@ -72,7 +82,8 @@ def test_add_question_writes_to_the_tracked_file_for_a_public_tag(tmp_path, monk
     monkeypatch.setattr(sw, "get_project_root", lambda: tmp_path.resolve())
     (tmp_path / "wiki").mkdir()
 
-    assert memory.add_question("public q", "because", ["zurvan"]) is True
+    with _op(tmp_path, monkeypatch):
+        assert memory.add_question("public q", "because", ["zurvan"]) is True
 
     tracked = (tmp_path / "wiki" / "open-questions.md")
     assert tracked.exists() and "public q" in tracked.read_text(encoding="utf-8")

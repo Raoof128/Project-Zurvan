@@ -347,7 +347,8 @@ CLI command / MCP tool / agent operation   <- operation boundary
 ```
 
 A memory function called with no boundary above it still becomes an implicit
-mutation, recorded as such for the migration inventory.
+mutation, recorded as such for the migration inventory. **Superseded by §9
+(2026-09-28): it is now refused.**
 
 ### 8.5 Not fixed here, deliberately
 
@@ -356,7 +357,69 @@ mutation, recorded as such for the migration inventory.
 workspace switch before argparse runs, then re-execs the CLI in that project's
 directory. The subcommand's documented subject flag is shadowed. Measured
 2026-09-19; the flag's help now says so, and the fix is a separate change
-because it alters CLI argument semantics.
+because it alters CLI argument semantics. **Fixed 2026-09-28 (§9.3).**
+
+---
+
+## 9. Amendment 7 — implicit mode is closed to production
+
+### 9.1 The evidence
+
+On 2026-09-23 an agent working in another repository (Antigravity, pid 22012)
+recorded two decisions and a note. `PYTHONPATH=. python3 scripts/cli.py` failed
+under an interpreter without PyYAML; `uv run` worked, but `decision add
+--project` could not carry the subject it needed (§8.5), so it imported the
+library:
+
+```
+uv run python -c "from scripts.memory import add_decision, add_note; ..."
+```
+
+Three logical writes became **six revisions (73-78)**, each page and its
+`wiki/log.md` line committing separately — the half-operation §3.2 of the Z0
+design names, in production, nine days after the MCP instance of it was fixed.
+`resolve_project("ClientX")` answered `unknown` silently, and the agent then
+hand-edited the pages outside the ledger. Forensic rows are preserved at
+`~/.zurvan/forensics/2026-09-28-implicit-mutations-pid22012*.json`.
+
+The ledger behaved exactly as designed: it recorded and inventoried the writes.
+That was the defect. The 2026-09-19 decision to keep direct library writes
+"implicit and inventoried" assumed every writer would eventually be wrapped;
+an importable module has callers nobody enumerates.
+
+### 9.2 The rule
+
+- `plan_write` raises `KnowledgeOperationRequired` for an authoritative write
+  with no operation on its store — before any byte lands and before any ledger
+  row exists. It is the single point every `safe_write` passes, so bypassing
+  `memory.py` does not bypass the rule.
+- `memory`'s public writers (`add_decision`, `add_note`, `add_claim`,
+  `add_question`) refuse up front, naming themselves and the way out.
+- Implicit mode survives only inside
+  `knowledge_revision.allow_implicit_for_migration(reason)`. There is no
+  boolean form; the reason is mandatory and is recorded in a new
+  `mutations.implicit_reason` column. Historical rows keep NULL.
+- Boundaries stay where §8.4 put them: the CLI invocation and the MCP tool.
+  `ingest.py` and `extract.py`, which run as `__main__`, now open their own.
+
+### 9.3 Companion fixes, each causal in 9.1
+
+- `--project` switches workspace only BEFORE the subcommand; after it, it
+  belongs to the subcommand (`decision add --project clientx` works).
+- An explicit project that is not a valid slug raises `InvalidProjectError`.
+  It is neither stamped `unknown` nor lowercased on the caller's behalf: the
+  subject is a publication control, and canonicalising a typo would
+  manufacture authority. `unknown` remains the answer when nobody named one.
+- `cli.py` under an interpreter without its dependencies names `scripts/zurvan`
+  instead of printing a traceback.
+
+### 9.4 What this does not fix
+
+A hand edit of a wiki page is still invisible until something compares the
+manifest (2026-09-24 report, item 3). The pages from 9.1 were edited that way
+on 23, 24 and 26 September and the ledger reported CLEAN throughout. That is
+the EXTERNAL_OBSERVED path of Z0 §5, not the implicit path, and is its own
+change.
 
 ---
 
@@ -370,6 +433,7 @@ because it alters CLI argument semantics.
 | 4 | 2026-09-18 | §8.2 | Claim-ledger component declared unsupported, with a fail-closed guard |
 | 5 | 2026-09-19 | Z0 step 1 `mutations` | `project` split into `store_project` / `execution_project` / `selected_project` / `caller_project` (§8) |
 | 6 | 2026-09-19 | Z0 step 1 boundaries | MCP tools made top-level operation boundaries; live half-operation defect (§8.4) |
+| 7 | 2026-09-28 | Z0 §3.2, amendment 6 | Authoritative writes outside an operation refused; implicit mode only by reasoned migration opt-in; `--project` and project-slug fixes (§9) |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
 policy), §30 (success definition) or §34 (acceptance gate).

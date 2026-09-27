@@ -5,6 +5,18 @@ from datetime import datetime
 from typing import List, Optional
 from scripts.safe_write import write_file_safely, append_file_safely, escape_yaml_string
 from scripts.config import PROJECT_ROOT
+from scripts.knowledge_revision import require_active_operation
+
+
+class InvalidProjectError(ValueError):
+    """An explicitly named project is not a valid identifier.
+
+    Raised rather than collapsed into `"unknown"`: on 2026-09-23
+    `add_decision(project="ClientX")` stamped `unknown` without a word, and the
+    caller hand-edited the page to fix it — outside the ledger. Nor is the name
+    lowercased on the caller's behalf. The subject is a publication control;
+    canonicalising a typo would turn it into apparent authority.
+    """
 
 def append_to_log(action: str, details: str):
     log_path = str(PROJECT_ROOT / "wiki" / "log.md")
@@ -62,13 +74,23 @@ def resolve_project(explicit: str | None = None, root=None) -> str:
     4. `"unknown"`, which is not in `PUBLIC_PROJECTS`, so the page is blocked
        from publication rather than published under a guess.
 
+    An `explicit` name that is not a valid slug raises `InvalidProjectError`.
+    `"unknown"` answers "nobody said"; it is not an answer to "somebody said
+    something malformed".
+
     The invariant: a decision must never inherit a project merely because that
     project is "current" somewhere else.
     """
     from scripts.project_registry import is_safe_slug
 
     if explicit:
-        return explicit if is_safe_slug(explicit) else "unknown"
+        if is_safe_slug(explicit):
+            return explicit
+        hint = re.sub(r"[^a-z0-9_-]+", "-", explicit.strip().lower()).strip("-")[:64]
+        suggestion = f" Did you mean {hint!r}?" if hint and is_safe_slug(hint) else ""
+        raise InvalidProjectError(
+            f"project {explicit!r} is not a valid identifier (lowercase letters, "
+            f"digits, '-' and '_', at most 64).{suggestion} Nothing was written.")
 
     try:
         from pathlib import Path as _P
@@ -107,6 +129,7 @@ def current_project_name() -> str:
 
 def add_decision(title: str, reason: str, status: str, tags: List[str],
                  project: str | None = None):
+    require_active_operation("memory.add_decision()")
     filepath = _unique_path("wiki/decisions", _make_note_slug(title))
     subject = resolve_project(project)
 
@@ -146,6 +169,7 @@ tags:
         return False
 
 def add_note(title: str, body: str, tags: List[str]):
+    require_active_operation("memory.add_note()")
     filepath = _unique_path("wiki", _make_note_slug(title), prefix="note-")
 
     tags_yaml = "\n".join(f"  - {escape_yaml_string(t)}" for t in tags)
@@ -169,6 +193,7 @@ tags:
         return False
 
 def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List[str]):
+    require_active_operation("memory.add_claim()")
     # Validate evidence quote exists in source file. Relative sources resolve
     # against the repo root so this works from any CWD (e.g. the MCP server).
     source_read_path = source if os.path.isabs(source) else str(PROJECT_ROOT / source)
@@ -211,6 +236,7 @@ tags:
     return False
 
 def add_question(question: str, reason: str, tags: List[str]):
+    require_active_operation("memory.add_question()")
     q_id = str(uuid.uuid4())[:8]
     # Routed, not fixed: wiki/open-questions.md is TRACKED on a public remote,
     # so a question only lands there when its tags declare a public project.

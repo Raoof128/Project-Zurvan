@@ -358,12 +358,11 @@ def test_an_explicit_subject_diverges_from_the_workspace_that_ran_it(tmp_path):
     in the Zurvan workspace. Both facts are true at once, and the point of two
     fields is that neither has to be discarded to record the other.
 
-    Exercised through the MCP tool, not the CLI. `zurvan decision add --project
-    X` cannot reach `add_decision(project=X)`: `cli.py:42` scans `sys.argv` for
-    `--project` ANYWHERE and pops it before argparse runs, so the subcommand's
-    documented subject flag is shadowed by the global workspace switch, which
-    re-execs the CLI in another directory. Measured 2026-09-19; filed as its
-    own defect, and deliberately not fixed inside an attribution change.
+    Exercised through the MCP tool. When this was written the CLI could not
+    carry it: `cli.py` popped `--project` from anywhere as the global workspace
+    switch, shadowing the subcommand's subject flag. Fixed 2026-09-28 — only a
+    leading `--project` switches workspace — and the CLI path is covered in
+    `test_fail_closed_writes.py`.
     """
     store = tmp_path / "Zurvan"
     (store / "wiki" / "decisions").mkdir(parents=True)

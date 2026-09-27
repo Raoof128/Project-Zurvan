@@ -187,6 +187,16 @@ such in metadata. **Z0 may not claim logical-operation atomicity for an unknown
 caller performing multiple implicit writes**, and the closure gate (§10.1)
 tests that the inventory is empty rather than assuming it.
 
+**Amended 2026-09-28 — the migration door is closed.** An agent in another
+repository imported `scripts.memory` directly and produced six revisions for
+three logical writes (revisions 73-78, 2026-09-23). A door any importer can
+walk through is not a migration mechanism. `plan_write` now refuses an
+authoritative write with no operation (`KnowledgeOperationRequired`), before
+the bytes and before the row; implicit mode requires
+`allow_implicit_for_migration(reason)` and records the reason. The pipeline
+above is unchanged in intent — its first stage is now opt-in. Full record:
+`2026-09-18-zurvan-2-amendments.md` §9.
+
 ### 3.3 Revisions are CLEAN or SUSPECT
 
 Liveness and trustworthiness are different facts and must not share a flag.

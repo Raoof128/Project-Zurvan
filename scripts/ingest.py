@@ -458,4 +458,10 @@ def main():
     print(f"Successfully ingested {args.filepath}")
 
 if __name__ == "__main__":
-    main()
+    # One run is one logical operation. Its `wiki/log.md` line goes through
+    # `safe_write`, which refuses an authoritative write with no operation
+    # above it (2026-09-28); the source page itself is written directly and is
+    # seen by the ledger only as an external change.
+    from scripts import knowledge_revision as _kr
+    with _kr.operation(writer="ingest", caller="scripts.ingest:main"):
+        main()

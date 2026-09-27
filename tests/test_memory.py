@@ -39,6 +39,16 @@ def test_write_file_safely_prevents_raw_writes():
     assert write_file_safely(target, "malicious") == False
     assert not os.path.exists(target)
 
+def _op(tmp_path, monkeypatch):
+    """An operation over a throwaway store. `memory`'s writers refuse to run
+    without one (2026-09-28), so a test that calls them declares its boundary
+    exactly as the CLI and MCP do."""
+    from scripts import knowledge_revision as kr
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir(exist_ok=True)
+    return kr.operation(writer="test", root=tmp_path)
+
+
 def test_add_claim_resolves_source_against_project_root(tmp_path, monkeypatch):
     # Regression: add_claim checked the source path relative to the CWD, so
     # zurvan_claim_add via MCP (launched from any other directory) rejected
@@ -53,9 +63,10 @@ def test_add_claim_resolves_source_against_project_root(tmp_path, monkeypatch):
     # A CWD from which the relative path does NOT exist:
     monkeypatch.chdir(tmp_path / "wiki")
 
-    ok = memory.add_claim(
-        "test claim", "wiki/src.md", "the exact evidence line", "high", ["t"]
-    )
+    with _op(tmp_path, monkeypatch):
+        ok = memory.add_claim(
+            "test claim", "wiki/src.md", "the exact evidence line", "high", ["t"]
+        )
 
     assert ok is True
     claims = list((tmp_path / "wiki" / "claims").glob("claim-*.md"))
@@ -70,8 +81,9 @@ def test_add_decision_colliding_slugs_do_not_overwrite(tmp_path, monkeypatch):
     monkeypatch.setattr(memory, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path)
 
-    assert memory.add_decision("Use SQLite!", "reason A", "accepted", ["db"]) is True
-    assert memory.add_decision("Use SQLite?", "reason B", "accepted", ["db"]) is True
+    with _op(tmp_path, monkeypatch):
+        assert memory.add_decision("Use SQLite!", "reason A", "accepted", ["db"]) is True
+        assert memory.add_decision("Use SQLite?", "reason B", "accepted", ["db"]) is True
 
     files = sorted(p.name for p in (tmp_path / "wiki" / "decisions").glob("*.md"))
     assert len(files) == 2, files
@@ -94,7 +106,8 @@ def test_untagged_question_writes_no_trailing_whitespace(tmp_path, monkeypatch):
     monkeypatch.setattr(safe_write, "get_project_root", lambda: tmp_path.resolve())
     (tmp_path / "wiki").mkdir()
 
-    memory.add_question("Is this tagged?", "no tags given", [])
+    with _op(tmp_path, monkeypatch):
+        memory.add_question("Is this tagged?", "no tags given", [])
 
     # An untagged question declares no public project, so it routes to the
     # PRIVATE file — publishability is declared, never inferred.
@@ -117,7 +130,8 @@ def test_tagged_question_still_lists_its_tags(tmp_path, monkeypatch):
     (tmp_path / "wiki").mkdir()
 
     # "zurvan" is a public project, so this one DOES reach the tracked file.
-    memory.add_question("Tagged?", "reason", ["zurvan", "tests"])
+    with _op(tmp_path, monkeypatch):
+        memory.add_question("Tagged?", "reason", ["zurvan", "tests"])
 
     content = (tmp_path / "wiki" / "open-questions.md").read_text()
     assert "- **Tags**: zurvan, tests\n" in content
@@ -177,8 +191,12 @@ def test_explicit_project_wins_and_is_validated(tmp_path, monkeypatch):
     _registry(tmp_path, monkeypatch, {"zurvan": zurvan}, current="zurvan")
 
     assert resolve_project("simurgh", root=str(zurvan)) == "simurgh"
-    # An unsafe name must not reach a path or a frontmatter field.
-    assert resolve_project("../../etc", root=str(zurvan)) == "unknown"
+    # An unsafe name must not reach a path or a frontmatter field — and since
+    # 2026-09-28 it is refused outright rather than quietly stamped `unknown`,
+    # which is what sent a caller to hand-edit a page outside the ledger.
+    from scripts.memory import InvalidProjectError
+    with pytest.raises(InvalidProjectError):
+        resolve_project("../../etc", root=str(zurvan))
 
 
 def test_nested_projects_resolve_to_the_innermost(tmp_path, monkeypatch):
@@ -202,6 +220,7 @@ def test_decision_frontmatter_carries_the_resolved_project(tmp_path, monkeypatch
     (tmp_path / "wiki" / "decisions").mkdir(parents=True)
     monkeypatch.setattr(memory, "append_to_log", lambda *a, **k: None)
 
-    assert memory.add_decision("T", "r", "accepted", ["x"], project="zurvan") is True
+    with _op(tmp_path, monkeypatch):
+        assert memory.add_decision("T", "r", "accepted", ["x"], project="zurvan") is True
     written = (tmp_path / "wiki" / "decisions" / "t.md").read_text(encoding="utf-8")
     assert 'project: "zurvan"' in written

@@ -33,8 +33,9 @@ def mcp_operation(func):
                         |
             safe_write two-phase participant
 
-    and a memory function called with no boundary above it still becomes an
-    implicit mutation, recorded as such for the migration inventory.
+    and a memory function called with no boundary above it is refused
+    (`KnowledgeOperationRequired`, 2026-09-28) rather than recorded as an
+    implicit mutation.
 
     Inside `enforce_read_only`, never outside it: a refused write must not open
     an operation. It plans nothing so no row would be created either way, but
@@ -315,7 +316,12 @@ def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[st
     `public_repo_guard` gates publication on. Left unset it is resolved from the
     working directory, never from whichever workspace is globally selected.
     """
-    if add_decision(title, reason, status, tags, project=project):
+    from scripts.memory import InvalidProjectError
+    try:
+        ok = add_decision(title, reason, status, tags, project=project)
+    except InvalidProjectError as exc:
+        return f"Error: {exc}"
+    if ok:
         return f"Decision added successfully: {title}"
     return "Failed to add decision."
 
