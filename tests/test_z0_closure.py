@@ -67,8 +67,17 @@ def test_callers_without_strict_still_reports_and_exits_zero(store):
 
 
 def test_check_sh_gates_the_inventory():
-    text = (REPO / "scripts" / "check.sh").read_text()
-    assert "knowledge callers --strict" in text
+    """A substring match passed a commented-out line, `|| true`, or a line
+    after the final exit (closure review). The gate must be a live command
+    under `set -e` that can fail the run."""
+    lines = (REPO / "scripts" / "check.sh").read_text().splitlines()
+    assert "set -e" in [l.strip() for l in lines]
+    live = [i for i, l in enumerate(lines)
+            if l.strip() == "PYTHONPATH=. python scripts/cli.py knowledge callers --strict"]
+    assert len(live) == 1, "exactly one live, unguarded `callers --strict` line"
+    final = max(i for i, l in enumerate(lines) if "All Zurvan checks passed" in l)
+    exits = [i for i, l in enumerate(lines) if l.strip().startswith("exit 0")]
+    assert live[0] < final and not any(i < live[0] for i in exits)
 
 
 SPEC = REPO / "docs" / "superpowers" / "specs" / "2026-09-18-z0-coherent-snapshots-design.md"

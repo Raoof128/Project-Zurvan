@@ -373,3 +373,135 @@ def test_gate_7_a_kill_between_the_bytes_and_the_stamp_is_investigable(store):
     assert [Path(p).resolve() for p in orphan.planned_paths] == [target.resolve()]
     assert orphan.completed_paths == []
     assert kr.current(store).state == kr.SUSPECT
+
+
+# ── closure review (2026-09-28): rows that proved less than §10 says ─────────
+
+def _kill_mid_operation(store, name="torn.md"):
+    """A REAL writer death: the bytes land, the process is SIGKILLed inside
+    its operation, and the ledger is left with an ACTIVE row whose owner is
+    gone."""
+    import signal
+    repo = Path(__file__).resolve().parents[1]
+    child = subprocess.run([sys.executable, "-c", (
+        "import os, signal\n"
+        "from scripts import knowledge_revision as kr\n"
+        "from scripts.safe_write import write_file_safely\n"
+        f"with kr.operation(writer='doomed', root={str(store)!r}):\n"
+        f"    write_file_safely({str(store / 'wiki' / name)!r}, 'x')\n"
+        "    os.kill(os.getpid(), signal.SIGKILL)\n")],
+        env={**os.environ, "PYTHONPATH": str(repo)}, cwd=repo)
+    assert child.returncode == -signal.SIGKILL
+
+
+def test_gate_5_reconcile_then_rebuild_makes_every_derived_store_current(store):
+    """§10.1 item 5 says derived STORES: the earlier test rebuilt the graph
+    only. Reconcile reaches CLEAN with no rebuild; then both stores rebuild
+    to CURRENT."""
+    from scripts import derived_health as dh
+    from scripts import knowledge_reconcile as krec
+    _rebuild(store)
+    _kill_mid_operation(store)
+    kr.detect_orphans(store)
+    assert kr.current(store).state == kr.SUSPECT
+    result = krec.reconcile(root=store, accept=True, actor="test", reason="gate 5")
+    assert result["status"] == "CLEAN" and kr.current(store).state == kr.CLEAN
+    assert {k: dh.store_health(k, store)[0] for k in ("search", "graph")} == {
+        "search": dh.STALE, "graph": dh.STALE}                # no rebuild happened
+    _rebuild(store)
+    assert {k: dh.store_health(k, store)[0] for k in ("search", "graph")} == {
+        "search": dh.CURRENT, "graph": dh.CURRENT}
+
+
+def test_gate_11_a_real_write_during_capture_is_retried_never_mixed(store, monkeypatch):
+    """§10.2 item 11 says FORCE a write during capture: a real file, landing
+    between the two manifest reads, not a patched digest. The attempt is
+    discarded; the retry mints the edit (EXTERNAL_OBSERVED) and captures a
+    state that includes it."""
+    real = ms._COMPONENTS["docs"]
+    landed = {"n": 0}
+
+    def write_during_the_clone(root, into):
+        if landed["n"] == 0:
+            (store / "wiki" / "mid.md").write_text("landed mid-capture\n")
+            landed["n"] += 1
+        return real(root, into)
+
+    monkeypatch.setitem(ms._COMPONENTS, "docs", write_during_the_clone)
+    before = kr.current(store).revision
+    with bsn.capture_build_inputs(store) as bs:
+        assert bs.revision == before + 1
+        assert bs.atomicity == kr.EXTERNAL_OBSERVED
+        assert (bs.path / "wiki" / "mid.md").read_text() == "landed mid-capture\n"
+    assert _snapshot_dirs(store) == []
+
+
+def test_gate_11_writes_on_every_attempt_are_refused_not_mixed(store, monkeypatch):
+    real = ms._COMPONENTS["docs"]
+    count = {"n": 0}
+
+    def always_writing(root, into):
+        count["n"] += 1
+        (store / "wiki" / f"mid{count['n']}.md").write_text("x\n")
+        return real(root, into)
+
+    monkeypatch.setitem(ms._COMPONENTS, "docs", always_writing)
+    with pytest.raises(bsn.BuildSnapshotNotReady):
+        bsn.capture_build_inputs(store, attempts=3)
+    assert count["n"] == 3 and _snapshot_dirs(store) == []
+
+
+def test_gate_12_a_completed_unmanaged_edit_leaves_derived_stores_stale(store):
+    """§10.2 item 12's last clause, which the earlier test never asserted:
+    the mint leaves derived stores STALE, not INVALID and not CURRENT."""
+    from scripts import derived_health as dh
+    _rebuild(store)
+    (store / "wiki" / "a.md").write_text("# a\n\nhand edit, finished\n")
+    with bsn.capture_build_inputs(store) as bs:
+        assert bs.atomicity == kr.EXTERNAL_OBSERVED
+    for kind in ("search", "graph"):
+        state, built, now, _ = dh.store_health(kind, store)
+        assert state == dh.STALE and int(built) == now - 1
+
+
+def test_gate_17_a_rebuild_while_the_corpus_advances_reports_coherent_stale(store):
+    """§10.3 item 17 in full: the stamp is the revision READ, and the store
+    then reports COHERENT+STALE. Also item 15 for a real SEARCH build: the
+    published index is self-contained (the earlier row showed it for the
+    graph only)."""
+    import sqlite3
+    from scripts import derived_health as dh
+    from scripts.rebuild_search_index import rebuild_search_index, read_index_meta
+    db = os.environ["ZURVAN_SEARCH_DB"]
+    with bsn.capture_build_inputs(store) as bs:
+        read_at = bs.revision
+        _write(store, "after.md")                          # the corpus advances
+        rebuild_search_index(db, snapshot=bs)
+    assert read_index_meta(db)["built_from_revision"] == str(read_at)
+    state, built, now, _ = dh.store_health("search", store)
+    assert (state, int(built), now) == (dh.STALE, read_at, read_at + 1)
+    assert [s for s in ("-journal", "-wal", "-shm") if os.path.exists(db + s)] == []
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        conn.close()
+
+
+def test_gate_18_a_real_orphan_makes_the_rebuild_entry_point_refuse(store):
+    """§10.3 item 18 through a REAL orphan and the REAL rebuild entry point
+    (`python scripts/rebuild_search_index.py`), not `_mark_suspect` and a
+    library call. Nothing is published."""
+    _kill_mid_operation(store)
+    kr.detect_orphans(store)
+    assert kr.current(store).state == kr.SUSPECT
+    repo = Path(__file__).resolve().parents[1]
+    out = subprocess.run([sys.executable, str(repo / "scripts" / "rebuild_search_index.py")],
+                         capture_output=True, text=True, cwd=repo,
+                         env={**os.environ, "PYTHONPATH": str(repo)})
+    assert out.returncode != 0
+    # The designated refusal, not merely "something failed": SUSPECT is also
+    # caught later by drift observation (LedgerError), and a test that only
+    # checked the word SUSPECT passed with this refusal removed (falsified).
+    assert "BuildSnapshotRefused" in out.stderr and "SUSPECT" in out.stderr
+    assert not os.path.exists(os.environ["ZURVAN_SEARCH_DB"])

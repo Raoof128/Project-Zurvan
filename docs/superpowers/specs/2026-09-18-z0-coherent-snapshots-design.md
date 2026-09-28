@@ -947,7 +947,10 @@ being comparable. A real guarantee at a real cost, now measured.
 
 Every item above, and the test that demonstrates it. `tests/test_z0_closure.py`
 fails if any named test stops existing, so a rename cannot silently unprove an
-item.
+item. Rows 5, 11, 12, 15, 17 and 18 were strengthened after an adversarial
+review found their first tests proved less than the item's wording (a graph-only
+rebuild, a patched digest instead of a real write, an unasserted STALE clause,
+`_mark_suspect` instead of a real orphan); each new test was falsified.
 
 | Item | What | Named test(s) |
 |---|---|---|
@@ -955,20 +958,20 @@ item.
 | 2 | Two implicit writes are detected and reported | `test_two_unwrapped_writes_are_two_implicit_mutations`, `test_a_permitted_write_outside_any_operation_is_one_implicit_mutation` |
 | 3 | Inventory empty, as a gated query | `test_gate_3_strict_callers_fails_while_the_inventory_is_open`, `test_check_sh_gates_the_inventory` |
 | 4 | Orphan: SUSPECT, snapshots refused, writes continue, propagates, only reconcile clears | `test_gate_4_a_killed_writer_blocks_snapshots_not_writes_until_reconciled` |
-| 5 | Reconcile reaches CLEAN without a rebuild; a rebuild then makes stores CURRENT | `test_an_accepted_reconciliation_clears_an_incomplete_orphan`, `test_gate_5_reconcile_then_rebuild_is_current` |
+| 5 | Reconcile reaches CLEAN without a rebuild; a rebuild then makes stores CURRENT | `test_an_accepted_reconciliation_clears_an_incomplete_orphan`, `test_gate_5_reconcile_then_rebuild_is_current`, `test_gate_5_reconcile_then_rebuild_makes_every_derived_store_current` |
 | 6 | Reconcile stops for review when a planned path never completed | `test_an_incomplete_operation_stops_for_review`, `test_the_review_report_names_the_path_that_never_completed` |
 | 7 | Planned vs completed: investigable after a kill before stamping | `test_gate_7_a_kill_between_the_bytes_and_the_stamp_is_investigable`, `test_a_crash_after_publishing_but_before_completing_still_orphans`, `test_an_orphan_names_the_path_that_never_completed` |
 | 8 | Coherence refusal names the component and the gap | `test_gate_8_disagreeing_components_fail_closed_naming_the_gap` |
 | 9 | No deadlock from a stale index | `test_gate_9_no_deadlock_from_a_stale_index` |
 | 10 | A/B isolation | `test_gate_10_a_measurement_keeps_resolving_to_E_while_live_moves_to_E1` |
-| 11 | A write during capture is retried, never mixed | `test_a_write_during_capture_is_retried_then_refused` |
-| 12 | A completed unmanaged edit is minted EXTERNAL_OBSERVED | `test_gate_12_capture_mints_a_completed_unmanaged_edit` |
+| 11 | A write during capture is retried, never mixed | `test_a_write_during_capture_is_retried_then_refused`, `test_gate_11_a_real_write_during_capture_is_retried_never_mixed`, `test_gate_11_writes_on_every_attempt_are_refused_not_mixed` |
+| 12 | A completed unmanaged edit is minted EXTERNAL_OBSERVED | `test_gate_12_capture_mints_a_completed_unmanaged_edit`, `test_gate_12_a_completed_unmanaged_edit_leaves_derived_stores_stale` |
 | 13 | Atomicity is not laundered | `test_gate_13_a_snapshot_of_an_external_revision_says_so`, `test_eval_reports_the_coherence_of_the_snapshot_it_scored` |
 | 14 | An in-place write to the published index fails loudly | `test_gate_14_an_in_place_write_to_the_published_index_fails_loudly` |
-| 15 | Published stores are self-contained | `test_the_published_graph_is_self_contained`, `test_a_build_with_a_sidecar_is_not_published` |
+| 15 | Published stores are self-contained | `test_the_published_graph_is_self_contained`, `test_a_build_with_a_sidecar_is_not_published`, `test_gate_17_a_rebuild_while_the_corpus_advances_reports_coherent_stale` (search), `test_a_wal_mode_build_is_not_published` |
 | 16 | Wiki immutability matrix, all five edits | `test_modifying_the_live_file_in_place_does_not_reach_the_snapshot`, `test_renaming_the_live_file_does_not_reach_the_snapshot`, `test_deleting_the_live_file_does_not_reach_the_snapshot`, `test_atomically_replacing_the_live_file_does_not_reach_the_snapshot`, `test_truncating_the_live_file_does_not_reach_the_snapshot` |
-| 17 | Truthful stamp | `test_gate_17_a_rebuild_stamps_the_revision_it_read` |
-| 18 | A rebuild refuses a SUSPECT store | `test_gate_18_a_suspect_store_is_refused` |
+| 17 | Truthful stamp | `test_gate_17_a_rebuild_stamps_the_revision_it_read`, `test_gate_17_a_rebuild_while_the_corpus_advances_reports_coherent_stale` |
+| 18 | A rebuild refuses a SUSPECT store | `test_gate_18_a_suspect_store_is_refused`, `test_gate_18_a_real_orphan_makes_the_rebuild_entry_point_refuse` |
 | 19 | Claims guard | `test_gate_19_an_unadapted_claims_ledger_fails_capture_closed` |
 | 20 | Regression floor | full pytest 0 failed; `check.sh` all 24 gates; `public_repo_guard`; `git diff --check` (recorded in the closing change entry) |
 
