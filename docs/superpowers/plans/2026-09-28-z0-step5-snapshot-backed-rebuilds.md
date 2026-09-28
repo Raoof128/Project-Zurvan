@@ -41,6 +41,29 @@ index_identity                 NOT called by build capture (it is the 6.7 s cost
                                build does not need to describe an index)
 ```
 
+## Gauntlet 2, 2026-09-28 — all five tasks dry-run in a throwaway worktree
+
+```text
+dry run                 Tasks 1-5 applied as written (Task 4 from this code), 104 new and
+                        affected tests passed; full suite: no failure introduced by the
+                        plan (the worktree's 12 are the known environment classes: no
+                        .private-projects, no instrument, no live graph)
+capture under load      a second process holding an eager operation for 2 s made capture
+                        REFUSE after 0.64 s blaming "the store kept changing" - fixed:
+                        _wait_for_quiet (default 300 s) is separate from race retries
+name shadowing          `_collect_graph(root=None)` would have been shadowed by its own
+                        os.walk loop variable - renamed source_root
+health path             derived_health read data/search.sqlite, ignoring
+                        ZURVAN_SEARCH_DB - now get_search_db_path()
+imports                 `knowledge status` pays ~200 ms importing derived_health
+stamped index           check_index_health(deep=True) passes on an index with index_meta
+falsify_live_read       first plugin read the REPO tree (import-bound PROJECT_ROOT), red
+                        for the wrong reason; corrected to read ZURVAN_ROOT live: red on
+                        `wiki/after.md` appearing in the index, the intended reason
+check.sh gate 5         now refuses on a SUSPECT store and waits for live operations;
+                        both are intended behaviour changes, stated here
+```
+
 ## Review Focus
 
 1. **A write landing during the clone.** Expected: the snapshot is discarded and capture retries; after `attempts` it raises `BuildSnapshotNotReady`, and nothing is built. (Task 2, `test_a_write_during_capture_is_retried_then_refused`.)
@@ -92,7 +115,7 @@ PYTHONPATH=. python $M/digest.py search $M/before-search.sqlite | tee $M/before-
 PYTHONPATH=. python -m pytest -q -p no:cacheprovider 2>&1 | grep -E '[0-9]+ passed' | tee $M/pytest-floor.txt
 ```
 
-Expected: `1243 passed` (1238 + 5 plan-integrity cases for this plan). If different, explain before editing.
+Expected: `1248 passed` (1238 + 5 plan-integrity cases for this plan + 5 for the public-mirror plan committed after it). If different, explain before editing.
 
 ---
 
@@ -199,7 +222,7 @@ and in `_COMPONENTS`: `"docs": capture_docs, "roots": capture_roots,`.
 
 **Interfaces:**
 - Consumes: `capture(root=None, label="measurement", deep=False, components=None) -> Snapshot`, `BUILD_INPUTS`, `observe_external_drift(root=None, trigger="manual")`, `DriftUnobservable`, `detect_orphans(root=None) -> list`
-- Produces: `class BuildSnapshotRefused(RuntimeError)`, `class BuildSnapshotNotReady(RuntimeError)`, `class NoBaseline(BuildSnapshotRefused)`, `class BuildSnapshot` (fields `snapshot`, `revision`, `atomicity`, `manifest_digest`; property `path`; `stamp() -> dict`; `release() -> None`; context manager), `capture_build_inputs(root=None, label="rebuild", attempts=3) -> BuildSnapshot`, `inputs_for_rebuild(root=None)` (context manager yielding a `BuildSnapshot` or `None` when the store has no baseline).
+- Produces: `class BuildSnapshotRefused(RuntimeError)`, `class BuildSnapshotNotReady(RuntimeError)`, `class NoBaseline(BuildSnapshotRefused)`, `class BuildSnapshot` (fields `snapshot`, `revision`, `atomicity`, `manifest_digest`; property `path`; `stamp() -> dict`; `release() -> None`; context manager), `capture_build_inputs(root=None, label="rebuild", attempts=3, wait_s=300) -> BuildSnapshot`, `inputs_for_rebuild(root=None)` (context manager yielding a `BuildSnapshot` or `None` when the store has no baseline).
 
 - [ ] **Step 1: Failing tests**
 
@@ -300,6 +323,34 @@ def test_a_dead_writer_does_not_block_capture(store):
         assert bs.revision == kr.current(store).revision
 
 
+def test_capture_waits_for_a_live_operation_to_finish(store):
+    """A real second process holds an eager operation for 1.5 s. Capture must
+    wait it out, not give up (the gauntlet reproduced a 0.64 s refusal)."""
+    import os, subprocess, sys, time
+    holder = subprocess.Popen([sys.executable, "-c", (
+        "import time\n"
+        "from scripts import knowledge_revision as kr\n"
+        f"with kr.operation(writer='long', root={str(store)!r}, eager=True):\n"
+        f"    open({str(store / 'wiki' / 'held.md')!r}, 'w').write('x')\n"
+        "    time.sleep(1.5)\n")], env={**os.environ, "PYTHONPATH": "."})
+    try:
+        deadline = time.monotonic() + 10
+        while not kr.mutations_in(kr.ACTIVE, store):
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        with bsn.capture_build_inputs(store) as bs:
+            assert (bs.path / "wiki" / "held.md").is_file()
+    finally:
+        holder.wait()
+
+
+def test_a_capture_that_waits_too_long_names_who_it_waited_for(store):
+    other = kr.Operation(root=store, writer="still-running")
+    other.mutation_id = kr._insert_mutation(other)        # owned by THIS live pid
+    with pytest.raises(bsn.BuildSnapshotBusy, match="still-running"):
+        bsn.capture_build_inputs(store, wait_s=0.5)
+
+
 def test_a_store_with_no_baseline_yields_no_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
     (tmp_path / "wiki").mkdir()
@@ -353,6 +404,10 @@ class BuildSnapshotNotReady(RuntimeError):
     """The store kept changing; no snapshot was kept (gate item 11)."""
 
 
+class BuildSnapshotBusy(BuildSnapshotNotReady):
+    """Operations stayed in flight past the wait budget; names them."""
+
+
 def _live_manifest(base) -> str:
     from scripts.knowledge_manifest import authoritative_manifest
     return authoritative_manifest(base)
@@ -404,7 +459,25 @@ class BuildSnapshot:
         return False
 
 
-def capture_build_inputs(root=None, label="rebuild", attempts=3) -> BuildSnapshot:
+def _wait_for_quiet(base, wait_s) -> None:
+    """Wait for live operations to finish - a different thing from retrying a
+    race. Gauntlet 2026-09-28: with only the race retries, a capture started
+    while another process held an operation for 2 s gave up after 0.64 s and
+    blamed the store for changing; any rebuild during an ingest would fail."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        kr.detect_orphans(base)
+        live = kr.mutations_in(kr.ACTIVE, base)
+        if not live:
+            return
+        if time.monotonic() >= deadline:
+            raise BuildSnapshotBusy(
+                f"operation(s) still in flight after {wait_s}s: "
+                + ", ".join(f"{m.writer} pid {m.owner_pid}" for m in live))
+        time.sleep(0.25)
+
+
+def capture_build_inputs(root=None, label="rebuild", attempts=3, wait_s=300) -> BuildSnapshot:
     from scripts import measurement_snapshot as ms
     base = ks.store_root(root)
     for attempt in range(attempts):
@@ -415,10 +488,7 @@ def capture_build_inputs(root=None, label="rebuild", attempts=3) -> BuildSnapsho
         if not state.manifest_digest:
             raise NoBaseline("no recorded manifest; run `zurvan knowledge bootstrap`")
         _refuse_if_suspect(state)
-        kr.detect_orphans(base)
-        if kr.mutations_in(kr.ACTIVE, base):
-            time.sleep(0.1 * (attempt + 1))
-            continue
+        _wait_for_quiet(base, wait_s)
         try:
             kr.observe_external_drift(base, trigger="capture")
         except kr.DriftUnobservable:
@@ -466,7 +536,7 @@ def inputs_for_rebuild(root=None):
 **Files:** Modify `scripts/rebuild_search_index.py` (`rebuild_search_index`, `__main__`); Test `tests/test_build_snapshot.py`
 
 **Interfaces:**
-- Consumes: `capture_build_inputs(root=None, label="rebuild", attempts=3) -> BuildSnapshot`, `inputs_for_rebuild(root=None)`, `BuildSnapshot.stamp() -> dict`
+- Consumes: `capture_build_inputs(root=None, label="rebuild", attempts=3, wait_s=300) -> BuildSnapshot`, `inputs_for_rebuild(root=None)`, `BuildSnapshot.stamp() -> dict`
 - Produces: `rebuild_search_index(db_path=None, root=None, snapshot=None)`; `INDEX_META = "index_meta"`; `read_index_meta(db_path) -> dict`
 
 - [ ] **Step 1: Failing tests** (append)
@@ -580,7 +650,7 @@ if __name__ == "__main__":
 **Files:** Modify `scripts/graph_build.py` (`get_file_content`, `_collect_graph`, `_write_graph`, `build_graph`, `__main__`); Modify `tests/test_graph_publication.py` (three fakes); Test `tests/test_build_snapshot.py`
 
 **Interfaces:**
-- Produces: `get_file_content(path: str, root=None) -> str`, `_collect_graph(root=None)`, `_write_graph(build_path, nodes_dict, edges_list, stamp=None) -> None`, `build_graph(db_path: str = DB_PATH, snapshot=None)`
+- Produces: `get_file_content(path: str, root=None) -> str`, `_collect_graph(source_root=None)`, `_write_graph(build_path, nodes_dict, edges_list, stamp=None) -> None`, `build_graph(db_path: str = DB_PATH, snapshot=None)`
 
 - [ ] **Step 1: Failing test** (append)
 
@@ -608,9 +678,35 @@ def test_the_graph_is_built_from_the_snapshot_and_stamped(store):
 
 - [ ] **Step 2: Run** — Expected: `TypeError: build_graph() got an unexpected keyword argument 'snapshot'`.
 
-- [ ] **Step 3: Implement.** `get_file_content(path: str, root=None) -> str` reads from `root or PROJECT_ROOT`; `_collect_graph(root=None)` uses `base = str(root) if root is not None else PROJECT_ROOT` everywhere it used `PROJECT_ROOT` and passes `root=base` to `get_file_content`; `_write_graph` gains `stamp=None` and, when given, adds its items to the `graph_meta` rows; `build_graph(db_path: str = DB_PATH, snapshot=None)` calls `_collect_graph(snapshot.path if snapshot is not None else None)` and `_write_graph(..., stamp=snapshot.stamp() if snapshot is not None else None)`. `__main__`:
+- [ ] **Step 3: Implement** — exact edits in `scripts/graph_build.py` (dry-run 2026-09-28). The parameter is `source_root`, NOT `root`: `_collect_graph`'s body already uses `root` as its `os.walk` loop variable, and a parameter of that name would be shadowed after the first directory.
 
 ```python
+def get_file_content(path: str, root=None) -> str:
+    abs_path = path if os.path.isabs(path) else os.path.join(
+        str(root) if root is not None else PROJECT_ROOT, path)
+    with open(abs_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+def _collect_graph(source_root=None):
+    ...
+    base = str(source_root) if source_root is not None else PROJECT_ROOT
+    for root, dirs, files in os.walk(base):              # was os.walk(PROJECT_ROOT)
+        ...
+        rel_root = os.path.relpath(root, base)           # was relpath(root, PROJECT_ROOT)
+    ...
+            content = get_file_content(p, root=base)     # both passes
+
+def _write_graph(build_path, nodes_dict, edges_list, stamp=None) -> None:
+    ...
+            ("edge_count", str(len(edges_list))),
+        ] + sorted((stamp or {}).items()))
+
+def build_graph(db_path: str = DB_PATH, snapshot=None):
+    ...
+        nodes_dict, edges_list = _collect_graph(snapshot.path if snapshot is not None else None)
+        _write_graph(build_path, nodes_dict, edges_list,
+                     stamp=snapshot.stamp() if snapshot is not None else None)
+
 if __name__ == "__main__":
     from scripts.build_snapshot import inputs_for_rebuild
     with inputs_for_rebuild() as bs:
@@ -770,7 +866,10 @@ def _meta(kind, base) -> tuple:
         return path, (read_graph_meta(path) if path.is_file() else None)
     if kind == "search":
         from scripts.rebuild_search_index import read_index_meta
-        path = Path(base) / "data" / "search.sqlite"
+        from scripts.config import get_search_db_path
+        # Not data/search.sqlite: ZURVAN_SEARCH_DB moves the index (the e2e
+        # scripts set it), and health must describe the index actually used.
+        path = Path(get_search_db_path())
         return path, (read_index_meta(path) if path.is_file() else None)
     raise ValueError(f"unknown derived store {kind!r}")
 
@@ -849,10 +948,24 @@ def pytest_configure(config):
     import scripts.build_snapshot as mod
     mod._refuse_if_suspect = lambda state: None
 # falsify_live_read.py — the indexer ignores the snapshot and reads live
+import os
 def pytest_configure(config):
     import scripts.rebuild_search_index as rsi
     real = rsi.iter_all_markdown_chunks
-    rsi.iter_all_markdown_chunks = lambda root=None: real(None)
+    rsi.iter_all_markdown_chunks = lambda root=None: real(os.environ["ZURVAN_ROOT"])
+```
+
+# falsify_no_wait.py — do not wait for live operations
+def pytest_configure(config):
+    import scripts.build_snapshot as mod
+    mod._wait_for_quiet = lambda base, wait_s: None
+```
+
+```text
+Required red: falsify_no_wait -> test_capture_waits_for_a_live_operation_to_finish,
+test_a_capture_that_waits_too_long_names_who_it_waited_for, and
+test_a_dead_writer_does_not_block_capture (orphan detection lives in the wait).
+Dry-run 2026-09-28: exactly these 3 red, 7 green.
 ```
 
 Required red: `falsify_no_second_manifest` → `test_a_write_during_capture_is_retried_then_refused`; `falsify_suspect_allowed` → `test_gate_18_a_suspect_store_is_refused`; `falsify_live_read` → `test_gate_17_a_rebuild_stamps_the_revision_it_read` (`wiki/after.md` appears in the index). The first draft of these plugins replaced the exception class the test imports, and removed the manifest entirely — both would have left their target test green. Any red that is a harness error is inconclusive and redone.
