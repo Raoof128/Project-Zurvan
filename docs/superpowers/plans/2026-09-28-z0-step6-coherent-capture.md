@@ -36,6 +36,8 @@
 5. **A directory with no lease keeps the pid rule.** This covers `.building-<pid>` directories and snapshots taken before this step. A lease cannot exist before publication, and snapshots from before step 6 have none.
 6. **`check.sh` gate 6 stays a legacy capture, and says `UNVERIFIED`.** Requiring `search` there would fail the gate whenever another project writes between gate 5's rebuild and gate 6. That is exactly the failure snapshots were introduced to remove (`scripts/check.sh:115-120`). §9.1 is honoured by labelling, not by refusal: the gate's number is not claimed as a coherent Z0 measurement.
 7. **A lease names a TTL, and the default is 3600 s.** §8 lists the fields, not their values. An hour covers a full gate run. Because GC also requires a dead owner, the TTL only bounds how long a dead process's snapshot survives.
+8. **A live-stamp pre-check runs before the freeze. It is a fast path, not the proof.** Measured in the gauntlet: refusing a stale live store after freezing it took 11.69 s. Nearly all of that is `index_identity` over the 739 MB index, spent only to say no. With the pre-check the refusal takes 0.17 s. The frozen copies are still verified, because a rebuild may promote between the pre-check and the clone.
+9. **The pid rule treats `PermissionError` as alive.** `kill(2)` returns EPERM for a process that exists but belongs to another user. The pre-step-6 sweep caught every `OSError` as death (`except (OSError, ProcessLookupError)`), so it could delete a snapshot owned by a live process. Found by reading the 2026 Python `os.kill`/`signal` documentation, not by a failure.
 
 ## Review Focus
 
@@ -555,6 +557,16 @@ def test_a_dead_builders_partial_directory_is_reclaimed(store):
     assert not ghost.exists()
 
 
+def test_the_pid_rule_keeps_a_process_it_cannot_signal(store):
+    """kill(2): EPERM means the process EXISTS. Before step 6 the sweep read
+    any OSError as death. pid 1 (launchd/init) is another user's process
+    unless the suite runs as root, and then it is signalable and kept anyway."""
+    ghost = ms.snapshots_dir(store) / "t-20260101T000000Z-1"
+    ghost.mkdir(parents=True)
+    assert ms.collect_garbage(store) == []
+    assert ghost.exists()
+
+
 def test_a_path_only_snapshot_survives_its_capturing_process(store):
     """Review focus 5: check.sh gate 6 captures in a short-lived process and
     measures in the shell. A concurrent check.sh's --sweep must not delete it,
@@ -620,11 +632,18 @@ def _pid_rule(child) -> tuple:
     pid = int(suffix)
     if pid == os.getpid():
         return KEEP, "owned by this process"
+    # kill(2): ESRCH means no such process; EPERM means it EXISTS and belongs
+    # to someone else. The pre-step-6 sweep caught both as OSError and so
+    # deleted snapshots owned by live processes it could not signal.
     try:
         os.kill(pid, 0)
-        return KEEP, f"no lease; owner pid {pid} is running"
-    except (OSError, ProcessLookupError):
+    except ProcessLookupError:
         return RECLAIM, f"no lease; owner pid {pid} is gone"
+    except PermissionError:
+        return KEEP, f"no lease; pid {pid} exists (another user's process)"
+    except OSError as exc:
+        return KEEP, f"no lease; liveness of pid {pid} unknown ({exc})"
+    return KEEP, f"no lease; owner pid {pid} is running"
 
 
 def gc_verdict(child, now=None) -> tuple:
@@ -895,6 +914,52 @@ def test_a_graph_from_before_stamps_existed_is_refused_not_a_crash(store):
     assert exc.value.component == "graph"
 
 
+def test_stamps_are_read_from_the_frozen_copy_not_the_live_store(store, monkeypatch):
+    """The live index reads CURRENT at the pre-check and at verification, but
+    the bytes frozen are an older build. Only a check of the FROZEN copy can
+    refuse, and it must: the frozen copy is what a measurement reads.
+    Gauntlet 2026-09-28: without this test, reading stamps from the live
+    store passed every other test in this file."""
+    from scripts import derived_health as dh
+    live = Path(os.environ["ZURVAN_SEARCH_DB"])
+    _rebuild(store)
+    old = store / "old.sqlite"
+    shutil.copy2(live, old)
+    _write(store, "b.md")
+    _rebuild(store)
+    cur = store / "cur.sqlite"
+    shutil.copy2(live, cur)
+    real = ms._COMPONENTS["search"]
+
+    def freeze_an_older_build(root, into):
+        os.replace(old, live)
+        try:
+            return real(root, into)
+        finally:
+            os.replace(cur, live)
+
+    monkeypatch.setitem(ms._COMPONENTS, "search", freeze_an_older_build)
+    with pytest.raises(bsn.SnapshotNotReady) as exc:
+        bsn.capture_coherent(store, purpose="measurement", required=MEASURE)
+    assert exc.value.component == "search"
+    assert dh.store_health("search", store)[0] == dh.CURRENT
+
+
+def test_a_certain_refusal_freezes_nothing(store, monkeypatch):
+    """A stale live store is refused before any byte is frozen (11.7 s ->
+    0.17 s on the live store, gauntlet 2026-09-28)."""
+    _rebuild(store)
+    _write(store, "b.md")
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("froze bytes for a refusal the live stamps already decided")
+
+    monkeypatch.setattr(ms, "_freeze", must_not_run)
+    with pytest.raises(bsn.SnapshotNotReady) as exc:
+        bsn.capture_coherent(store, purpose="measurement", required=MEASURE)
+    assert exc.value.component == "search"
+
+
 def test_gate_1_a_capture_between_the_two_writes_of_decision_add_is_busy(store, monkeypatch):
     """The page is written and log.md is not yet appended: a snapshot here
     would be a half-operation. It must be BUSY, never a half-state."""
@@ -980,7 +1045,7 @@ def test_the_script_can_take_a_coherent_capture(store):
 PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py
 ```
 
-Expected: the tests fail with `AttributeError: module 'scripts.build_snapshot' has no attribute 'capture_coherent'` (or `SnapshotNotReady`). The script test fails with `unrecognized arguments: --require`.
+Expected: 16 failed and 1 passed. The failures are `AttributeError: module 'scripts.build_snapshot' has no attribute 'capture_coherent'` (or `SnapshotNotReady`), `assert 'legacy' == 'rebuild_graph'`, and, for the script test, `unrecognized arguments: --require`. `test_components_and_required_are_exclusive` passes already, because Task 2's `capture` raises before it imports anything.
 
 - [ ] **Step 3: Implement in `scripts/build_snapshot.py`**
 
@@ -1078,6 +1143,22 @@ def _verifier(base, required, before, m_before, purpose):
                 "revision": before.revision, "atomicity": before.atomicity,
                 "manifest_digest": before.manifest_digest, "components": components}
     return verify
+
+
+def _precheck(base, required, before) -> None:
+    """Fail fast on the LIVE stamps. Gauntlet 2026-09-28: refusing a stale
+    live store AFTER freezing it took 11.7 s, nearly all `index_identity`
+    over a 739 MB index, to say no. This is not the proof: a rebuild may
+    promote between here and the clone, so the frozen copies are still
+    checked. It is only a cheap early no."""
+    from scripts import derived_health as dh
+    for kind in ("search", "graph"):
+        if kind not in required:
+            continue
+        state, built, now, reason = dh.store_health(kind, base)
+        if state != dh.CURRENT and now in (None, before.revision):
+            raise SnapshotNotReady(kind, UNVERIFIED if built is None else state,
+                                   built, before.revision, reason)
 ```
 
 Add `import sqlite3` and `from pathlib import Path` to the imports at the top of the module.
@@ -1131,6 +1212,7 @@ def capture_coherent(root=None, purpose="rebuild", required=("wiki",), label=Non
             continue                     # a file vanished mid-manifest: a race
         if m_before != before.manifest_digest:
             continue
+        _precheck(base, required, before)
         try:
             snap = ms._freeze(base, label, deep, names, purpose, before.revision,
                               ttl, _verifier(base, required, before, m_before, purpose))
@@ -1207,16 +1289,22 @@ PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py tests/test_build
 
 Expected: all pass. `test_a_write_during_capture_is_retried_then_refused` still passes, because `_unchanged` now raises `_Moved` inside `verify` and the attempt is discarded before it is published.
 
-- [ ] **Step 5: Falsify the two load-bearing lines, one at a time**
+- [ ] **Step 5: Falsify the three load-bearing lines, one at a time**
 
 ```bash
-# 1. Remove the derived check (replace `if state != dh.CURRENT:` with `if False:`)
-PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py -k "gate_8 or unstamped or before_stamps" ; git checkout scripts/build_snapshot.py
-# 2. Read stamps from the LIVE store (in _frozen_meta, replace `directory` with `ks.store_root(None) / "data"`)
-PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py -k "gate_8" ; git checkout scripts/build_snapshot.py
+f=scripts/build_snapshot.py; cp $f /tmp/bs.keep
+# 1. Remove the frozen-copy check
+sed -i '' 's/            if state != dh.CURRENT:/            if False:/' $f
+PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py 2>&1 | grep -E 'FAILED|passed|failed'; cp /tmp/bs.keep $f
+# 2. Read the search stamp from the LIVE index instead of the frozen copy
+sed -i '' 's|Path(directory) / "search.sqlite"|Path(__import__("os").environ["ZURVAN_SEARCH_DB"])|' $f
+PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py 2>&1 | grep -E 'FAILED|passed|failed'; cp /tmp/bs.keep $f
+# 3. Remove the pre-check
+sed -i '' 's/^        _precheck(base, required, before)$/        pass/' $f
+PYTHONPATH=. python -m pytest -q tests/test_coherent_capture.py 2>&1 | grep -E 'FAILED|passed|failed'; cp /tmp/bs.keep $f
 ```
 
-Expected: mutation 1 turns all three named tests red. Mutation 2 turns `gate_8` red, because the live search file under `ZURVAN_SEARCH_DB` is not at `data/search.sqlite`. If a mutation stays green, the test does not prove what it names; stop and fix the test. Record the red counts for the CHANGELOG.
+Expected, as measured in the gauntlet: each mutation turns exactly one test red. Mutations 1 and 2 turn `test_stamps_are_read_from_the_frozen_copy_not_the_live_store` red, and mutation 3 turns `test_a_certain_refusal_freezes_nothing` red. Mutation 1 reddens only one test because the pre-check refuses the plainly stale cases first, so the frozen check is the only line of defence for a build that changes underneath the capture, and that one test is what pins it. If a mutation stays green, the test does not prove what it names; stop and fix the test. Record the red counts for the CHANGELOG.
 
 - [ ] **Step 6: Commit**
 
@@ -1490,7 +1578,7 @@ git diff --check main...HEAD
 PYTHONPATH=. python -m pytest -q tests/test_plan_integrity.py
 ```
 
-Expected: `0 failed`, and more passes than Task 0's floor (at least 38 new tests). Guard and diff-check are clean.
+Expected: `0 failed`, and exactly 39 more passes than Task 0's floor: 21 in `test_coherent_capture.py`, 17 in `test_snapshot_leases.py`, and 1 in `test_derived_health.py`. Guard and diff-check are clean. `tests/test_write_attribution.py::test_a_corrupt_write_log_line_does_not_break_the_guard` errored once at setup in a full run during the gauntlet, and passed alone on `main` and on this branch. If it recurs, it is pre-existing, and it is reported rather than folded into this step.
 
 - [ ] **Step 2: The full gate.** Nothing else may be rebuilding the index; check first.
 
