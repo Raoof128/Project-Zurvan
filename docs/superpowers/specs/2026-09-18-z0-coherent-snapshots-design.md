@@ -6,8 +6,9 @@
 [amendments](2026-09-18-zurvan-2-amendments.md))
 **Supersedes in scope:** [2026-09-17-measurement-snapshot-design.md](2026-09-17-measurement-snapshot-design.md),
 which remains accurate for what it built and is the starting point, not a rival.
-**Status:** Design. Not implemented. Nothing here may be reported as built until
-it is measured.
+**Status:** Z0 CLOSED 2026-09-28 — all 20 §10 items demonstrated by named
+tests (§10.5), enforced by `tests/test_z0_closure.py`. Bounds that remain are
+stated in the 2026-09-28g change entry, not hidden.
 
 **Rev 2 changed four things that were wrong, not unclear.** Rev 1 claimed
 implicit mutations were safe (they are not, §3.2); made rebuild and capture
@@ -898,8 +899,9 @@ item 1 (`test_gate_1_a_capture_between_the_two_writes_of_decision_add_is_busy`),
 measurement capture: VERIFIED at revision 242, 3.28 s. Amendments:
 `2026-09-18-zurvan-2-amendments.md` §11.
 
-Still NOT BUILT: step 7 — the implicit-mutation inventory driven to empty
-(§10.1 items 2–3). Z0 OPEN.
+**Status 2026-09-28 (Z0 step 7): Z0 CLOSED.** The inventory was already empty
+(10 historical implicit rows, all resolved); `zurvan knowledge callers
+--strict` now gates it in `check.sh`. Every item maps to named tests in §10.5.
 
 ### 10.4 Regression floor
 

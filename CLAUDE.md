@@ -111,15 +111,17 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
-- **Z0 is OPEN.** Steps 1–6 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
-  are built. A measurement capture declares what must be coherent —
-  `measurement_snapshot.py --require wiki,search,graph` — and refuses with
-  `SNAPSHOT_NOT_READY` unless each required store is CURRENT at the revision
-  it pins; `zurvan knowledge status` shows CURRENT, STALE (normal) or INVALID.
-  Snapshots hold leases; `zurvan knowledge gc` reclaims only an expired lease
-  with a dead owner. Step 7 (implicit-mutation inventory driven to empty) is
-  NOT BUILT. check.sh gate 6 is a LEGACY capture and reports UNVERIFIED — never
-  describe its number as a coherent Z0 measurement. A rebuild REFUSES a SUSPECT store and WAITS
+- **Z0 is CLOSED (2026-09-28).** All 20 gate items of
+  `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md` are
+  demonstrated by the named tests in its §10.5 matrix; `tests/test_z0_closure.py`
+  fails if any of them stops existing. A measurement capture declares what must
+  be coherent — `measurement_snapshot.py --require wiki,search,graph` — and
+  refuses with `SNAPSHOT_NOT_READY` unless each required store is CURRENT at the
+  revision it pins. Snapshots hold leases; `zurvan knowledge gc` reclaims only
+  an expired lease with a dead owner. `zurvan knowledge callers --strict` gates
+  the implicit inventory in check.sh. check.sh gate 6 is a LEGACY capture and
+  reports UNVERIFIED — never describe its number as a coherent Z0 measurement.
+  A rebuild REFUSES a SUSPECT store and WAITS
   for live operations (300 s per attempt, up to 3 attempts).
 - **Never quote the retrieval instrument verbatim.** The 50-item gold set lives
   in `~/.zurvan/instruments/`, never in git; `eval/search_gold.manifest.json`

@@ -464,6 +464,7 @@ Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.
 | 7 | 2026-09-28 | Z0 §3.2, amendment 6 | Authoritative writes outside an operation refused; implicit mode only by reasoned migration opt-in; `--project` and project-slug fixes (§9) |
 | 8 | 2026-09-28 | Z0 §6.1 | Rebuild snapshots capture all build inputs; coherence by live double manifest; released after build; no-baseline builds unstamped (§10) |
 | 9 | 2026-09-28 | Z0 §7-§8 | Coherence verified on frozen copies before publication; `knowledge snapshots|gc`; leases with expired-AND-dead GC; gate 6 stays UNVERIFIED; liveness never guessed (§11) |
+| 10 | 2026-09-28 | Z0 §10 | Z0 CLOSED (step 7): no design change; inventory gated by `callers --strict`; §10.5 closure matrix enforced by a test |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
 policy), §30 (success definition) or §34 (acceptance gate).
