@@ -338,6 +338,11 @@ def capture_search(root, into) -> Component:
         raise MissingComponentError(
             f"no search index to snapshot at {source}; build one before measuring")
     assert_self_contained(source)
+    from scripts.sqlite_publish import PublicationError, assert_published_immutable
+    try:
+        assert_published_immutable(source)
+    except PublicationError as exc:
+        raise SnapshotComponentError(str(exc)) from exc
     destination = Path(into) / INDEX_NAME
     try:
         os.link(source, destination)

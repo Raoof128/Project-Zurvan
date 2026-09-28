@@ -51,6 +51,8 @@ def tmp_index(tmp_path_factory):
     os.environ["ZURVAN_EMBED_MODEL"] = "mock_model"
     try:
         rebuild_search_index(db_path, root=corpus)
+        # `_insert_chunk` uses this index as scratch: not a published store.
+        _unlock_published_for_fixture(db_path)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -58,6 +60,13 @@ def tmp_index(tmp_path_factory):
             else:
                 os.environ[k] = v
     return db_path
+
+
+def _unlock_published_for_fixture(db) -> None:
+    """Deliberately undo publication's read-only bit. These tests simulate the
+    forbidden in-place write (or use a published store as scratch); saying so
+    here keeps it from looking like an accident."""
+    os.chmod(db, 0o644)
 
 
 def _insert_chunk(db_path, chunk_id, heading, text):
@@ -212,6 +221,8 @@ def test_vectorised_scoring_matches_the_reference_cosine_fusion(tmp_path_factory
     os.environ["ZURVAN_EMBED_MODEL"] = "mock_model"
     try:
         rebuild_search_index(db_path, root=corpus)
+        # `_insert_chunk` uses this index as scratch: not a published store.
+        _unlock_published_for_fixture(db_path)
     finally:
         for k, v in saved.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)

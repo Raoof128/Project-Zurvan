@@ -21,7 +21,6 @@ and aborts otherwise, because an index of hashes answers every query with
 confident noise.
 """
 
-import glob
 import json
 import os
 import sqlite3
@@ -43,7 +42,11 @@ from scripts.index_health import (
 # profile nobody needs.
 COMMIT_EVERY = 2000
 
-_BUILD_SUFFIX = ".building-"
+from scripts import sqlite_publish as _publication
+
+_BUILD_SUFFIX = _publication.BUILD_SUFFIX
+# Kept under its old name: tests/test_index_integrity.py calls it directly.
+_sweep_abandoned_builds = _publication.sweep_abandoned_builds
 
 
 class _PriorIndex:
@@ -160,42 +163,6 @@ def _assert_embedding_space_is_safe(db_path: str, probe: dict) -> None:
         )
 
 
-def _sweep_abandoned_builds(db_path: str) -> set[int]:
-    """Delete build files left by rebuilds that were killed outright.
-
-    A SIGKILL cannot clean up after itself, so these accumulate. Files owned by
-    a LIVE process are left alone and their pids returned: that is a concurrent
-    rebuild, and the caller refuses to start beside it.
-    """
-    live_builders: set[int] = set()
-    for path in glob.glob(f"{db_path}{_BUILD_SUFFIX}*"):
-        # SQLite's own sidecars are named `<db>-journal` / `-wal` / `-shm`, so
-        # the pid is the LEADING integer of the suffix, not the whole of it.
-        # Parsing the whole suffix made a live rebuild's journal look ownerless
-        # and deletable, which would corrupt that build.
-        suffix = path.rsplit(_BUILD_SUFFIX, 1)[-1]
-        digits = ""
-        for ch in suffix:
-            if not ch.isdigit():
-                break
-            digits += ch
-        pid = int(digits) if digits else None
-        if pid is not None and pid != os.getpid():
-            try:
-                os.kill(pid, 0)
-                live_builders.add(pid)
-                continue  # a live rebuild owns this file
-            except (OSError, ProcessLookupError):
-                pass
-        if pid != os.getpid():
-            try:
-                os.remove(path)
-                print(f"  discarded abandoned build file {os.path.basename(path)}")
-            except OSError:
-                pass
-    return live_builders
-
-
 def rebuild_search_index(db_path: str | None = None, root=None):
     """Rebuild the chunk/FTS/embedding index into a temp file, then swap it in.
 
@@ -233,9 +200,8 @@ def rebuild_search_index(db_path: str | None = None, root=None):
             f"for {os.path.basename(db_path)}. Wait for it, or kill it and "
             "remove its .building-<pid> file."
         )
-    build_path = f"{db_path}{_BUILD_SUFFIX}{os.getpid()}"
-    if os.path.exists(build_path):
-        os.remove(build_path)
+    build_path = _publication.build_path_for(db_path)
+    _publication.discard_build(build_path)
 
     reusable = _PriorIndex(db_path)
     try:
@@ -255,19 +221,15 @@ def rebuild_search_index(db_path: str | None = None, root=None):
             )
 
         # The only mutation of the canonical path in this function, and it is
-        # atomic: readers see the old index or the new one.
-        os.replace(build_path, db_path)
+        # atomic: readers see the old index or the new one. Integrity was
+        # checked by `check_index_health(deep=True)` above, and a full
+        # `integrity_check` over 739 MB would double the cost of publishing.
+        _publication.publish(build_path, db_path, integrity=False)
     finally:
         reusable.close()
         # The build file AND its sqlite sidecars: a killed rebuild that leaves a
         # `-journal` behind makes the next sweep's job ambiguous.
-        for leftover in (build_path, f"{build_path}-journal",
-                         f"{build_path}-wal", f"{build_path}-shm"):
-            if os.path.exists(leftover):
-                try:
-                    os.remove(leftover)
-                except OSError:
-                    pass
+        _publication.discard_build(build_path)
 
     # The sidecar describes the index that was just replaced; drop it after the
     # swap, so a failed rebuild does not invalidate a still-live index's cache.

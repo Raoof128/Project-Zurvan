@@ -45,6 +45,13 @@ import scripts.rebuild_search_index as rsi
 CANONICAL_DB = PROJECT_ROOT / "data" / "search.sqlite"
 
 
+def _unlock_published_for_fixture(db) -> None:
+    """Deliberately undo publication's read-only bit. These tests simulate the
+    forbidden in-place write (or use a published store as scratch); saying so
+    here keeps it from looking like an accident."""
+    os.chmod(db, 0o644)
+
+
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
 def _corpus(root: Path) -> Path:
@@ -419,6 +426,7 @@ def test_embeddings_are_still_reused_across_rebuilds(tmp_path, mock_env, monkeyp
 def test_a_partial_index_is_not_healthy(tmp_path, mock_env):
     db = tmp_path / "search.sqlite"
     rebuild_search_index(str(db), root=_corpus(tmp_path))
+    _unlock_published_for_fixture(db)
 
     conn = sqlite3.connect(db)
     conn.execute("DELETE FROM embeddings WHERE rowid IN (SELECT rowid FROM embeddings LIMIT 1)")
@@ -433,6 +441,7 @@ def test_a_partial_index_is_not_healthy(tmp_path, mock_env):
 def test_chunks_must_equal_embeddings(tmp_path, mock_env):
     db = tmp_path / "search.sqlite"
     rebuild_search_index(str(db), root=_corpus(tmp_path))
+    _unlock_published_for_fixture(db)
     chunks, embeddings = _counts(db)
     assert chunks == embeddings
 
@@ -465,6 +474,7 @@ def test_the_wrong_provider_fails_health_even_with_perfect_counts(tmp_path, mock
 def test_the_wrong_model_fails_health(tmp_path, mock_env):
     db = tmp_path / "search.sqlite"
     rebuild_search_index(str(db), root=_corpus(tmp_path))
+    _unlock_published_for_fixture(db)
     conn = sqlite3.connect(db)
     conn.execute("UPDATE embeddings SET provider = ?, model = 'all-MiniLM-L12-v2'",
                  (CANONICAL_PROVIDER,))
@@ -482,6 +492,7 @@ def test_a_mixed_provider_index_fails_health(tmp_path, mock_env):
     """Cosine scores across two embedding spaces are arithmetic, not meaning."""
     db = tmp_path / "search.sqlite"
     rebuild_search_index(str(db), root=_corpus(tmp_path))
+    _unlock_published_for_fixture(db)
 
     conn = sqlite3.connect(db)
     conn.execute(
@@ -501,6 +512,7 @@ def test_a_wrong_width_vector_fails_deep_health(tmp_path, mock_env):
     """A dimension/blob mismatch makes vec_distance_cosine return garbage."""
     db = tmp_path / "search.sqlite"
     rebuild_search_index(str(db), root=_corpus(tmp_path))
+    _unlock_published_for_fixture(db)
 
     conn = sqlite3.connect(db)
     conn.execute(
@@ -737,3 +749,13 @@ def test_canonical_path_detection_follows_the_search_db_override(tmp_path, monke
     assert not is_canonical_index(tmp_path / "search.sqlite"), (
         "a redirected index is a throwaway, never the production corpus"
     )
+
+
+def test_a_rebuilt_index_is_published_read_only(tmp_path, mock_env):
+    """The real rebuild path, not the protocol in isolation."""
+    import stat
+    from scripts import sqlite_publish as sp
+    db = tmp_path / "search.sqlite"
+    rebuild_search_index(str(db), root=_corpus(tmp_path))
+    assert stat.S_IMODE(db.stat().st_mode) == sp.PUBLISHED_MODE
+    assert [s for s in sp.SIDECARS if (tmp_path / f"search.sqlite{s}").exists()] == []
