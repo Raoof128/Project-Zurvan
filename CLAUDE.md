@@ -69,8 +69,12 @@ invalidated by another session writing. `capture(components=...)` defaults to
 
 - **A hardlink is legal only for a store whose published inode is never
   modified in place.** `search.sqlite` qualifies because rebuilds build to a
-  temp file and promote with one `os.replace`. `graph.sqlite` does **not** —
-  it is written in place, so it is cloned, under a SQLite read lock.
+  temp file and promote with one `os.replace`. Since 2026-09-28 the graph does
+  too, and both publish through `scripts/sqlite_publish.py` as mode **0444** —
+  an in-place write fails. The graph is still captured by clone (0.33 ms).
+- **Never write a published store in place.** A test that must (simulating
+  corruption, or using a rebuilt index as scratch) calls a named
+  `_unlock_published_for_fixture` helper, so it cannot look like an accident.
 - A store with a `-journal`, `-wal` or `-shm` sidecar, or in WAL mode, is
   refused: its committed state is not in the file being frozen.
 - Cost, measured 2026-09-19: a full three-component capture is **~5.9 s**, of
@@ -101,11 +105,11 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
-- **Z0 is OPEN.** Steps 1–3 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
-  are built; gate item 16 is closed and **gate 14 is not** — the hardlink
-  hazard is reproduced by a test, not prevented. Atomic graph publication,
-  coherence verification, `built_from_revision` and snapshot-backed rebuilds
-  are NOT BUILT. Do not describe snapshots as coherence-verified.
+- **Z0 is OPEN.** Steps 1–4 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
+  are built; gate items 14, 15 and 16 are closed. Gate 14's bound: 0444 stops
+  an accidental in-place write, not the owner (chmod) or root. Coherence
+  verification, `built_from_revision` and snapshot-backed rebuilds are NOT
+  BUILT. Do not describe snapshots as coherence-verified.
 - **Never quote the retrieval instrument verbatim.** The 50-item gold set lives
   in `~/.zurvan/instruments/`, never in git; `eval/search_gold.manifest.json`
   carries a count and one whole-file digest, deliberately with no per-item

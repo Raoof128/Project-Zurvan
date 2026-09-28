@@ -454,6 +454,16 @@ os.replace()
 
 Stamps live **inside** the database. A filename is not evidence.
 
+**Built 2026-09-28 (Z0 step 4).** `graph_build` builds at
+`graph.sqlite.building-<pid>` and publishes through `scripts/sqlite_publish.py`
+(validate, fsync, chmod 0444, `os.replace`, fsync the directory) — the same
+protocol the search index now uses. `graph_meta` carries `schema_version`,
+`graph_generation_id`, `built_at`, `node_count`, `edge_count`;
+`built_from_revision` and `built_from_snapshot` are step 5 and are NOT written.
+Measured on a frozen corpus: content identical to the pre-change build. Found
+on the way: `edge_id` is `uuid4()` per build, so a rebuild renames every edge;
+content comparisons exclude it, and deterministic ids are filed for step 5/Z1.
+
 ### 4.5 The wiki regression must exceed "one edit pattern"
 
 Proving inode separation proves too little. The regression clones a wiki file
@@ -818,6 +828,26 @@ Z0 closes when all of these are demonstrated, each by a named test.
 18. **SUSPECT refusal.** A rebuild refuses a SUSPECT snapshot.
 19. **Claims guard.** Create an empty `claims.sqlite` with no adapter; capture
     fails closed.
+
+**Status 2026-09-28 (Z0 step 4).** Items 14 and 15 CLOSED.
+
+- 14: published stores are mode 0444; an in-place SQLite write raises
+  `attempt to write a readonly database` and a byte write raises
+  `PermissionError` (`test_gate_14_an_in_place_write_to_the_published_index_fails_loudly`,
+  and the graph and protocol equivalents). Bound: the owner can chmod it back
+  and root ignores it. This stops an accidental in-place write; it is not a
+  security boundary. `capture_search` refuses to hardlink a writable index.
+- 15: `sqlite_publish.assert_publishable` refuses any sidecar, any
+  journal_mode other than `delete`, any unreadable database, and (graph) any
+  `integrity_check` result other than `ok`, before the swap.
+
+Falsified: removing the chmod, the self-containment check, the
+validate-before-swap order or the fsyncs each turns named tests red (8 / 5 /
+18 / 3), all behavioural. The fsync tests prove the OS primitive is called,
+never that bytes survive a power cut.
+
+Still NOT BUILT: `built_from_revision`, `built_from_snapshot`,
+snapshot-backed rebuilds (step 5); coherence verification (step 6). Z0 OPEN.
 
 ### 10.4 Regression floor
 
