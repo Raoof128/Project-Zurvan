@@ -1,5 +1,13 @@
 ## Change Log
 
+### 2026-09-29 (Australia/Sydney) — overnight: another session's decision was mis-attributed, then hand-fixed outside the barrier
+**Raouf:**
+- **Scope:** records only, no code.
+- **What the ledger shows.** At 07:54:03 another session's `decision add` committed revision 259 with `store_project=zurvan`; the page (a client-project decision) was stamped with the active workspace because the command ran without `--project <client-slug>`. At 07:54:07 the page's `project:` field was corrected to the client's slug by a direct edit, outside the mutation barrier, so `knowledge status` reported unrecorded drift.
+- **How it is recorded.** The next managed write mints that edit as its own EXTERNAL_OBSERVED revision (§5.2) — the honest label for a change made outside the barrier. The page now names the client; the ledger row for revision 259 still says `zurvan`. History is not rewritten; this entry is the reconciliation of the two.
+- **The rule that would have avoided both:** `zurvan --project <slug> decision add …` or `decision add --project <slug>` (CLAUDE.md). Filed as a question: whether `decision add` should refuse, or warn, when run for a subject whose slug differs from the active workspace.
+- **Also:** the third 2026-09-28 session push (`9bd4637..5983d5f`) is recorded in 28h.
+
 ### 2026-09-28h (Australia/Sydney) — session record: two pushes close Z0; the write-back itself was bypassing the barrier
 **Raouf:**
 - **Scope:** `scripts/agent_workflow.py` (`agent_postedit` appends through `append_file_safely`), `tests/test_agent_workflow.py` (+1 barrier test; the old unit test moved into a store and an operation, assertions unchanged); records.
