@@ -637,38 +637,132 @@ def capture(root=None, label="measurement", deep=False, components=None,
                    lease_ttl_s, None)
 
 
-def sweep_abandoned(root=None) -> list:
-    """Remove snapshot directories owned by processes that are gone.
+KEEP = "KEEP"
+RECLAIM = "RECLAIM"
 
-    A SIGKILL cannot clean up after itself. Directories owned by a LIVE process
-    are left alone — that is a measurement in progress, and deleting its input
-    mid-run is exactly the failure this module exists to prevent.
 
-    Only the snapshot directory is removed. The link inside it is a second name
-    for the index inode, never the canonical name, so the sweep can never
-    delete the production index.
+def _lease_of(directory):
+    """The lease, or None when there is none or it does not parse. A torn
+    lease cannot come from this module (it is replaced atomically), so an
+    unparsable one is treated like a lease-less directory."""
+    try:
+        lease = json.loads((Path(directory) / LEASE_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return lease if isinstance(lease, dict) else None
+
+
+def _pid_rule(child) -> tuple:
+    """The pre-step-6 rule, kept for directories that cannot have a lease:
+    `.building-<pid>` (never published) and snapshots taken before leases
+    existed (amendment 9.5)."""
+    suffix = child.name.rsplit("-", 1)[-1]
+    if not suffix.isdigit():
+        return KEEP, "not a name this module writes; left alone"
+    pid = int(suffix)
+    if pid == os.getpid():
+        return KEEP, "owned by this process"
+    # kill(2): ESRCH means no such process; EPERM means it EXISTS and belongs
+    # to someone else. The pre-step-6 sweep caught both as OSError and so
+    # deleted snapshots owned by live processes it could not signal.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return RECLAIM, f"no lease; owner pid {pid} is gone"
+    except PermissionError:
+        return KEEP, f"no lease; pid {pid} exists (another user's process)"
+    except OSError as exc:
+        return KEEP, f"no lease; liveness of pid {pid} unknown ({exc})"
+    return KEEP, f"no lease; owner pid {pid} is running"
+
+
+def gc_verdict(child, now=None) -> tuple:
+    """(KEEP|RECLAIM, reason) for one entry under data/snapshots (design §8).
+
+    A lease is reclaimed only when it has EXPIRED and its owner is provably
+    DEAD. An expired lease on a live process is a long measurement that has
+    not heartbeated; a dead owner with a fresh lease is a shell still using
+    what a short-lived capturer handed it (check.sh gate 6). An owner whose
+    liveness cannot be established is never reclaimed on a guess.
     """
+    from scripts import knowledge_revision as kr
+    child = Path(child)
+    if ".building-" in child.name:
+        return _pid_rule(child)
+    lease = _lease_of(child)
+    if lease is None:
+        return _pid_rule(child)
+    now = now or datetime.now(timezone.utc)
+    try:
+        beat = datetime.fromisoformat(lease["last_heartbeat"])
+        ttl = float(lease["ttl_s"])
+    except (KeyError, TypeError, ValueError):
+        return KEEP, "lease has no usable heartbeat; not reclaimed on a guess"
+    expired = (now - beat).total_seconds() > ttl
+    owner = kr.process_state(lease.get("owner_pid"),
+                             lease.get("process_start_identity"))
+    if owner == kr.ALIVE:
+        return KEEP, "owner alive"
+    if not expired:
+        return KEEP, f"lease unexpired (owner {owner})"
+    if owner != kr.DEAD:
+        return KEEP, "lease expired but owner liveness UNKNOWN; not reclaimed on a guess"
+    return RECLAIM, "lease expired and owner dead"
+
+
+def collect_garbage(root=None, dry_run=False, now=None) -> list:
+    """Remove every snapshot `gc_verdict` reclaims. Only the snapshot
+    directory is removed: a search link inside it is a second name for the
+    index inode, never the canonical name, so GC cannot delete the production
+    index."""
     directory = snapshots_dir(root)
     if not directory.is_dir():
         return []
-    swept = []
+    reclaimed = []
     for child in sorted(directory.iterdir()):
         if not child.is_dir():
             continue
-        suffix = child.name.rsplit("-", 1)[-1]
-        if not suffix.isdigit():
-            continue                       # not ours; leave it rather than guess
-        pid = int(suffix)
-        if pid == os.getpid():
+        verdict, _ = gc_verdict(child, now)
+        if verdict != RECLAIM:
             continue
+        if not dry_run:
+            shutil.rmtree(child, ignore_errors=True)
+        reclaimed.append(str(child))
+    return reclaimed
+
+
+def sweep_abandoned(root=None) -> list:
+    """Since Z0 step 6 the sweep IS garbage collection. `check.sh` calls
+    `--sweep` at start; a SIGKILLed gate's snapshot is now reclaimed once
+    its lease expires, not the moment its capturing process is gone."""
+    return collect_garbage(root)
+
+
+def list_snapshots(root=None, now=None) -> list:
+    directory = snapshots_dir(root)
+    if not directory.is_dir():
+        return []
+    rows = []
+    for child in sorted(directory.iterdir()):
+        if not child.is_dir():
+            continue
+        lease = _lease_of(child) or {}
         try:
-            os.kill(pid, 0)
-            continue                       # a live measurement owns this
-        except (OSError, ProcessLookupError):
-            pass
-        shutil.rmtree(child, ignore_errors=True)
-        swept.append(str(child))
-    return swept
+            manifest = json.loads((child / "manifest.json").read_text(encoding="utf-8"))
+            coherence = manifest.get("coherence") or {}
+        except (OSError, ValueError):
+            coherence = {}
+        verdict, reason = gc_verdict(child, now)
+        rows.append({
+            "snapshot_id": child.name,
+            "purpose": lease.get("purpose"),
+            "knowledge_revision": lease.get("knowledge_revision"),
+            "coherence": coherence.get("status", "UNVERIFIED"),
+            "owner_pid": lease.get("owner_pid"),
+            "gc": verdict,
+            "reason": reason,
+        })
+    return rows
 
 
 if __name__ == "__main__":

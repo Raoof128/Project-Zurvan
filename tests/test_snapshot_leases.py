@@ -79,3 +79,101 @@ def test_gate_19_an_unadapted_claims_ledger_fails_capture_closed(store):
         _capture(store)
     snapshots = ms.snapshots_dir(store)
     assert not snapshots.exists() or list(snapshots.iterdir()) == []
+
+
+def test_gc_reclaims_an_expired_lease_whose_owner_is_dead(store):
+    s = _capture(store)
+    _rewrite_lease(s, owner_pid=_dead_pid(), process_start_identity="gone",
+                   last_heartbeat=_ago(7200))
+    assert ms.collect_garbage(store) == [str(s.path)]
+    assert not s.path.exists()
+
+
+def test_gc_keeps_a_dead_owners_unexpired_lease(store):
+    """Design §8: crash cleanup must not delete a snapshot because a process
+    vanished moments ago."""
+    s = _capture(store)
+    _rewrite_lease(s, owner_pid=_dead_pid(), process_start_identity="gone")
+    assert ms.collect_garbage(store) == []
+    assert s.path.exists()
+    s.release()
+
+
+def test_gc_keeps_an_expired_lease_whose_owner_is_alive(store):
+    """A long measurement that has not heartbeated is still a measurement."""
+    with _capture(store) as s:
+        _rewrite_lease(s, last_heartbeat=_ago(7200))
+        assert ms.collect_garbage(store) == []
+        assert s.path.exists()
+
+
+def test_gc_never_reclaims_when_liveness_is_unknown(store, monkeypatch):
+    s = _capture(store)
+    _rewrite_lease(s, last_heartbeat=_ago(7200))
+    monkeypatch.setattr(kr, "process_state", lambda pid, identity: kr.UNKNOWN)
+    assert ms.collect_garbage(store) == []
+    s.release()
+
+
+def test_gc_dry_run_reports_without_deleting(store):
+    s = _capture(store)
+    _rewrite_lease(s, owner_pid=_dead_pid(), process_start_identity="gone",
+                   last_heartbeat=_ago(7200))
+    assert ms.collect_garbage(store, dry_run=True) == [str(s.path)]
+    assert s.path.exists()
+    s.release()
+
+
+def test_a_corrupt_lease_falls_back_to_the_pid_rule_and_never_crashes(store):
+    s = _capture(store)
+    s.lease_path.write_text("{not json")
+    [row] = ms.list_snapshots(store)
+    assert row["gc"] == ms.KEEP            # the name's pid is this live process
+    assert row["purpose"] is None
+    s.release()
+
+
+def test_a_dead_builders_partial_directory_is_reclaimed(store):
+    ghost = ms.snapshots_dir(store) / f"t-20260101T000000Z-1.building-{_dead_pid()}"
+    ghost.mkdir(parents=True)
+    assert str(ghost) in ms.collect_garbage(store)
+    assert not ghost.exists()
+
+
+def test_the_pid_rule_keeps_a_process_it_cannot_signal(store):
+    """kill(2): EPERM means the process EXISTS. Before step 6 the sweep read
+    any OSError as death. pid 1 (launchd/init) is another user's process
+    unless the suite runs as root, and then it is signalable and kept anyway."""
+    ghost = ms.snapshots_dir(store) / "t-20260101T000000Z-1"
+    ghost.mkdir(parents=True)
+    assert ms.collect_garbage(store) == []
+    assert ghost.exists()
+
+
+def test_a_path_only_snapshot_survives_its_capturing_process(store):
+    """Review focus 5: check.sh gate 6 captures in a short-lived process and
+    measures in the shell. A concurrent check.sh's --sweep must not delete it,
+    and the pid rule alone would have."""
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from scripts import measurement_snapshot as ms\n"
+         f"s = ms.capture(root={str(store)!r}, label='check', components=('wiki',))\n"
+         "print(s.path)\n"],
+        capture_output=True, text=True, env={**os.environ, "PYTHONPATH": "."})
+    assert out.returncode == 0, out.stderr
+    from pathlib import Path
+    path = Path(out.stdout.strip())
+    assert ms.sweep_abandoned(store) == []
+    assert path.exists()
+    lease = json.loads((path / ms.LEASE_NAME).read_text())
+    lease["last_heartbeat"] = _ago(7200)
+    (path / ms.LEASE_NAME).write_text(json.dumps(lease))
+    assert ms.sweep_abandoned(store) == [str(path)]
+
+
+def test_list_snapshots_reports_purpose_revision_and_gc_verdict(store):
+    with _capture(store) as s:
+        [row] = ms.list_snapshots(store)
+        assert row["snapshot_id"] == s.snapshot_id
+        assert (row["purpose"], row["coherence"], row["gc"]) == (
+            "legacy", "UNVERIFIED", ms.KEEP)
