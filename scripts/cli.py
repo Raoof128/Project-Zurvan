@@ -1137,6 +1137,11 @@ def _main():
                           "mutation barrier (an editor, or a writer that bypasses "
                           "safe_write); the next write records it as "
                           "EXTERNAL_OBSERVED")
+            from scripts import derived_health as dh
+            for kind in ("search", "graph"):
+                state, built, _, reason = dh.store_health(kind)
+                line = f"{state}" + (f" (built from {built})" if built else "")
+                print(f"{kind + ':':11} {line}" + (f" — {reason}" if reason else ""))
         elif args.action == "bootstrap":
             print(f"bootstrapped at revision {kr.bootstrap(actor='cli')}")
         elif args.action == "callers":
