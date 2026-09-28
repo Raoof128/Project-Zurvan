@@ -201,6 +201,9 @@ echo ""
 
 echo "[13/23] Running Doctor Check..."
 PYTHONPATH=. python scripts/cli.py doctor
+# Z0 gate item 3: the implicit-mutation inventory is a gated query, not an
+# assertion. A production write outside an operation reopens it and fails here.
+PYTHONPATH=. python scripts/cli.py knowledge callers --strict
 echo "✅ Doctor check passed."
 echo ""
 

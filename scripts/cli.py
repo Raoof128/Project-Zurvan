@@ -533,8 +533,11 @@ def _main():
     knowledge_sub.add_parser("doctor", help="Report orphaned mutations")
     knowledge_sub.add_parser(
         "bootstrap", help="Record this store's manifest as the drift baseline")
-    knowledge_sub.add_parser(
+    k_callers = knowledge_sub.add_parser(
         "callers", help="Unresolved implicit callers still to be migrated")
+    k_callers.add_argument("--strict", action="store_true",
+                           help="exit 1 while any unresolved implicit caller "
+                                "exists (Z0 gate item 3)")
     k_rec = knowledge_sub.add_parser("reconcile", help="Return the store to CLEAN")
     k_rec.add_argument("--accept", action="store_true",
                        help="record an explicit decision for an operation whose "
@@ -1117,7 +1120,7 @@ def _main():
             try:
                 kr.current()
             except kr.LedgerError as exc:
-                print(f"no ledger yet: {exc}")
+                print(f"no ledger yet: nothing recorded ({exc})")
                 return
         if args.action == "snapshots":
             from scripts import measurement_snapshot as ms
@@ -1173,6 +1176,10 @@ def _main():
                 print("No unresolved implicit callers.")
             for caller, count in sorted(callers.items(), key=lambda kv: -kv[1]):
                 print(f"{count:6}  {caller}")
+            if callers and args.strict:
+                print(f"{len(callers)} unresolved implicit caller(s): Z0 gate "
+                      "item 3 requires none")
+                sys.exit(1)
         elif args.action == "doctor":
             reports = krec.inspect()
             rev = kr.current()
