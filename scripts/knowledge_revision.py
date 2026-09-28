@@ -61,6 +61,11 @@ class NestedMutationError(LedgerError):
     """A second operation was opened inside one that already owns this store."""
 
 
+class DriftUnobservable(LedgerError):
+    """Drift may exist but cannot be attributed right now: the store is still
+    changing, another operation is in flight, or the ledger moved."""
+
+
 class KnowledgeOperationRequired(LedgerError):
     """An authoritative write was attempted with no operation above it.
 
@@ -260,6 +265,13 @@ def ensure_schema(root=None) -> None:
                 manifest_after    TEXT NOT NULL,
                 from_revision     INTEGER NOT NULL,
                 to_revision       INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS external_observations (
+                revision        INTEGER PRIMARY KEY,
+                trigger         TEXT NOT NULL,
+                manifest_before TEXT NOT NULL,
+                manifest_after  TEXT NOT NULL,
+                observed_at     TEXT NOT NULL
             );
             """
         )
@@ -1020,7 +1032,7 @@ def bootstrap(root=None, actor="bootstrap") -> int:
     return new_revision
 
 
-def observe_external_drift(root=None):
+def observe_external_drift(root=None, trigger="manual"):
     """Detect a completed unmanaged edit and record it, in one operation.
 
     Two different questions, both required:
@@ -1054,7 +1066,7 @@ def observe_external_drift(root=None):
         return None
     second = authoritative_manifest(base)
     if first != second:
-        raise LedgerError("the store is still changing; retry when quiet")
+        raise DriftUnobservable("the store is still changing; retry when quiet")
 
     conn = _connect(base)
     try:
@@ -1062,14 +1074,22 @@ def observe_external_drift(root=None):
         try:
             if conn.execute("SELECT COUNT(*) FROM mutations WHERE state = ?",
                             (ACTIVE,)).fetchone()[0]:
-                raise LedgerError("a mutation is in flight; not external drift")
+                raise DriftUnobservable("a mutation is in flight; not external drift")
             rev, recorded, st = conn.execute(
                 "SELECT current_revision, manifest_digest, state"
                 " FROM knowledge_state WHERE id = 1").fetchone()
             if st != CLEAN or recorded != state.manifest_digest:
-                raise LedgerError("the ledger moved during observation; retry")
+                raise DriftUnobservable("the ledger moved during observation; retry")
             new_revision = rev + 1
             _set_revision(conn, new_revision, EXTERNAL_OBSERVED, second)
+            # Recorded in the same transaction: the managed commit that usually
+            # follows overwrites `atomicity`, and without this row the
+            # observation would leave no trace (2026-09-28).
+            conn.execute(
+                "INSERT INTO external_observations (revision, trigger,"
+                " manifest_before, manifest_after, observed_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (new_revision, trigger, recorded, second, _now()))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -1077,6 +1097,19 @@ def observe_external_drift(root=None):
     finally:
         conn.close()
     return new_revision
+
+
+def external_observations(root=None) -> list:
+    """Every minted EXTERNAL_OBSERVED revision, oldest first. The record
+    outlives the managed commit that follows, which overwrites atomicity."""
+    conn = _connect_ro(root)
+    try:
+        return conn.execute(
+            "SELECT revision, trigger, manifest_before, manifest_after,"
+            " observed_at FROM external_observations ORDER BY revision"
+        ).fetchall()
+    finally:
+        conn.close()
 
 
 def detect_orphans(root=None) -> list:
