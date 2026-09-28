@@ -350,3 +350,26 @@ def test_gate_4_a_killed_writer_blocks_snapshots_not_writes_until_reconciled(sto
     assert result["status"] == "CLEAN"
     with bsn.capture_coherent(store, purpose="measurement", required=("wiki",)) as bs:
         assert bs.revision == kr.current(store).revision
+
+
+def test_gate_7_a_kill_between_the_bytes_and_the_stamp_is_investigable(store):
+    """§10.1 item 7 with a REAL kill at exactly that point: the file is on
+    disk, `completed_paths` never received it, and `planned_paths` still names
+    it. Before this the item was proven only against a fabricated orphan row
+    (closure audit, 2026-09-28)."""
+    import signal
+    target = store / "wiki" / "torn.md"
+    child = subprocess.run([sys.executable, "-c", (
+        "import os, signal\n"
+        "from scripts import knowledge_revision as kr\n"
+        "from scripts.safe_write import write_file_safely\n"
+        "kr.complete_write = lambda *a, **k: os.kill(os.getpid(), signal.SIGKILL)\n"
+        f"with kr.operation(writer='doomed', root={str(store)!r}):\n"
+        f"    write_file_safely({str(target)!r}, 'x')\n")],
+        env={**os.environ, "PYTHONPATH": "."})
+    assert child.returncode == -signal.SIGKILL
+    assert target.read_text() == "x"                        # the bytes landed
+    [orphan] = kr.detect_orphans(store)
+    assert [Path(p).resolve() for p in orphan.planned_paths] == [target.resolve()]
+    assert orphan.completed_paths == []
+    assert kr.current(store).state == kr.SUSPECT

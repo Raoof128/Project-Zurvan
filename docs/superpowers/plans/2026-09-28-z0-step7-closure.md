@@ -255,7 +255,7 @@ git commit -m "zurvan: Z0 gate item 4 end to end with a real kill"
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md` (a new §10.5 after the §10.4 block)
-- Test: `tests/test_z0_closure.py`
+- Test: `tests/test_z0_closure.py`, `tests/test_coherent_capture.py` (item 7's real-kill test, added during execution: the audit's candidate used a fabricated orphan row)
 
 **Interfaces:**
 - Produces: a table in §10.5 with rows `| <item> | <what> | `<test name>`[, `<test name>`…] |`. `test_every_gate_item_names_a_test_that_exists` parses it.
@@ -273,14 +273,14 @@ def _matrix():
     for line in section.splitlines():
         m = re.match(r"^\|\s*(\d+)\s*\|[^|]*\|(.*)\|\s*$", line)
         if m:
-            rows[int(m.group(1))] = re.findall(r"`(test_[a-z0-9_]+)`", m.group(2))
+            rows[int(m.group(1))] = re.findall(r"`(test_[A-Za-z0-9_]+)`", m.group(2))
     return rows
 
 
 def _defined_tests():
     names = set()
     for path in (REPO / "tests").glob("test_*.py"):
-        names.update(re.findall(r"^def (test_[a-z0-9_]+)\(", path.read_text(encoding="utf-8"), re.M))
+        names.update(re.findall(r"^def (test_[A-Za-z0-9_]+)\(", path.read_text(encoding="utf-8"), re.M))
     return names
 
 
@@ -302,7 +302,7 @@ Item 20 is the regression floor, which is demonstrated by running pytest, `check
 - [ ] **Step 2: Run it and watch it fail**
 
 ```bash
-PYTHONPATH=. python -m pytest -q tests/test_z0_closure.py -k matrix
+PYTHONPATH=. python -m pytest -q tests/test_z0_closure.py -k every_gate_item
 ```
 
 Expected: FAIL with `IndexError: list index out of range`, because there is no `### 10.5 Closure matrix` section yet.
@@ -324,7 +324,7 @@ item.
 | 4 | Orphan: SUSPECT, snapshots refused, writes continue, propagates, only reconcile clears | `test_gate_4_a_killed_writer_blocks_snapshots_not_writes_until_reconciled` |
 | 5 | Reconcile reaches CLEAN without a rebuild; a rebuild then makes stores CURRENT | `test_an_accepted_reconciliation_clears_an_incomplete_orphan`, `test_gate_5_reconcile_then_rebuild_is_current` |
 | 6 | Reconcile stops for review when a planned path never completed | `test_an_incomplete_operation_stops_for_review`, `test_the_review_report_names_the_path_that_never_completed` |
-| 7 | Planned vs completed: investigable after a kill before stamping | `test_a_crash_after_publishing_but_before_completing_still_orphans`, `test_an_orphan_names_the_path_that_never_completed` |
+| 7 | Planned vs completed: investigable after a kill before stamping | `test_gate_7_a_kill_between_the_bytes_and_the_stamp_is_investigable`, `test_a_crash_after_publishing_but_before_completing_still_orphans`, `test_an_orphan_names_the_path_that_never_completed` |
 | 8 | Coherence refusal names the component and the gap | `test_gate_8_disagreeing_components_fail_closed_naming_the_gap` |
 | 9 | No deadlock from a stale index | `test_gate_9_no_deadlock_from_a_stale_index` |
 | 10 | A/B isolation | `test_gate_10_a_measurement_keeps_resolving_to_E_while_live_moves_to_E1` |
@@ -353,7 +353,7 @@ Expected: each body asserts the behaviour in its row. If one does not, do not re
 ```bash
 PYTHONPATH=. python -m pytest -q tests/test_z0_closure.py
 sed -i '' 's/`test_gate_17_a_rebuild_stamps_the_revision_it_read`/`test_gate_17_renamed`/' docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md
-PYTHONPATH=. python -m pytest -q tests/test_z0_closure.py -k matrix 2>&1 | grep -E "17|failed"
+PYTHONPATH=. python -m pytest -q tests/test_z0_closure.py -k every_gate_item 2>&1 | grep -E "17|failed"
 git checkout docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md
 ```
 

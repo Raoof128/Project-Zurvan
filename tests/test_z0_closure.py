@@ -69,3 +69,37 @@ def test_callers_without_strict_still_reports_and_exits_zero(store):
 def test_check_sh_gates_the_inventory():
     text = (REPO / "scripts" / "check.sh").read_text()
     assert "knowledge callers --strict" in text
+
+
+SPEC = REPO / "docs" / "superpowers" / "specs" / "2026-09-18-z0-coherent-snapshots-design.md"
+
+
+def _matrix():
+    text = SPEC.read_text(encoding="utf-8")
+    section = text.split("### 10.5 Closure matrix", 1)[1].split("\n## ", 1)[0]
+    rows = {}
+    for line in section.splitlines():
+        m = re.match(r"^\|\s*(\d+)\s*\|[^|]*\|(.*)\|\s*$", line)
+        if m:
+            rows[int(m.group(1))] = re.findall(r"`(test_[A-Za-z0-9_]+)`", m.group(2))
+    return rows
+
+
+def _defined_tests():
+    names = set()
+    for path in (REPO / "tests").glob("test_*.py"):
+        names.update(re.findall(r"^def (test_[A-Za-z0-9_]+)\(", path.read_text(encoding="utf-8"), re.M))
+    return names
+
+
+def test_every_gate_item_names_a_test_that_exists():
+    """A renamed test must not silently unprove a gate item."""
+    rows = _matrix()
+    assert sorted(rows) == list(range(1, 21)), f"matrix covers {sorted(rows)}"
+    defined = _defined_tests()
+    missing = {item: [t for t in tests if t not in defined]
+               for item, tests in rows.items()}
+    missing = {k: v for k, v in missing.items() if v}
+    empty = [item for item, tests in rows.items() if not tests and item != 20]
+    assert not missing, f"matrix names tests that do not exist: {missing}"
+    assert not empty, f"items with no named test: {empty}"
