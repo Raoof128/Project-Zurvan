@@ -116,7 +116,16 @@ def test_a_failed_build_leaves_the_published_graph_untouched(tree, monkeypatch):
     gb.build_graph(db)
     before = _bytes(db)
 
-    def disk_full(*a, **k):
+    def disk_full(build_path, nodes_dict, edges_list):
+        # A real mid-write failure: the build file exists and a write
+        # transaction is open when the error lands. Replacing _write_graph
+        # without creating the file made the cleanup assertion vacuous — the
+        # final review showed the test passing with the cleanup removed.
+        conn = sqlite3.connect(build_path)
+        conn.execute("CREATE TABLE half (x)")
+        conn.execute("BEGIN")
+        conn.execute("INSERT INTO half VALUES (1)")
+        assert os.path.exists(build_path)
         raise OSError(28, "No space left on device (injected)")
     monkeypatch.setattr(gb, "_write_graph", disk_full)
     (root / "wiki" / "c.md").write_text("---\ntitle: C\n---\nnew\n")
@@ -124,7 +133,8 @@ def test_a_failed_build_leaves_the_published_graph_untouched(tree, monkeypatch):
     with pytest.raises(OSError):
         gb.build_graph(db)
     assert _bytes(db) == before
-    assert not os.path.exists(sp.build_path_for(db))
+    leftovers = [p for p in os.listdir(os.path.dirname(db)) if sp.BUILD_SUFFIX in p]
+    assert leftovers == []
 
 
 def test_a_second_concurrent_build_refuses(tree):
@@ -181,3 +191,37 @@ def test_an_in_place_write_to_the_published_graph_fails_loudly(tree):
             conn.commit()
     finally:
         conn.close()
+
+
+def test_a_build_still_collecting_already_blocks_a_second(tree, tmp_path):
+    """The final review found a ~3 s window on the live corpus: the build file
+    was created only in `_write_graph`, after `_collect_graph` had read every
+    page, so a second build started meanwhile passed the sweep. The child
+    below holds itself inside `_collect_graph`; the parent must be refused."""
+    import time
+    root, db = tree
+    marker = tmp_path / "collecting"
+    child = (
+        "import sys, time\n"
+        f"sys.path.insert(0, {str(REPO)!r})\n"
+        "import scripts.graph_build as gb\n"
+        f"gb.PROJECT_ROOT = {str(root)!r}\n"
+        "def slow_collect():\n"
+        f"    open({str(marker)!r}, 'w').close()\n"
+        "    time.sleep(30)\n"
+        "    return {}, []\n"
+        "gb._collect_graph = slow_collect\n"
+        f"gb.build_graph({db!r})\n"
+    )
+    proc = subprocess.Popen([sys.executable, "-c", child])
+    try:
+        deadline = time.monotonic() + 20
+        while not marker.exists():
+            assert proc.poll() is None, "child exited before collecting"
+            assert time.monotonic() < deadline, "child never started collecting"
+            time.sleep(0.05)
+        with pytest.raises(RuntimeError, match=str(proc.pid)):
+            gb.build_graph(db)
+    finally:
+        proc.kill()
+        proc.wait()

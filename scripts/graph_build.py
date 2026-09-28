@@ -232,6 +232,11 @@ def build_graph(db_path: str = DB_PATH):
     build_path = sp.build_path_for(db_path)
     sp.discard_build(build_path)
     try:
+        # Claim the build path BEFORE collecting: the sweep finds concurrent
+        # builders by their build file, and collecting the live corpus takes
+        # ~3 s. Created only in `_write_graph`, a second build started in that
+        # window passed the sweep (found by the final review, 2026-09-28).
+        open(build_path, "xb").close()
         nodes_dict, edges_list = _collect_graph()
         _write_graph(build_path, nodes_dict, edges_list)
         sp.publish(build_path, db_path, integrity=True)
