@@ -1,5 +1,16 @@
 ## Change Log
 
+### 2026-09-28h (Australia/Sydney) — session record: two pushes close Z0; the write-back itself was bypassing the barrier
+**Raouf:**
+- **Scope:** `scripts/agent_workflow.py` (`agent_postedit` appends through `append_file_safely`), `tests/test_agent_workflow.py` (+1 barrier test; the old unit test moved into a store and an operation, assertions unchanged); records.
+- **Pushes, each at Raouf's explicit request with `ZURVAN_ALLOW_PUSH=1` for that push only:** `c72479c..fbf7139` (11 commits: the session record, the Z0 step-6 plan and its gauntlet, Z0 step 6) and `fbf7139..9bd4637` (6 commits: Z0 step 7, closure). Both fast-forwards of the exact tree that passed the full suite; `public_repo_guard` passed before each.
+- **Found while writing back: `zurvan agent postedit` bypassed the mutation barrier.** It appended to `wiki/log.md` with a raw `open(..., "a")`, so the write-back CLAUDE.md prescribes at the end of every session left `knowledge status` reporting unrecorded drift (revision 250), which the next managed write mints as EXTERNAL_OBSERVED — a Zurvan writer recorded as if an editor had touched the wiki. Now one MANAGED revision with no drift, by a test through the real CLI (red before the fix). The drift already on the live store is recorded honestly by the next write as EXTERNAL_OBSERVED; it is not rewritten.
+- **Same bypass, filed not fixed:** `zurvan session start|close` (`scripts/session.py` writes a session page and `wiki/log.md` raw) and `scripts/rebuild_index.py` (`wiki/index.md`) — neither activates eagerly the way ingest and extract do (28c).
+- **Boundary is not configured on this machine.** `~/.zurvan/boundary` is absent, so `check.sh` gate 0 and the pre-push scan both report NOT CONFIGURED; the two pushes were checked by `public_repo_guard` only. Earlier sessions ran it (27/27 red-team). Filed.
+- **A process lesson, saved to memory:** a scripted anchor edit duplicated ~590 lines of `cli.py` while every test stayed green; only `git diff --stat` caught it. Compare the diff size with the plan before committing any scripted edit.
+- **Verification.** pytest **1345 passed / 4 skipped / 0 failed**; `public_repo_guard` passed; `git diff --check` clean.
+- **Next.** Z1 (retire the burned retrieval instrument; content-addressed edge ids); route `session` and `rebuild_index` through the barrier; re-configure Boundary; the deferred minors in 28f and 28g; the public mirror (repository name still to be chosen).
+
 ### 2026-09-28g (Australia/Sydney) — Z0 CLOSED: all 20 §10 gate items demonstrated by named tests, enforced by a matrix that cannot rot
 **Raouf:**
 - **Scope:** `scripts/cli.py` (`zurvan knowledge callers --strict`; a store with no ledger says "nothing recorded"), `scripts/check.sh` (`[13/23]` runs it), new `tests/test_z0_closure.py` (the gated inventory, and `test_every_gate_item_names_a_test_that_exists`, which fails if any test the matrix names stops existing), `tests/test_coherent_capture.py` (+8: real-kill gates 4, 5, 7, 18; real-write gate 11 ×2; STALE clauses of 12 and 17), spec §10.5 closure matrix. Plan `docs/superpowers/plans/2026-09-28-z0-step7-closure.md`.
