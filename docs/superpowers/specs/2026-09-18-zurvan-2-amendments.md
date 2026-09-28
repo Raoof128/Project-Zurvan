@@ -454,7 +454,7 @@ Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.
 ## 12. Amendment 10 — Z1 split into Z1a/Z1b; the holdout seal is OS-enforced
 
 **Date:** 2026-09-29. **Amends:** §26 Z1 build list, §9.2 holdout protections (mechanism only).
-**Design:** [2026-09-29-z1-observability-sealed-eval-design.md](2026-09-29-z1-observability-sealed-eval-design.md). Status: DRAFT until Raouf approves it.
+**Design:** [2026-09-29-z1-observability-sealed-eval-design.md](2026-09-29-z1-observability-sealed-eval-design.md). Status: Z1a approved; Z1b approved at revision 2.
 
 - Z1 is built as **Z1a** (observability: trace modes, stage timings, trace
   permissions/retention, rank movers, retirement of the burned 50-item
@@ -464,6 +464,13 @@ Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.
   by a separate OS identity, a pinned broker reachable through one sudoers
   command, a sandboxed candidate, and an allowlist serializer — not by prompt
   or by subagent context isolation.
+- Revision 2 (Raouf's review, 2026-09-29): candidate code runs as a third
+  identity (`zurvancandidate`) that cannot read the sets, so the deprecated
+  `sandbox-exec` is defence in depth only; the broker is root-owned and pinned
+  by sudoers SHA-256 digest; the key is excluded from Time Machine; the
+  aggregate-result covert channel is stated and bounded; canonical targets
+  are page/source locators with chunk ids as snapshot aliases; the reviewer
+  stays Anthropic-only (no new corpus egress).
 - The holdout is AI-authored inside that identity (author, reviewer and
   independent re-solver as separate clean sessions), per Raouf 2026-09-29.
 - Policy in §9 is unchanged. This amendment strengthens how §9.2 is enforced
