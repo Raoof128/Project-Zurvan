@@ -299,13 +299,12 @@ def capture_wiki(root, into) -> Component:
 
 
 def capture_graph(root, into) -> Component:
-    """Freeze the graph by CLONE, never by hardlink, under a read lock.
+    """Freeze the graph by CLONE, under a read lock.
 
-    `scripts/graph_build.py:186` mutates the canonical inode in place, so a
-    hardlink would make snapshot and live store the same bytes — the illegal
-    case of design §4.2. Step 4 makes the graph atomic; until then the clone is
-    what makes capturing it legal at all, and the read lock is what makes the
-    cloned bytes coherent rather than merely separate.
+    Since 2026-09-28 the graph is published atomically and read-only (Z0 step
+    4), so a hardlink would now be legal too. The clone stays: it costs 0.33 ms
+    on the 13 MB graph, and a capture path that already works is not changed
+    inside the step that made the alternative possible.
     """
     from scripts.immutable_bytes import ImmutableBytesError, clone_file
     source = Path(root) / "data" / "graph.sqlite"

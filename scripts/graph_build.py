@@ -132,9 +132,9 @@ def extract_edges(path: str, content: str, nodes_dict: Dict[str, Dict]) -> List[
                 
     return edges
 
-def build_graph(db_path: str = DB_PATH):
-    setup_graph_schema(db_path)
-    
+def _collect_graph():
+    """(nodes_dict, edges_list) for the corpus under PROJECT_ROOT. The logic is
+    the pre-2026-09-28 body of build_graph, moved, not changed."""
     target_dirs = ['wiki', 'docs']
     target_files = ['AGENTS.md', 'CHANGELOG.md', 'README.md']
     # 'traces' holds derived, self-referential trace replay mirrors — the search
@@ -182,30 +182,66 @@ def build_graph(db_path: str = DB_PATH):
         except Exception as e:
             print(f"Warning: Edge extraction failed for {p}: {e}")
 
-    # Write to DB
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM nodes")
-    cursor.execute("DELETE FROM edges")
-    
-    for n in nodes_dict.values():
-        cursor.execute("""
-            INSERT INTO nodes (node_id, node_type, title, path, slug, content_hash, tags, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (n['node_id'], n['node_type'], n['title'], n['path'], n['slug'], n['content_hash'], n['tags'], n['created_at'], n['updated_at']))
-        
-    for e in edges_list:
-        cursor.execute("""
-            INSERT INTO edges (edge_id, from_node_id, to_node_id, edge_type, evidence, source_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (e['edge_id'], e['from_node_id'], e['to_node_id'], e['edge_type'], e['evidence'], e['source_path'], e['created_at']))
-        
-    conn.commit()
-    conn.close()
-    
+    return nodes_dict, edges_list
+
+
+def _write_graph(build_path, nodes_dict, edges_list) -> None:
+    import uuid
+    from datetime import datetime, timezone
+    from scripts.graph_schema import GRAPH_SCHEMA_VERSION
+    setup_graph_schema(build_path)
+    conn = sqlite3.connect(build_path)
+    try:
+        cursor = conn.cursor()
+        for n in nodes_dict.values():
+            cursor.execute("""
+                INSERT INTO nodes (node_id, node_type, title, path, slug, content_hash, tags, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (n['node_id'], n['node_type'], n['title'], n['path'], n['slug'], n['content_hash'], n['tags'], n['created_at'], n['updated_at']))
+        for e in edges_list:
+            cursor.execute("""
+                INSERT INTO edges (edge_id, from_node_id, to_node_id, edge_type, evidence, source_path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (e['edge_id'], e['from_node_id'], e['to_node_id'], e['edge_type'], e['evidence'], e['source_path'], e['created_at']))
+        cursor.executemany("INSERT INTO graph_meta (key, value) VALUES (?, ?)", [
+            ("schema_version", str(GRAPH_SCHEMA_VERSION)),
+            ("graph_generation_id", uuid.uuid4().hex),
+            ("built_at", datetime.now(timezone.utc).isoformat()),
+            ("node_count", str(len(nodes_dict))),
+            ("edge_count", str(len(edges_list))),
+        ])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def build_graph(db_path: str = DB_PATH):
+    """Build the graph beside the canonical file and publish it atomically.
+
+    Until 2026-09-28 this DELETEd and re-INSERTed into the canonical file, so
+    a reader mid-build saw a partial graph and a hardlink to it was illegal.
+    """
+    from scripts import sqlite_publish as sp
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    live = sp.sweep_abandoned_builds(db_path)
+    if live:
+        raise RuntimeError(
+            f"another graph build is already running (pid {sorted(live)}) for "
+            f"{os.path.basename(db_path)}. Wait for it, or kill it and remove "
+            "its .building-<pid> file.")
+    build_path = sp.build_path_for(db_path)
+    sp.discard_build(build_path)
+    try:
+        nodes_dict, edges_list = _collect_graph()
+        _write_graph(build_path, nodes_dict, edges_list)
+        sp.publish(build_path, db_path, integrity=True)
+    finally:
+        sp.discard_build(build_path)   # absent after a successful replace
+
     print(f"Graph built successfully.")
     print(f"Nodes: {len(nodes_dict)}")
     print(f"Edges: {len(edges_list)}")
+
 
 if __name__ == "__main__":
     build_graph()
