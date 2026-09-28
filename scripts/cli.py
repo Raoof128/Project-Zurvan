@@ -541,6 +541,13 @@ def _main():
                             "completeness cannot be established mechanically")
     k_rec.add_argument("--actor", default="local:unknown")
     k_rec.add_argument("--reason", default=None)
+    # Design §8 names `zurvan snapshot list|gc`; that is the release-archive
+    # command above, so these live here (amendment 9.1).
+    knowledge_sub.add_parser(
+        "snapshots", help="Measurement and rebuild snapshots, their leases and GC verdicts")
+    k_gc = knowledge_sub.add_parser(
+        "gc", help="Reclaim snapshots whose lease expired AND whose owner is dead")
+    k_gc.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args(args_list)
     
@@ -1112,6 +1119,22 @@ def _main():
             except kr.LedgerError as exc:
                 print(f"no ledger yet: {exc}")
                 return
+        if args.action == "snapshots":
+            from scripts import measurement_snapshot as ms
+            rows = ms.list_snapshots()
+            if not rows:
+                print("no snapshots")
+                return
+            for r in rows:
+                print(f"{r['snapshot_id']}  purpose={r['purpose']}  "
+                      f"revision={r['knowledge_revision']}  coherence={r['coherence']}  "
+                      f"gc={r['gc']} ({r['reason']})")
+            return
+        if args.action == "gc":
+            from scripts import measurement_snapshot as ms
+            for path in ms.collect_garbage(dry_run=args.dry_run):
+                print(("would reclaim " if args.dry_run else "reclaimed ") + path)
+            return
         if args.action == "status":
             rev = kr.current()
             print(f"revision:   {rev.revision}")

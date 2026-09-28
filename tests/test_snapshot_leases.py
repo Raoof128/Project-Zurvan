@@ -177,3 +177,41 @@ def test_list_snapshots_reports_purpose_revision_and_gc_verdict(store):
         assert row["snapshot_id"] == s.snapshot_id
         assert (row["purpose"], row["coherence"], row["gc"]) == (
             "legacy", "UNVERIFIED", ms.KEEP)
+
+
+def _cli(store, *args):
+    env = {**os.environ, "ZURVAN_ROOT": str(store), "PYTHONPATH": "."}
+    return subprocess.run([sys.executable, "scripts/cli.py", "knowledge", *args],
+                          capture_output=True, text=True, env=env)
+
+
+def test_knowledge_snapshots_lists_leases(store):
+    s = _capture(store)
+    try:
+        out = _cli(store, "snapshots")
+        assert out.returncode == 0, out.stderr
+        assert s.snapshot_id in out.stdout
+        assert "purpose=legacy" in out.stdout and "gc=KEEP" in out.stdout
+    finally:
+        s.release()
+
+
+def test_knowledge_snapshots_on_an_empty_store(store):
+    out = _cli(store, "snapshots")
+    assert out.returncode == 0, out.stderr
+    assert "no snapshots" in out.stdout
+
+
+def test_knowledge_gc_reclaims_only_what_the_rule_allows(store):
+    keep = _capture(store, label="keep")
+    dead = _capture(store, label="dead")
+    _rewrite_lease(dead, owner_pid=_dead_pid(), process_start_identity="gone",
+                   last_heartbeat=_ago(7200))
+    out = _cli(store, "gc", "--dry-run")
+    assert out.returncode == 0, out.stderr
+    assert "would reclaim" in out.stdout and dead.path.exists()
+    out = _cli(store, "gc")
+    assert out.returncode == 0, out.stderr
+    assert "reclaimed" in out.stdout
+    assert not dead.path.exists() and keep.path.exists()
+    keep.release()
