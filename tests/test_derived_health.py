@@ -164,3 +164,18 @@ def test_health_says_so_when_the_ledger_is_suspect(store):
     kr._mark_suspect(store)
     state, _, _, reason = dh.store_health("graph", store)
     assert "SUSPECT" in reason
+
+
+def test_stamp_verdict_is_the_one_definition_of_coherent():
+    """store_health and a measurement capture share this, so "coherent"
+    cannot come to mean two things (design §6.2, §7.1 step 6)."""
+    d = "digest"
+    assert dh.stamp_verdict({}, 5, d)[0] == dh.INVALID
+    assert dh.stamp_verdict({"built_from_revision": "x"}, 5, d)[0] == dh.INVALID
+    assert dh.stamp_verdict({"built_from_revision": "6"}, 5, d)[0] == dh.INVALID
+    assert dh.stamp_verdict({"built_from_revision": "5",
+                             "built_from_manifest": "other"}, 5, d)[0] == dh.INVALID
+    assert dh.stamp_verdict({"built_from_revision": "5",
+                             "built_from_manifest": d}, 5, d) == (dh.CURRENT, "")
+    assert dh.stamp_verdict({"built_from_revision": "3"}, 5, d) == (
+        dh.STALE, "2 revision(s) behind")

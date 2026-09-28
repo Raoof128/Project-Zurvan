@@ -37,6 +37,30 @@ def _meta(kind, base) -> tuple:
     raise ValueError(f"unknown derived store {kind!r}")
 
 
+def stamp_verdict(meta, revision, manifest_digest) -> tuple:
+    """(state, reason) for one store's stamps against the ledger at `revision`.
+
+    Pure. `store_health` reads the live store; a measurement capture reads the
+    FROZEN copy (design §7.1 step 6). Both come here, so a stamp cannot be
+    coherent for one and not the other.
+    """
+    built = meta.get("built_from_revision")
+    if built is None:
+        return INVALID, "no truthful source snapshot (unstamped build)"
+    try:
+        built_rev = int(built)
+    except ValueError:
+        return INVALID, f"stamp {built!r} is not a revision"
+    if built_rev > revision:
+        return INVALID, "stamp names a revision the ledger has not reached"
+    if built_rev == revision:
+        stamped = meta.get("built_from_manifest")
+        if stamped and manifest_digest and stamped != manifest_digest:
+            return INVALID, "stamp's manifest is not the ledger's at that revision"
+        return CURRENT, ""
+    return STALE, f"{revision - built_rev} revision(s) behind"
+
+
 def store_health(kind, root=None) -> tuple:
     base = ks.store_root(root)
     try:
@@ -53,19 +77,8 @@ def store_health(kind, root=None) -> tuple:
     except kr.LedgerError:
         return INVALID, built, None, "no ledger to compare against"
     now = ledger.revision
-    if built is None:
-        return INVALID, None, now, "no truthful source snapshot (unstamped build)"
-    try:
-        built_rev = int(built)
-    except ValueError:
-        return INVALID, built, now, f"stamp {built!r} is not a revision"
+    state, reason = stamp_verdict(meta, now, ledger.manifest_digest)
+    if state == INVALID:
+        return INVALID, built, now, reason
     note = "; ledger is SUSPECT - reconcile" if ledger.state != kr.CLEAN else ""
-    if built_rev > now:
-        return INVALID, built, now, "stamp names a revision the ledger has not reached"
-    if built_rev == now:
-        stamped = meta.get("built_from_manifest")
-        if stamped and ledger.manifest_digest and stamped != ledger.manifest_digest:
-            return INVALID, built, now, ("stamp's manifest is not the ledger's "
-                                         "at that revision")
-        return CURRENT, built, now, note.lstrip("; ")
-    return STALE, built, now, f"{now - built_rev} revision(s) behind" + note
+    return state, built, now, (reason + note).lstrip("; ")
