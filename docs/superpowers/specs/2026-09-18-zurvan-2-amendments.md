@@ -451,6 +451,24 @@ Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.
 
 ---
 
+## 12. Amendment 10 — Z1 split into Z1a/Z1b; the holdout seal is OS-enforced
+
+**Date:** 2026-09-29. **Amends:** §26 Z1 build list, §9.2 holdout protections (mechanism only).
+**Design:** [2026-09-29-z1-observability-sealed-eval-design.md](2026-09-29-z1-observability-sealed-eval-design.md). Status: DRAFT until Raouf approves it.
+
+- Z1 is built as **Z1a** (observability: trace modes, stage timings, trace
+  permissions/retention, rank movers, retirement of the burned 50-item
+  instrument) and **Z1b** (sealed DEV/HOLDOUT/RESERVE programme). Z1 closes
+  only when both gates hold.
+- §9.2's "development agents do not receive raw holdout queries" is enforced
+  by a separate OS identity, a pinned broker reachable through one sudoers
+  command, a sandboxed candidate, and an allowlist serializer — not by prompt
+  or by subagent context isolation.
+- The holdout is AI-authored inside that identity (author, reviewer and
+  independent re-solver as separate clean sessions), per Raouf 2026-09-29.
+- Policy in §9 is unchanged. This amendment strengthens how §9.2 is enforced
+  and loosens nothing.
+
 ## 7. Amendment log
 
 | # | Date | Amends | Summary |
@@ -465,6 +483,8 @@ Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.
 | 8 | 2026-09-28 | Z0 §6.1 | Rebuild snapshots capture all build inputs; coherence by live double manifest; released after build; no-baseline builds unstamped (§10) |
 | 9 | 2026-09-28 | Z0 §7-§8 | Coherence verified on frozen copies before publication; `knowledge snapshots|gc`; leases with expired-AND-dead GC; gate 6 stays UNVERIFIED; liveness never guessed (§11) |
 | 10 | 2026-09-28 | Z0 §10 | Z0 CLOSED (step 7): no design change; inventory gated by `callers --strict`; §10.5 closure matrix enforced by a test |
+| 11 | 2026-09-29 | §26 Z1, §9.2 (mechanism) | Z1 split into Z1a/Z1b; holdout seal enforced by OS identity + pinned broker; AI-authored holdout (§12) |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
-policy), §30 (success definition) or §34 (acceptance gate).
+policy), §30 (success definition) or §34 (acceptance gate). Amendment 10
+touches §9.2's enforcement mechanism only, and makes it stricter.
