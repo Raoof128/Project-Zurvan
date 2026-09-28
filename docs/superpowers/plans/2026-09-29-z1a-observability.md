@@ -46,6 +46,48 @@ historical-reproducibility check on a coherent Z0 snapshot.
 4. **`eval search --json` output.** Expect item indices, never query text, even for failures. Task 6 test `test_json_output_never_contains_query_text`.
 5. **Movers or save-run on a HOLDOUT/RESERVE dataset.** Expect a refusal before any per-item row is written. Task 7 test `test_save_run_refuses_holdout_before_writing`.
 
+
+## Gauntlet (2026-09-29, dry run in a throwaway worktree)
+
+Every task was applied verbatim at `9dc181a`, and its tests ran red, then
+green. Each task was then falsified by mutation. The full suite went from
+**1333 → 1408 passed**, with the same 3 failures before and after. All 3 are
+environmental: a worktree has no `wiki/` and no graph DB.
+
+Defects found and fixed in this plan:
+
+| # | Defect | Evidence | Fix |
+|---|---|---|---|
+| G0 | Committing this plan turned `main` red | `test_plan_integrity`: `_rec`/`test_unknown_mode_is_refused` declared with different signatures in different tasks | renamed per task (`9dc181a`) |
+| G1 | Prune's "never delete a tracked Markdown twin" check untested | mutant survived | `test_prune_never_removes_a_tracked_markdown_twin` |
+| G2 | `from tests.… import` cannot work: `tests/` is not a package | ModuleNotFoundError (Task 4 fixture, Task 9 matrix) | `from test_hybrid_search import tmp_index`; closure scans files like `test_z0_closure` |
+| G3 | Result digest could ignore the rankings and still pass | mutant survived: the old test's reorder also changed top-1 | `test_result_digest_sees_a_ranking_change_the_metrics_cannot` |
+| G4 | p95 wiring and formula untested (constant samples) | 2 mutants survived | nearest-rank `_percentile`; two percentile tests |
+| G5 | `reproduce()` passed `components=` AND `required=`, which `capture()` refuses (`SnapshotComponentError`); fakes hid it | read of `measurement_snapshot.py:626` | `required=` only; test binds the call to the real signature |
+| G6 | `eval reproduce` crashed printing its result: `cli.py`'s dispatcher binds `json` locally | UnboundLocalError after a 1m50s live run | local `import json`; CLI test (red, then green) |
+| G7 | Exit condition checked `"COHERENT"`; the capture says `"VERIFIED"` | live run: equal digests, exit 1 | `build_snapshot.VERIFIED`; tests use the real vocabulary |
+| — | Task 4 Step 3, Task 6 Step 3, Task 7 wiring were prose, not code | no-placeholder rule | replaced by the exact functions the dry run proved |
+| G8 | Embedding unified diffs in the plan fails `git diff --check`: a blank context line is a single space | `git diff --check` flagged 28 lines; a whitespace-stripped diff no longer applies | full replacement functions instead of diffs |
+| — | No test for `--explain`, the malformed-line print, or the movers CLI | — | added |
+
+Mutation results (final): Task 1 4/4, Task 2 9/9, Task 3 6/6, Task 4 4/4,
+Task 5 4/4, Task 6 9/9, Task 7 5/5, Task 8 3/3, closure 1/1 caught.
+
+Measured on the live store (rev 262, CLEAN), using worktree code, read-only
+except for released snapshots:
+
+- **Ranking unchanged:** BASE and Z1a top-10 lists for all 50 items are byte-identical on one VERIFIED snapshot. Metrics are equal: top-1 0.72, top-3 0.74, MRR 0.739, 13 failures. 3m18s.
+- **`eval reproduce`:** two digests equal (`f1406842…`), coherence VERIFIED at revision 262 MANAGED, snapshot released. About 2m09s.
+- **RQ1 pilot unchanged:** `eval_provenance` on `provenance_real_gold.jsonl` is identical under BASE and Z1a (source recall 0.861, raw-leak 0, hash integrity 1.0).
+- **Retention:** a prune costs about 7 ms per trace write. On the live repo it keeps 33 tracked traces and selects 0, even at `days=0, keep=0`.
+- **Registry:** the live instrument resolves to `search_gold RETIRED` by whole-file digest.
+- **Summary trace, end to end:** the query is absent from the file bytes, file 0600 / dir 0700, no Markdown twin.
+
+A worktree cannot show:
+- the post-write retention prune on a live trace directory that holds untracked traces (there are none today);
+- `trace prune` without `--dry-run` on live;
+- effects on the ledger. Z1a writes no knowledge, so none are expected. Task 9 checks `knowledge status` afterwards.
+
 ---
 
 ### Task 1: Trace schema v2 with `trace_mode`
@@ -366,6 +408,20 @@ def test_prune_dry_run_on_live_repo_never_selects_tracked():
     assert not (selected & tracked)
     tracked_json = [t for t in tracked if t.startswith("data/traces/trace-") and t.endswith(".json")]
     assert result.kept_tracked == len(tracked_json) > 0
+
+
+def test_prune_never_removes_a_tracked_markdown_twin(tmp_path):
+    # An untracked JSON whose Markdown twin IS tracked: the JSON may go,
+    # the tracked twin may not.
+    _git_repo(tmp_path)
+    store = TraceStore(tmp_path)
+    now = time.time()
+    paths = store.write(_trace("trace-20260929T000000Z-twin0001", "full"))
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-f", "wiki/traces"], check=True)
+    _age(paths.json_path, 40, now)
+    result = store.prune(now=now)
+    assert result.removed == [str(paths.json_path)]
+    assert paths.markdown_path.exists()
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -538,7 +594,7 @@ git commit -m "zurvan: private trace files (0700/0600), protected-eval write gua
 **Files:**
 - Modify: `scripts/context_export.py` (`_write_retrieval_trace`, `search_memory`, `export_context`, add `import hashlib` if absent)
 - Modify: `scripts/cli.py` (search and context parsers and dispatch)
-- Modify: `tests/test_trace_retrieval_integration.py` (existing assertions expect the Markdown mirror and raw query, so pass `trace_mode="full"` there)
+- Modify: `tests/test_trace_retrieval_integration.py` (one call: the mirror test passes `trace_mode="full"`)
 - Test: `tests/test_trace_modes_retrieval.py` (create)
 
 **Interfaces:**
@@ -717,7 +773,7 @@ In `scripts/cli.py`, add to both the search and context parsers:
                 trace_mode=getattr(args, "trace_mode", None) or "summary",
 ```
 
-In `tests/test_trace_retrieval_integration.py`, add `trace_mode="full",` to every `export_context(...)` and `search_memory(...)` call that asserts on the mirror or the raw query. That is a deliberate behaviour change: the default no longer writes them.
+In `tests/test_trace_retrieval_integration.py`, `test_export_context_trace_writes_retrieval_and_graph_events` is the only test that breaks (measured in the gauntlet: 1 failed, 7 passed). It asserts on the Markdown mirror. Add `trace_mode="full",` to its `export_context(...)` call, directly after `trace=True,`. That is a deliberate behaviour change: the default no longer writes a mirror.
 
 - [ ] **Step 4: Run to verify**
 
@@ -739,7 +795,7 @@ git commit -m "zurvan: --trace defaults to summary (no raw query, no snippets); 
 - Modify: `scripts/hybrid_search.py` (`search_hybrid`)
 - Modify: `scripts/context_export.py` (`_search_internal`, `search_memory`)
 - Modify: `scripts/cli.py` (`--explain` on search)
-- Test: `tests/test_stage_timings.py` (create)
+- Test: `tests/test_stage_timings.py` (create; reuses the `tmp_index` fixture of `tests/test_hybrid_search.py`, which is not modified)
 
 **Interfaces:**
 - Produces:
@@ -752,22 +808,16 @@ git commit -m "zurvan: --trace defaults to summary (no raw query, no snippets); 
 `tests/test_stage_timings.py`:
 
 ```python
-import pytest
-
 from scripts import hybrid_search as hs
+from test_hybrid_search import tmp_index  # noqa: F401 — pytest fixture; tests/ is on sys.path (prepend mode, no package)
 
 
-@pytest.fixture
-def index(tmp_path, monkeypatch):
-    # Reuse the fixture builder the existing hybrid tests use; see Step 1b.
-    from tests.test_hybrid_search import _build_tiny_index  # noqa: F401 (resolved in Step 1b)
-    return _build_tiny_index(tmp_path, monkeypatch)
-
-
-def test_timings_are_filled_and_ranking_unchanged(index):
-    plain = hs.search_hybrid("alpha beta", limit=5, db_path=index)
+def test_timings_are_filled_and_ranking_unchanged(tmp_index):
+    plain = hs.search_hybrid("hybrid search citation source", limit=5, db_path=tmp_index)
+    assert len(plain) >= 2, "a vacuous result would make the equality below prove nothing"
     timings = {}
-    timed = hs.search_hybrid("alpha beta", limit=5, db_path=index, timings=timings)
+    timed = hs.search_hybrid("hybrid search citation source", limit=5, db_path=tmp_index,
+                             timings=timings)
     assert timed == plain
     assert set(timings) == set(hs.STAGES)
     assert all(isinstance(v, float) and v >= 0 for v in timings.values())
@@ -778,22 +828,35 @@ def test_missing_index_leaves_timings_empty(tmp_path):
     timings = {}
     assert hs.search_hybrid("x", db_path=str(tmp_path / "none.sqlite"), timings=timings) == []
     assert timings == {}
+
+
+def test_search_explain_prints_stage_table_and_traces_timings(tmp_path, monkeypatch, capsys):
+    import json
+
+    import scripts.context_export as ce
+    monkeypatch.setattr(ce, "PROJECT_ROOT", tmp_path)
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "a.md").write_text("alpha beta")
+    ce.search_memory("alpha", hybrid=False, explain=True, trace=True,
+                     trace_id="trace-20260929T000000Z-explain1")
+    out = capsys.readouterr().out
+    assert "Stage timings (ms):" in out and "keyword_scan" in out
+    trace = json.loads((tmp_path / "data" / "traces" / "trace-20260929T000000Z-explain1.json").read_text())
+    assert set(trace["events"][1]["payload"]["timings_ms"]) == {"keyword_scan", "total"}
 ```
 
-- [ ] **Step 1b: Resolve the fixture**
-
-Read `tests/test_hybrid_search.py`. If it has a helper that builds a small index file, expose it as `_build_tiny_index(tmp_path, monkeypatch) -> str`, or import the existing one under that name. If it builds indexes inline, move that code into `_build_tiny_index` in that file without changing its tests. Ledger the ruling. The helper must use the mock embedding provider exactly as the existing tests do.
+`tests/` is not a package. pytest's default `prepend` import mode puts `tests/` itself on `sys.path`, so the existing module-scoped fixture is importable as `from test_hybrid_search import tmp_index`. `from tests.test_hybrid_search …` fails with ModuleNotFoundError (gauntlet G2). The query matches the fixture corpus, and `len(plain) >= 2` stops the equality from passing vacuously on empty results.
 
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `PYTHONPATH=. python -m pytest tests/test_stage_timings.py -q`
-Expected: FAIL. `search_hybrid()` got an unexpected keyword argument `timings` (or `STAGES` is missing).
+Expected: FAIL. `search_hybrid()` got an unexpected keyword argument `timings`.
 
-- [ ] **Step 3: Implement in `scripts/hybrid_search.py`**
+- [ ] **Step 3: Implement**
+
+`scripts/hybrid_search.py` (Task 4 is the only task that touches it). Add `import time` after `import math`. After the imports add:
 
 ```python
-import time
-
 #: Stages recorded by `search_hybrid(timings=...)` — observation only.
 STAGES = ("fts", "embed_query", "vector_scan", "hydrate", "fuse", "total")
 
@@ -802,21 +865,131 @@ def _ms(start_ns: int) -> float:
     return round((time.perf_counter_ns() - start_ns) / 1e6, 3)
 ```
 
-Change the signature to `def search_hybrid(query: str, limit: int = 10, db_path: str | None = None, timings: dict | None = None) -> List[Dict]:`. Then record spans without changing any computation:
-- `t_total = time.perf_counter_ns()` after the missing-index early return;
-- `t = time.perf_counter_ns()` before the FTS block, and after the normalisation loop `stage["fts"] = _ms(t)`;
-- around `get_embedding(...)`: `stage["embed_query"]`;
-- around `_score_semantic_top_k(...)`: `stage["vector_scan"]`;
-- around `_hydrate(...)`: `stage["hydrate"]`;
-- around the final `_fuse(scored)[:limit]`, computed into a local `fused` before `return`: `stage["fuse"]`, then `stage["total"] = _ms(t_total)`.
+Replace `search_hybrid` in full with the gauntlet-proven version. Only the `stage`/`t`/`_ms` lines and the `timings` parameter are new; every computation is unchanged:
 
-Use a local `stage = {}` and, just before returning, `if timings is not None: timings.update(stage)`. The missing-index path returns `[]` before any timing and leaves `timings` untouched.
+```python
+def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
+                  timings: dict | None = None) -> List[Dict]:
+    from scripts.config import get_search_db_path
+    if db_path is None:
+        db_path = str(get_search_db_path())
+    if not os.path.exists(db_path):
+        # stderr, not stdout: callers run with --json and parse stdout, so a
+        # diagnostic printed there corrupts the payload into unparseable text.
+        print(
+            f"Error: Search index not found at {db_path}. Run 'zurvan index rebuild' first.",
+            file=sys.stderr,
+        )
+        return []
 
-In `scripts/context_export.py`:
-- `_search_internal` gains `timings: Dict[str, float] | None = None`. In hybrid mode, pass `timings=timings`. In keyword mode, time the file scan: `t0 = time.perf_counter_ns()` at the start, and before `return` do `if timings is not None: timings.update({"keyword_scan": ms, "total": ms})`.
-- `search_memory` gains `explain: bool = False`. Collect `timings = {}` and pass it to `_search_internal`, then pass `timings=timings` to `_write_retrieval_trace`.
-  - In JSON mode add `"timings_ms": timings` when `explain`.
-  - In text mode, when `explain`, print after the results:
+    stage = {}
+    t_total = time.perf_counter_ns()
+    # read-only: the query path must never create or modify the index
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    from scripts import vec_storage
+    vec_storage.load_extension(conn)
+    cursor = conn.cursor()
+
+    # Keyword search using FTS5 (BM25 rank)
+    t = time.perf_counter_ns()
+    import re
+    terms = [t for t in re.split(r'\W+', query) if t]
+    if terms:
+        # Each term is quoted as an FTS5 string: identical matching for plain
+        # tokens, but bareword keywords (AND/OR/NOT/NEAR) no longer raise
+        # "fts5: syntax error".
+        fts_query = " OR ".join(f'"{t}"' for t in terms)
+        cursor.execute("""
+            SELECT chunk_id, bm25(chunks_fts) as bm25_score
+            FROM chunks_fts
+            WHERE chunks_fts MATCH ?
+        """, (fts_query,))
+        fts_results = cursor.fetchall()
+    else:
+        fts_results = []
+
+    # Normalize BM25 scores (lower bm25 value is better in SQLite FTS5)
+    # Actually SQLite bm25 returns negative values. Let's invert and normalize.
+    fts_scores = {}
+    if fts_results:
+        min_score = min(row[1] for row in fts_results)
+        max_score = max(row[1] for row in fts_results)
+        for chunk_id, score in fts_results:
+            # Normalize between 0 and 1
+            if max_score == min_score:
+                fts_scores[chunk_id] = 1.0
+            else:
+                # since scores are typically negative, smaller is better.
+                # mapping max_score (worst) -> 0, min_score (best) -> 1
+                norm_score = (max_score - score) / (max_score - min_score)
+                fts_scores[chunk_id] = norm_score
+    stage["fts"] = _ms(t)
+
+    # Semantic search — embed the query with the SAME provider/model the
+    # index was built with (never the env), so scores stay meaningful.
+    index_provider, index_model = _index_embedding_config(cursor)
+    t = time.perf_counter_ns()
+    query_emb = get_embedding(query, provider=index_provider, model=index_model)['vector']
+    stage["embed_query"] = _ms(t)
+
+    t = time.perf_counter_ns()
+    top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
+    stage["vector_scan"] = _ms(t)
+    t = time.perf_counter_ns()
+    scored = _hydrate(cursor, top)
+    stage["hydrate"] = _ms(t)
+    conn.close()
+
+    t = time.perf_counter_ns()
+    fused = _fuse(scored)[:limit]
+    stage["fuse"] = _ms(t)
+    stage["total"] = _ms(t_total)
+    if timings is not None:
+        timings.update(stage)
+    return fused
+```
+
+`scripts/context_export.py` (on top of Task 3):
+
+1. Add `import time` after `import hashlib`.
+2. `_search_internal`: add the parameter and time both modes:
+
+```python
+def _search_internal(
+    query: str, hybrid: bool = False, limit: int = 10, root: str | Path | None = None,
+    timings: Dict[str, float] | None = None,
+) -> List[Dict[str, Any]]:
+```
+
+```python
+        return search_hybrid(query, limit, db_path=str(get_search_db_path()), timings=timings)
+
+    t0 = time.perf_counter_ns()
+```
+
+```python
+    matches.sort(key=lambda x: x['hybrid_score'], reverse=True)
+    if timings is not None:
+        elapsed = round((time.perf_counter_ns() - t0) / 1e6, 3)
+        timings.update({"keyword_scan": elapsed, "total": elapsed})
+    return matches[:limit]
+```
+
+3. `search_memory`: add `explain: bool = False` after `trace_mode`. Replace `results = _search_internal(query, hybrid, limit=10)` with:
+
+```python
+    timings: Dict[str, float] = {}
+    results = _search_internal(query, hybrid, limit=10, timings=timings)
+```
+
+Pass `timings=timings,` to its `_write_retrieval_trace(...)` call, after `trace_mode=trace_mode,`. In the JSON branch, before `print(json.dumps(payload, indent=2))`:
+
+```python
+        if explain:
+            payload["timings_ms"] = timings
+```
+
+In the text branch, before `if trace_path: print(f"Trace written: ...")`:
 
 ```python
         if explain:
@@ -825,8 +998,9 @@ In `scripts/context_export.py`:
                 print(f"  {name:<12} {value:>10.3f}")
 ```
 
-In `scripts/cli.py`, add to the search parser:
-`search_parser.add_argument("--explain", action="store_true", help="Print per-stage timings")`. Pass `explain=getattr(args, "explain", False)` in the dispatch.
+`scripts/cli.py`: before the search parser's `--json` argument, add
+`search_parser.add_argument("--explain", action="store_true", help="Print per-stage timings")`.
+In the search dispatch, after `as_json=getattr(args, "as_json", False),`, add `explain=getattr(args, "explain", False),`.
 
 - [ ] **Step 4: Run to verify**
 
@@ -836,7 +1010,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/hybrid_search.py scripts/context_export.py scripts/cli.py tests/test_stage_timings.py tests/test_hybrid_search.py
+git add scripts/hybrid_search.py scripts/context_export.py scripts/cli.py tests/test_stage_timings.py
 git commit -m "zurvan: per-stage search timings (observation only) and search --explain"
 ```
 
@@ -1105,6 +1279,48 @@ def test_json_output_never_contains_query_text(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "secret-query-text" not in out
     assert json.loads(out)["failing_items"] == [0, 1]
+
+
+def test_a_malformed_gold_line_is_reported_by_number_not_content(tmp_path, capsys):
+    gold = tmp_path / "g.jsonl"
+    gold.write_text('{"query": "secret-query-text-three"}\n{not json secret-query-text-four\n')
+    assert es.load_gold_dataset(str(gold)) == []
+    out = capsys.readouterr().out
+    assert "secret-query-text" not in out
+    assert "line 1" in out and "line 2" in out
+
+
+def test_result_digest_sees_a_ranking_change_the_metrics_cannot(monkeypatch):
+    # Same hits at the same ranks, different results below them: every quality
+    # metric is equal, so only the per-item ranked ids can tell the runs apart.
+    monkeypatch.setattr(es, "search_hybrid", lambda *a, **k: [
+        {"source_path": "wiki/a.md"}, {"source_path": "wiki/c.md"}])
+    m1, _ = es.evaluate(DATA, index_path="x")
+    monkeypatch.setattr(es, "search_hybrid", lambda *a, **k: [
+        {"source_path": "wiki/a.md"}, {"source_path": "wiki/d.md"}])
+    m2, _ = es.evaluate(DATA, index_path="x")
+    assert (m1["top1_accuracy"], m1["top3_accuracy"], m1["mrr"]) == \
+           (m2["top1_accuracy"], m2["top3_accuracy"], m2["mrr"])
+    assert m1["result_digest"] != m2["result_digest"]
+
+
+def test_percentiles_are_nearest_rank():
+    samples = [float(v) for v in range(1, 21)]
+    assert es._percentile(samples, 50) == 10.0
+    assert es._percentile(samples, 95) == 19.0
+    assert es._percentile([5.0], 95) == 5.0
+    assert es._percentile([], 50) is None
+
+
+def test_evaluate_reports_p50_and_p95_of_each_stage(monkeypatch):
+    totals = iter([1.0, 9.0])
+
+    def varying(query, limit=10, db_path=None, timings=None):
+        timings.update({"total": next(totals)})
+        return []
+    monkeypatch.setattr(es, "search_hybrid", varying)
+    metrics, _ = es.evaluate(DATA, index_path="x")
+    assert metrics["stage_latency_ms"]["total"] == {"p50": 1.0, "p95": 9.0}
 ```
 
 In `tests/test_eval_search.py`, rename `test_metrics_name_the_failing_queries` to `test_metrics_name_the_failing_items` and assert `metrics["failing_items"] == [0, 1, 2]` and `"failing_queries" not in metrics`. Keep its comment: indices serve the before/after need without quoting the instrument.
@@ -1116,14 +1332,63 @@ Expected: FAIL. `es.evaluate` does not exist.
 
 - [ ] **Step 3: Implement in `scripts/eval_search.py`**
 
-Add `import hashlib, statistics` and:
+Proven in the gauntlet. Make the edits below; the result is the file the dry run tested.
+
+1. Imports: change the `scripts.metrics` import to also import `get_rank`, and add `import hashlib` and `import math` above it.
+2. Replace `load_gold_dataset` in full. A malformed line is reported by number, never by content:
 
 ```python
+def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
+    filepath = _resolve(filepath)
+    if not os.path.exists(filepath):
+        print(f"Error: Gold dataset '{filepath}' not found.")
+        sys.exit(1)
+
+    dataset = []
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                if 'query' not in data or 'expected_paths' not in data:
+                    print(f"Warning: Skipping malformed line {lineno} (missing required fields)")
+                    continue
+                dataset.append(data)
+            except json.JSONDecodeError:
+                print(f"Warning: Skipping malformed JSON line {lineno}")
+    return dataset
+```
+
+3. Insert these before `def run_search_evaluation`. `_keyword_retrieve` is the old keyword branch, moved verbatim:
+
+```python
+def _keyword_retrieve(query: str) -> List[str]:
+    """The non-hybrid baseline: a substring scan over wiki/ + docs/."""
+    import glob
+    wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True) + \
+        glob.glob(str(PROJECT_ROOT / "docs" / "**" / "*.md"), recursive=True)
+    keywords = query.lower().split()
+    matches = []
+    for filepath in wiki_files:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            score = sum(1 for k in keywords if k in content.lower())
+            if score > 0:
+                matches.append((score, filepath))
+        except Exception:
+            continue
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return [m[1] for m in matches[:10]]
+
+
 def _percentile(values, pct):
     ordered = sorted(values)
     if not ordered:
         return None
-    k = max(0, min(len(ordered) - 1, int(round(pct / 100 * (len(ordered) - 1)))))
+    k = max(0, min(len(ordered) - 1, math.ceil(pct / 100 * len(ordered)) - 1))  # nearest rank
     return round(ordered[k], 3)
 
 
@@ -1174,25 +1439,106 @@ def evaluate(dataset, *, index_path, hybrid=True):
     return metrics, rows
 ```
 
-Move the existing keyword branch (the `glob` scan) verbatim into `def _keyword_retrieve(query) -> list[str]`.
-
-Import `get_rank` alongside the existing `scripts.metrics` imports. It is the matcher `calculate_top_k_hit` and `calculate_reciprocal_rank` already use (substring match, 1-based, 0 = miss), so `first_hit_rank` cannot disagree with the metrics.
-
-In `run_search_evaluation`, replace the per-item loop and metric computation with:
+4. Replace `run_search_evaluation` in full. It is built on the core, and its text report, mock-embedding skip and min-top3 exit are unchanged:
 
 ```python
+def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3: float = 0.0,
+                          as_json: bool = False, max_queries: int | None = None,
+                          index_path: str | None = None, keep_rows: bool = False):
+    """Score retrieval against the gold set.
+
+    ``index_path`` names the index to score. It defaults to the canonical one,
+    so ad-hoc use is unchanged, and it exists so a gate can hand this function a
+    MEASUREMENT SNAPSHOT — a hard link to the index as it was when the gate
+    started. Another project writing to the shared store mid-run then changes
+    the live store and the next rebuild, and changes nothing about the number
+    being computed here. The index is reported alongside the metrics, because a
+    result that cannot name its input is not a measurement.
+
+    ``max_queries`` runs only the first N queries. It exists for LIVENESS
+    checks, not for measurement: the MCP e2e smoke called this tool with the
+    full 50-query set, which at 199k chunks takes minutes and dominated the
+    smoke's runtime — a smoke test should assert the tool responds, not run an
+    evaluation. Quality numbers must always come from the whole set, so a
+    truncated run labels itself as one in its output.
+    """
+    gold_file = gold_file or _default_gold()
+    if index_path is None:
+        from scripts.config import get_search_db_path
+        index_path = str(get_search_db_path())
+    validate_gold_dataset(gold_file, quiet=as_json)
+    dataset = load_gold_dataset(gold_file)
+    if not dataset:
+        print("Error: No valid queries found in gold dataset.")
+        sys.exit(1)
+
+    full_size = len(dataset)
+    if max_queries is not None:
+        dataset = dataset[:max(1, int(max_queries))]
+
+    if not as_json:
+        print(f"Running Evaluation on {len(dataset)} queries (Hybrid: {hybrid})...")
+
     core, rows = evaluate(dataset, index_path=index_path, hybrid=hybrid)
-    metrics = dict(core)
-    metrics.update({"min_top3": min_top3, "passed": core["top3_accuracy"] >= min_top3,
-                    "index_path": index_path, "index_identity": _identity_of(index_path),
-                    "snapshot_coherence": _coherence_of(index_path)})
+    total_queries, failures = core["queries"], core["failures"]
     top1_accuracy, top3_accuracy, mrr = core["top1_accuracy"], core["top3_accuracy"], core["mrr"]
-    failures, total_queries = core["failures"], core["queries"]
+    metrics = dict(core)
+    metrics.update({
+        "min_top3": min_top3,
+        "passed": top3_accuracy >= min_top3,
+        "index_path": index_path,
+        "index_identity": _identity_of(index_path),
+        "snapshot_coherence": _coherence_of(index_path),
+    })
+    if keep_rows:
+        metrics["_rows"] = rows
+
+    if as_json:
+        print(json.dumps({k: v for k, v in metrics.items() if not k.startswith("_")}, indent=2))
+    else:
+        print("\nSearch Evaluation Results")
+        if total_queries < full_size:
+            print(f"(LIVENESS RUN — first {total_queries} of {full_size} queries; not a quality measurement)")
+        print("=========================")
+        print(f"Queries: {total_queries}")
+        print(f"Top-1 accuracy: {top1_accuracy * 100:.0f}%")
+        print(f"Top-3 accuracy: {top3_accuracy * 100:.0f}%")
+        print(f"Mean reciprocal rank: {mrr:.2f}")
+        print(f"Failures: {failures}")
+        ident = metrics["index_identity"]
+        if ident:
+            print(f"Index: {index_path}")
+            print(f"  {ident.get('chunks')} chunks / {ident.get('sources')} sources"
+                  f"  chunk-set {str(ident.get('chunk_id_set_sha'))[:12]}"
+                  f"  space {','.join(ident.get('embedding_space') or [])}")
+        c = metrics["snapshot_coherence"]
+        detail = (f"revision {c['revision']} ({c['atomicity']})"
+                  if c.get("revision") is not None else c.get("reason"))
+        print(f"Snapshot coherence: {c['status']} — {detail}")
+        print("=========================")
+
+    if top3_accuracy < min_top3:
+        if _index_uses_mock_embeddings(index_path):
+            # Retrieval quality cannot be judged against deterministic-hash
+            # vectors: the semantic half of the score is noise, so the number
+            # measures nothing. The smoke test runs under the mock provider,
+            # and this gate previously "passed" there only because that run had
+            # overwritten the real index with mock embeddings — the very bug
+            # this skip exists to stop masking.
+            if not as_json:
+                print(
+                    f"Skipping the retrieval quality gate: the index was built with mock "
+                    f"embeddings, so top-3 ({top3_accuracy:.2f}) is not a meaningful "
+                    f"measurement. Rebuild with a real provider to enforce it."
+                )
+            metrics["skipped_reason"] = "mock embeddings"
+            return metrics
+        if not as_json:
+            print(f"Error: Top-3 accuracy ({top3_accuracy}) is below required minimum ({min_top3})")
+        sys.exit(1)
+
+    return metrics
 ```
-
-Keep the text report and the mock-embedding and min-top3 logic exactly as they are, with `metrics` from above. Store rows for Task 7 by returning them: make `run_search_evaluation` set `metrics["_rows"] = rows` only when a new keyword `keep_rows=True` is passed, and `pop` it before printing JSON.
-
-The failing-query path of `load_gold_dataset` prints the raw line on a malformed record. Change `print(f"Warning: Skipping malformed line (missing required fields): {line}")` and the JSON-error print to `print(f"Warning: Skipping malformed line {lineno}")` with a line number, never the content.
 
 - [ ] **Step 4: Run to verify**
 
@@ -1281,6 +1627,25 @@ def test_movers_refuses_a_run_file_claiming_a_sealed_state(tmp_path):
     forged = dict(a, dataset=dict(a["dataset"], state="HOLDOUT"))
     with pytest.raises(DatasetNotEligible):
         er.movers(forged, forged)
+
+
+def test_cli_movers_prints_indices_and_refuses_sealed(tmp_path, monkeypatch, capsys):
+    import json
+
+    import scripts.cli as cli
+    a = er.save_run(METRICS, _rows(1, 2), DEV, runs_dir=tmp_path / "a")
+    b = er.save_run(METRICS, _rows(1, 4), DEV, runs_dir=tmp_path / "b")
+    monkeypatch.setattr("sys.argv", ["zurvan", "eval", "movers", str(a), str(b)])
+    cli.main()
+    assert "item    1: rank 2 -> 4" in capsys.readouterr().out
+    forged = tmp_path / "forged.json"
+    body = json.loads(a.read_text())
+    body["dataset"]["state"] = "HOLDOUT"
+    forged.write_text(json.dumps(body))
+    monkeypatch.setattr("sys.argv", ["zurvan", "eval", "movers", str(forged), str(forged)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1345,11 +1710,29 @@ def movers(a: dict, b: dict) -> list:
             for r in a["rows"] if rank_b.get(r["index"]) != r["first_hit_rank"]]
 ```
 
-Wire the CLI:
-- `scripts/eval_search.py` argparse gains `--save-run` (store_true). When it is set, run with `keep_rows=True`, pop `_rows`, call `save_run(metrics, rows, dataset_for_file(gold))` and print `Run saved: <path>` (to stderr in `--json` mode).
-- `scripts/cli.py`:
-  - `eval_search_parser.add_argument("--save-run", action="store_true")`, with `["--save-run"]` appended in the `_run_script` call when it is set;
-  - add the movers subcommand:
+Wire the CLI. In `scripts/eval_search.py`'s `__main__` block, add after the `--validate` argument:
+
+```python
+    parser.add_argument("--save-run", action="store_true",
+                        help="Save per-item rows (by index) to ~/.zurvan/eval-runs for `zurvan eval movers`")
+```
+
+and replace the final `else:` branch with:
+
+```python
+    else:
+        gold = args.gold or _default_gold()
+        metrics = run_search_evaluation(gold, args.hybrid, args.min_top3, as_json=args.as_json,
+                                        max_queries=args.max_queries, index_path=args.index_path,
+                                        keep_rows=args.save_run)
+        if args.save_run:
+            from scripts.eval_datasets import dataset_for_file
+            from scripts.eval_runs import save_run
+            path = save_run(metrics, metrics.pop("_rows"), dataset_for_file(_resolve(gold)))
+            print(f"Run saved: {path}", file=sys.stderr if args.as_json else sys.stdout)
+```
+
+`scripts/cli.py`: after `eval_search_parser.add_argument("--json", ...)`, add `eval_search_parser.add_argument("--save-run", action="store_true", help="Save per-item rows (by index) for `zurvan eval movers`")`, and in the `_run_script` call append `+ (["--save-run"] if getattr(args, "save_run", False) else [])`. Then add the movers subcommand:
 
 ```python
     eval_movers_parser = eval_sub.add_parser("movers", help="Items whose rank moved between two saved runs (by index)")
@@ -1395,7 +1778,7 @@ git commit -m "zurvan: saved eval runs (private, by index) and eval movers; seal
 - Test: `tests/test_eval_reproduce.py` (create)
 
 **Interfaces:**
-- Consumes: `measurement_snapshot.capture(components=..., purpose=..., required=...)` returning `Snapshot` (`.index_path`, `.release()`, context manager); `SnapshotNotReady` from `scripts.build_snapshot`; `evaluate`, `load_gold_dataset`.
+- Consumes: `measurement_snapshot.capture(label=..., purpose=..., required=...)` (never with `components=`) returning `Snapshot` (`.index_path`, `.release()`, context manager); `SnapshotNotReady` from `scripts.build_snapshot`; `evaluate`, `load_gold_dataset`.
 - Produces:
   - `reproduce(gold_path, *, runs=2, capture_fn=None, evaluate_fn=None) -> dict` returning `{"equal": bool, "digests": [str], "coherence": dict, "snapshot_index": str}`.
   - The snapshot is always released.
@@ -1418,7 +1801,7 @@ class FakeSnap:
         self.index_path = tmp_path / "search.sqlite"
         self.index_path.write_bytes(b"")
         (tmp_path / "manifest.json").write_text(json.dumps(
-            {"coherence": {"status": "COHERENT", "revision": 7, "atomicity": "MANAGED",
+            {"coherence": {"status": "VERIFIED", "revision": 7, "atomicity": "MANAGED",
                            "purpose": "measurement", "reason": None}}))
         self.released = False
 
@@ -1442,9 +1825,11 @@ def test_equal_digests_on_one_snapshot_and_release(tmp_path):
     out = er.reproduce(_gold(tmp_path), capture_fn=fake_capture,
                        evaluate_fn=lambda ds, index_path, hybrid: ({"result_digest": "same"}, []))
     assert out["equal"] is True and out["digests"] == ["same", "same"]
-    assert out["coherence"]["status"] == "COHERENT"
+    assert out["coherence"]["status"] == "VERIFIED"
     assert calls[0]["required"] == ("wiki", "search", "graph")
     assert calls[0]["purpose"] == "measurement"
+    # capture() refuses components= together with required= (SnapshotComponentError)
+    assert "components" not in calls[0]
     assert snap.released
 
 
@@ -1464,6 +1849,37 @@ def test_snapshot_released_even_when_evaluation_raises(tmp_path):
     with pytest.raises(RuntimeError):
         er.reproduce(_gold(tmp_path), capture_fn=lambda **kw: snap, evaluate_fn=boom)
     assert snap.released
+
+
+def test_reproduce_call_is_accepted_by_the_real_capture_contract(tmp_path):
+    # The fakes above accept any keywords; this pins the call against the real
+    # signature, which refuses `components=` together with `required=`.
+    import inspect
+
+    from scripts import measurement_snapshot as ms
+    seen = {}
+    er.reproduce(_gold(tmp_path), capture_fn=lambda **kw: seen.update(kw) or FakeSnap(tmp_path),
+                 evaluate_fn=lambda *a, **k: ({"result_digest": "d"}, []))
+    inspect.signature(ms.capture).bind(**seen)
+    assert not ({"components", "required"} <= set(seen))
+
+
+@pytest.mark.parametrize("equal,status,code", [(True, "VERIFIED", 0), (False, "VERIFIED", 1),
+                                               (True, "UNVERIFIED", 1)])
+def test_cli_reproduce_prints_json_and_sets_exit_code(monkeypatch, capsys, equal, status, code):
+    # cli.py's dispatcher has a function-local `import json`, which makes `json`
+    # unbound in any branch that did not execute it (measured: a 2-minute
+    # live run died printing its result).
+    import scripts.cli as cli
+    monkeypatch.setattr(er, "reproduce", lambda gold: {"equal": equal, "digests": ["d", "d"],
+                                                        "coherence": {"status": status},
+                                                        "snapshot_index": "x"})
+    monkeypatch.setattr(cli, "_resolved_gold", lambda g: "g")
+    monkeypatch.setattr("sys.argv", ["zurvan", "eval", "reproduce"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == code
+    assert json.loads(capsys.readouterr().out)["equal"] is equal
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -1487,8 +1903,9 @@ def reproduce(gold_path, *, runs: int = 2, capture_fn=None, evaluate_fn=None) ->
         from scripts.measurement_snapshot import capture as capture_fn
     evaluate_fn = evaluate_fn or evaluate
     dataset = load_gold_dataset(str(gold_path))
-    snap = capture_fn(components=REPRODUCE_REQUIRED, label="z1a-reproduce",
-                      purpose="measurement", required=REPRODUCE_REQUIRED)
+    # `required=` alone: capture() refuses it together with `components=`.
+    snap = capture_fn(label="z1a-reproduce", purpose="measurement",
+                      required=REPRODUCE_REQUIRED)
     try:
         digests = [evaluate_fn(dataset, index_path=str(snap.index_path), hybrid=True)[0]["result_digest"]
                    for _ in range(runs)]
@@ -1499,7 +1916,7 @@ def reproduce(gold_path, *, runs: int = 2, capture_fn=None, evaluate_fn=None) ->
         snap.release()
 ```
 
-Before running, read `measurement_snapshot.capture`'s signature (`scripts/measurement_snapshot.py:611`). If `components=` must include `"search"` explicitly, or `required=` alone implies components, adjust the call to the real contract and ledger the ruling.
+`capture()` raises `SnapshotComponentError` when given `components=` and `required=` together (gauntlet G5). `test_reproduce_call_is_accepted_by_the_real_capture_contract` binds the call against the real signature, because the fakes accept anything.
 
 CLI (`scripts/cli.py`):
 
@@ -1510,7 +1927,8 @@ CLI (`scripts/cli.py`):
 
 ```python
     elif args.command == "eval" and args.action == "reproduce":
-        from scripts.build_snapshot import SnapshotNotReady
+        import json  # this function binds `json` locally elsewhere (line ~853)
+        from scripts.build_snapshot import VERIFIED, SnapshotNotReady
         from scripts.eval_runs import reproduce
         try:
             out = reproduce(_resolved_gold(args.gold))
@@ -1518,7 +1936,7 @@ CLI (`scripts/cli.py`):
             print(f"SNAPSHOT_NOT_READY: {exc}", file=sys.stderr)
             sys.exit(2)
         print(json.dumps(out, indent=2))
-        sys.exit(0 if out["equal"] and out["coherence"].get("status") == "COHERENT" else 1)
+        sys.exit(0 if out["equal"] and out["coherence"].get("status") == VERIFIED else 1)
 ```
 
 - [ ] **Step 4: Run to verify**
@@ -1547,26 +1965,33 @@ git commit -m "zurvan: eval reproduce - result digests compared across two runs 
 `tests/test_z1a_closure.py`:
 
 ```python
-import importlib
+"""Z1a closure matrix (design §9, "Z1a closes when"): each gate names the test
+that demonstrates it. `tests/` is not a package, so tests are found by
+scanning files (as test_z0_closure does), never by importing `tests.*`."""
+import re
+from pathlib import Path
 
 import pytest
 
+TESTS = Path(__file__).resolve().parent
+
 MATRIX = {
-    1: "tests.test_trace_modes_retrieval::test_summary_trace_contains_no_query_text_anywhere",
-    2: "tests.test_trace_privacy::test_trace_files_and_dirs_are_private",
-    3: "tests.test_trace_privacy::test_prune_dry_run_on_live_repo_never_selects_tracked",
-    4: "tests.test_stage_timings::test_timings_are_filled_and_ranking_unchanged",
-    5: "tests.test_eval_runs::test_save_run_refuses_holdout_before_writing",
-    6: "tests.test_eval_datasets::test_only_holdout_can_gate_a_promotion",
-    7: "tests.test_eval_reproduce::test_equal_digests_on_one_snapshot_and_release",
-    8: "tests.test_trace_modes::test_committed_v1_traces_have_no_schema_issue",
+    1: ("test_trace_modes_retrieval.py", "test_summary_trace_contains_no_query_text_anywhere"),
+    2: ("test_trace_privacy.py", "test_trace_files_and_dirs_are_private"),
+    3: ("test_trace_privacy.py", "test_prune_dry_run_on_live_repo_never_selects_tracked"),
+    4: ("test_stage_timings.py", "test_timings_are_filled_and_ranking_unchanged"),
+    5: ("test_eval_runs.py", "test_save_run_refuses_holdout_before_writing"),
+    6: ("test_eval_datasets.py", "test_only_holdout_can_gate_a_promotion"),
+    7: ("test_eval_reproduce.py", "test_equal_digests_on_one_snapshot_and_release"),
+    8: ("test_trace_modes.py", "test_committed_v1_traces_have_no_schema_issue"),
 }
 
 
-@pytest.mark.parametrize("gate,ref", sorted(MATRIX.items()))
-def test_every_z1a_gate_has_a_named_test(gate, ref):
-    module, name = ref.split("::")
-    assert callable(getattr(importlib.import_module(module), name, None)), f"gate {gate}: {ref}"
+@pytest.mark.parametrize("gate", sorted(MATRIX))
+def test_every_z1a_gate_names_a_test_that_exists(gate):
+    filename, name = MATRIX[gate]
+    source = (TESTS / filename).read_text(encoding="utf-8")
+    assert re.search(rf"^def {name}\(", source, re.M), f"gate {gate}: {filename}::{name}"
 ```
 
 Run: `PYTHONPATH=. python -m pytest tests/test_z1a_closure.py -q`. Expected: 8 passed.
@@ -1574,10 +1999,11 @@ Falsify: rename one referenced test temporarily, confirm FAIL, then restore.
 
 - [ ] **Step 2: Ranking-unchanged proof against BASE**
 
-BASE is the commit before Task 1 (recorded by `task-start` for Task 1).
-1. `git worktree add /tmp/z1a-base <BASE>` (scratchpad path allowed).
-2. Capture one coherent snapshot: `PYTHONPATH=. python scripts/measurement_snapshot.py --require wiki,search,graph --json`. Record the snapshot's index path. If this refuses with `SNAPSHOT_NOT_READY`, stop and report; never work around it.
-3. For both trees, run this script against the snapshot index and write ranked paths per index to a file:
+BASE is the commit before Task 1. Run from a checkout of BASE's scripts: `git worktree add <scratch>/z1a-base <BASE>`. The proof takes ONE coherent snapshot, dumps every gold item's top-10 with BASE code and with HEAD code into scratch files, compares the bytes, prints only numbers, and always releases the snapshot. It needs about 3.3 min; the gauntlet measured 3m18s.
+
+Neither script may print query text. BASE's `eval_search --json` still emits `failing_queries`, so only numeric keys are printed.
+
+`<scratch>/rank_dump.py`:
 
 ```python
 import json, sys
@@ -1590,21 +2016,46 @@ out = [[r["source_path"] for r in search_hybrid(i["query"], limit=10, db_path=sy
 json.dump(out, open(sys.argv[3], "w"))
 ```
 
-Run it with `PYTHONPATH=<tree> python /scratch/rank_dump.py <tree> <snapshot-index> <tree>.json`.
+`<scratch>/ranking_proof.py`:
 
-4. `cmp base.json head.json`. Expected: identical. Any difference is a failed gate: stop and report it, never edit the proof.
-5. Release the snapshot (`zurvan knowledge gc` or the snapshot's release) and remove the worktree.
+```python
+import json, os, subprocess, sys, hashlib
+live, wt, S = sys.argv[1:4]
+sys.path.insert(0, live)
+from scripts.measurement_snapshot import capture
+snap = capture(root=live, label="z1a-rankproof", purpose="measurement", required=("wiki", "search", "graph"))
+try:
+    idx = str(snap.index_path)
+    res = {}
+    for name, tree in (("base", live), ("head", wt)):
+        out = f"{S}/{name}.json"
+        subprocess.run([sys.executable, f"{S}/rank_dump.py", tree, idx, out], check=True,
+                       env=dict(os.environ, PYTHONPATH=tree, ZURVAN_ROOT=live))
+        res[name] = open(out, "rb").read()
+        # eval metrics per tree (drop any text field; print numbers only)
+        m = subprocess.run([sys.executable, f"{tree}/scripts/eval_search.py", "--hybrid", "--index", idx, "--json"],
+                           capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=tree, ZURVAN_ROOT=live))
+        d = json.loads(m.stdout)
+        print(name, {k: d[k] for k in ("queries", "top1_accuracy", "top3_accuracy", "mrr", "failures")},
+              "digest" if "result_digest" in d else "no-digest")
+    print("ranked lists identical:", res["base"] == res["head"], hashlib.sha256(res["base"]).hexdigest()[:12])
+    print("coherence:", json.load(open(os.path.join(os.path.dirname(idx), "manifest.json")))["coherence"]["status"])
+finally:
+    snap.release()
+    for n in ("base", "head"):
+        try: os.remove(f"{S}/{n}.json")
+        except OSError: pass
+```
 
-Also run the retrieval eval before and after on the same snapshot:
+Run: `PYTHONPATH=<BASE-tree> python <scratch>/ranking_proof.py <BASE-tree> <HEAD-tree> <scratch>`
+Expected (the gauntlet's own measurement, rev 262): `ranked lists identical: True`; base and head both `{'queries': 50, 'top1_accuracy': 0.72, 'top3_accuracy': 0.74, 'mrr': 0.739…, 'failures': 13}`; `coherence: VERIFIED`; `data/snapshots` empty afterwards.
 
-`PYTHONPATH=. python scripts/eval_search.py --hybrid --index <snapshot-index> --json`
-
-It runs once on HEAD. The same command runs in the BASE worktree without `result_digest`: compare `top1_accuracy`, `top3_accuracy` and `mrr`, which must be equal.
+If the store has moved since the gauntlet, the numbers may differ, but base and head must still be EQUAL. Any inequality is a failed gate: stop and report it, never edit the proof. A `SNAPSHOT_NOT_READY` refusal means wait or report; never work around it.
 
 - [ ] **Step 3: Live gates**
 
 Run each; record the output in the ledger.
-- `PYTHONPATH=. python scripts/cli.py eval reproduce`. Expected: `"equal": true`, `coherence.status == "COHERENT"`, exit 0.
+- `PYTHONPATH=. python scripts/cli.py eval reproduce`. Expected: `"equal": true`, `coherence.status == "VERIFIED"` (the capture vocabulary; `COHERENT` is `knowledge status`'s word; gauntlet G7), exit 0, about 2 min.
 - `PYTHONPATH=. python scripts/cli.py search "trace privacy" --hybrid --trace`, then read the written JSON. Expected: `trace_mode` is `summary`, no query text, no Markdown twin, file mode 0600. Delete that one trace afterwards (it is untracked).
 - `PYTHONPATH=. python scripts/cli.py trace prune --dry-run`. Expected: it lists no tracked file.
 - `PYTHONPATH=. python scripts/eval_provenance.py --gold eval/provenance_real_gold.jsonl --json`. Expected: identical metrics to the frozen RQ1 values (86%/79% pair as recorded in AGENTS.md).
