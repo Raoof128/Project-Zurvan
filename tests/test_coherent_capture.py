@@ -263,3 +263,58 @@ def test_the_script_can_take_a_coherent_capture(store):
     assert manifest["coherence"]["status"] == "VERIFIED"
     assert manifest["purpose"] == "m"
     shutil.rmtree(path.parent)
+
+
+def test_gate_10_a_measurement_keeps_resolving_to_E_while_live_moves_to_E1(store):
+    """Canonical §8.7: every measurement input resolves to E while live is B
+    at E+1; no A/B hybrid is observable; a second snapshot sees E+1."""
+    from scripts.graph_schema import read_graph_meta
+    from scripts.rebuild_search_index import read_index_meta
+    _rebuild(store)
+    E = kr.current(store).revision
+    with bsn.capture_coherent(store, purpose="measurement", required=MEASURE) as S:
+        _write(store, "b.md", "# b\n\nbeta page\n")
+        _rebuild(store)                                   # live is now B at E+1
+        assert kr.current(store).revision == E + 1
+        assert read_index_meta(S.path / "search.sqlite")["built_from_revision"] == str(E)
+        assert read_graph_meta(S.path / "graph.sqlite")["built_from_revision"] == str(E)
+        assert not (S.path / "wiki" / "b.md").exists()
+        assert "wiki/b.md" not in _sources(S.path / "search.sqlite")
+        assert "wiki/b.md" in _sources(os.environ["ZURVAN_SEARCH_DB"])
+        with bsn.capture_coherent(store, purpose="measurement", required=MEASURE) as S2:
+            assert S2.revision == E + 1
+
+
+def test_eval_reports_the_coherence_of_the_snapshot_it_scored(store):
+    """Gate item 13 at the consumer: an EXTERNAL_OBSERVED input is reported as
+    such, never as MANAGED."""
+    from scripts.eval_search import _coherence_of
+    (store / "wiki" / "a.md").write_text("# a\n\nhand edit\n")
+    _rebuild(store)
+    with bsn.capture_coherent(store, purpose="measurement", required=MEASURE) as bs:
+        c = _coherence_of(str(bs.path / "search.sqlite"))
+    assert c["status"] == "VERIFIED"
+    assert c["atomicity"] == kr.EXTERNAL_OBSERVED
+
+
+def test_eval_of_a_legacy_snapshot_or_the_live_index_is_unverified(store):
+    """Design §9.1: no retrieval evaluation claims coherence it was not given."""
+    from scripts.eval_search import _coherence_of
+    _rebuild(store)
+    assert _coherence_of(None)["status"] == "UNVERIFIED"
+    assert _coherence_of(os.environ["ZURVAN_SEARCH_DB"])["status"] == "UNVERIFIED"
+    with ms.capture(root=store, label="legacy") as s:
+        assert _coherence_of(str(s.index_path))["status"] == "UNVERIFIED"
+
+
+def test_the_metrics_carry_snapshot_coherence(store, tmp_path):
+    from scripts import eval_search
+    _rebuild(store)
+    gold = tmp_path / "gold.jsonl"
+    gold.write_text(json.dumps({"query": "alpha page",
+                                "expected_paths": [str((store / "wiki" / "a.md").resolve())]}) + "\n")
+    with bsn.capture_coherent(store, purpose="measurement", required=MEASURE) as bs:
+        metrics = eval_search.run_search_evaluation(
+            gold_file=str(gold), hybrid=True, as_json=True,
+            index_path=str(bs.path / "search.sqlite"))
+    assert metrics["snapshot_coherence"]["status"] == "VERIFIED"

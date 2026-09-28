@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import List, Dict, Any
 from scripts.metrics import calculate_top_k_hit, calculate_reciprocal_rank, calculate_mean_reciprocal_rank, calculate_accuracy
@@ -177,6 +178,7 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
         "passed": top3_accuracy >= min_top3,
         "index_path": index_path,
         "index_identity": _identity_of(index_path),
+        "snapshot_coherence": _coherence_of(index_path),
     }
 
     if as_json:
@@ -197,6 +199,10 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
             print(f"  {ident.get('chunks')} chunks / {ident.get('sources')} sources"
                   f"  chunk-set {str(ident.get('chunk_id_set_sha'))[:12]}"
                   f"  space {','.join(ident.get('embedding_space') or [])}")
+        c = metrics["snapshot_coherence"]
+        detail = (f"revision {c['revision']} ({c['atomicity']})"
+                  if c.get("revision") is not None else c.get("reason"))
+        print(f"Snapshot coherence: {c['status']} — {detail}")
         print("=========================")
 
     if top3_accuracy < min_top3:
@@ -229,6 +235,26 @@ def _identity_of(index_path: str) -> dict:
         return index_identity(index_path)
     except Exception:
         return {}
+
+
+def _coherence_of(index_path) -> dict:
+    """The coherence record of the snapshot this index belongs to (design §9.1).
+
+    A live index, or a legacy snapshot, is UNVERIFIED: never read as agreement.
+    An EXTERNAL_OBSERVED revision is reported as such, never as MANAGED (gate
+    item 13). Reporting, not a gate: this never raises.
+    """
+    if not index_path:
+        return {"status": "UNVERIFIED", "reason": "live index, not a snapshot"}
+    manifest = Path(index_path).parent / "manifest.json"
+    try:
+        coherence = json.loads(manifest.read_text(encoding="utf-8")).get("coherence")
+    except (OSError, ValueError):
+        coherence = None
+    if not coherence:
+        return {"status": "UNVERIFIED", "reason": "no coherence record"}
+    return {key: coherence.get(key)
+            for key in ("status", "reason", "purpose", "revision", "atomicity")}
 
 
 def _index_uses_mock_embeddings(index_path: str | None = None) -> bool:
