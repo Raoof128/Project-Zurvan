@@ -80,14 +80,14 @@ from scripts.trace_validate import validate_trace_file
 V1 = "zurvan.trace.v1"
 
 
-def _rec(**kw):
+def _v2_rec(**kw):
     base = dict(trace_id="trace-20260929T000000Z-modes001", title="t", summary="s")
     base.update(kw)
     return TraceRecord(**base)
 
 
 def test_new_records_are_v2_and_carry_their_mode():
-    data = _rec(trace_mode="summary").to_dict()
+    data = _v2_rec(trace_mode="summary").to_dict()
     assert data["schema_version"] == SCHEMA_VERSION == "zurvan.trace.v2"
     assert data["trace_mode"] == "summary"
     assert TRACE_MODES == ("summary", "full", "protected_eval")
@@ -95,13 +95,13 @@ def test_new_records_are_v2_and_carry_their_mode():
 
 def test_unknown_mode_is_refused():
     with pytest.raises(ValueError, match="trace_mode"):
-        _rec(trace_mode="verbose")
+        _v2_rec(trace_mode="verbose")
 
 
 def test_v1_cannot_claim_a_mode():
     # v1 predates modes and stored raw payloads: calling one "summary" would lie.
     with pytest.raises(ValueError, match="trace_mode"):
-        _rec(schema_version=V1, trace_mode="summary")
+        _v2_rec(schema_version=V1, trace_mode="summary")
 
 
 def test_v1_dict_round_trips_byte_for_byte():
@@ -112,7 +112,7 @@ def test_v1_dict_round_trips_byte_for_byte():
 
 
 def test_validator_accepts_v2_and_rejects_a_bad_mode(tmp_path):
-    good = _rec(trace_mode="summary").to_dict()
+    good = _v2_rec(trace_mode="summary").to_dict()
     path = tmp_path / "good.json"
     path.write_text(json.dumps(good))
     assert validate_trace_file(path).valid
@@ -256,7 +256,7 @@ from scripts.trace_writer import (ProtectedTraceError, TraceStore, in_protected_
                                   protected_eval_context)
 
 
-def _rec(tid="trace-20260929T000000Z-priv0001", mode="summary"):
+def _trace(tid="trace-20260929T000000Z-priv0001", mode="summary"):
     return TraceRecord(trace_id=tid, title="t", summary="s", trace_mode=mode)
 
 
@@ -265,7 +265,7 @@ def _mode(p):
 
 
 def test_trace_files_and_dirs_are_private(tmp_path):
-    paths = TraceStore(tmp_path).write(_rec(mode="full"))
+    paths = TraceStore(tmp_path).write(_trace(mode="full"))
     assert _mode(paths.json_path) == 0o600
     assert _mode(paths.markdown_path) == 0o600
     assert _mode(paths.json_path.parent) == 0o700
@@ -278,14 +278,14 @@ def test_an_existing_world_readable_trace_is_tightened(tmp_path):
     target.parent.mkdir(parents=True)
     target.write_text("{}")
     os.chmod(target, 0o644)
-    store.write(_rec())
+    store.write(_trace())
     assert _mode(target) == 0o600
 
 
 def test_summary_writes_no_markdown_twin_full_does(tmp_path):
     store = TraceStore(tmp_path)
-    assert not store.write(_rec(mode="summary")).markdown_path.exists()
-    assert store.write(_rec("trace-20260929T000000Z-priv0002", "full")).markdown_path.exists()
+    assert not store.write(_trace(mode="summary")).markdown_path.exists()
+    assert store.write(_trace("trace-20260929T000000Z-priv0002", "full")).markdown_path.exists()
 
 
 def test_protected_context_refuses_any_other_mode_before_writing(tmp_path):
@@ -294,10 +294,10 @@ def test_protected_context_refuses_any_other_mode_before_writing(tmp_path):
         assert in_protected_eval()
         for mode in ("summary", "full"):
             with pytest.raises(ProtectedTraceError) as exc:
-                store.write(_rec(mode=mode))
+                store.write(_trace(mode=mode))
             assert exc.value.code == "PROTECTED_TRACE"
         assert not store.trace_path("trace-20260929T000000Z-priv0001").exists()
-        paths = store.write(_rec("trace-20260929T000000Z-priv0003", "protected_eval"))
+        paths = store.write(_trace("trace-20260929T000000Z-priv0003", "protected_eval"))
         assert paths.json_path.exists() and not paths.markdown_path.exists()
     assert not in_protected_eval()
 
@@ -314,10 +314,10 @@ def test_prune_removes_old_untracked_and_never_tracked(tmp_path):
     _git_repo(tmp_path)
     store = TraceStore(tmp_path)
     now = time.time()
-    tracked = store.write(_rec("trace-20260929T000000Z-tracked1", "full"))
+    tracked = store.write(_trace("trace-20260929T000000Z-tracked1", "full"))
     subprocess.run(["git", "-C", str(tmp_path), "add", "-f", "data/traces", "wiki/traces"], check=True)
-    old = store.write(_rec("trace-20260929T000000Z-oldtrace", "full"))
-    new = store.write(_rec("trace-20260929T000000Z-newtrace"))
+    old = store.write(_trace("trace-20260929T000000Z-oldtrace", "full"))
+    new = store.write(_trace("trace-20260929T000000Z-newtrace"))
     for p in (tracked.json_path, tracked.markdown_path, old.json_path, old.markdown_path):
         _age(p, 40, now)
 
@@ -336,7 +336,7 @@ def test_prune_keeps_only_the_newest_n_untracked(tmp_path):
     now = time.time()
     ids = [f"trace-20260929T000000Z-keep000{i}" for i in range(3)]
     for age, tid in zip((3, 2, 1), ids):
-        _age(store.write(_rec(tid)).json_path, age, now)
+        _age(store.write(_trace(tid)).json_path, age, now)
     removed = store.prune(keep=1, now=now).removed
     assert sorted(removed) == sorted(str(store.trace_path(t)) for t in ids[:2])
 
@@ -344,14 +344,14 @@ def test_prune_keeps_only_the_newest_n_untracked(tmp_path):
 def test_prune_dry_run_deletes_nothing(tmp_path):
     _git_repo(tmp_path)
     store = TraceStore(tmp_path)
-    p = store.write(_rec()).json_path
+    p = store.write(_trace()).json_path
     result = store.prune(days=0, keep=0, dry_run=True)
     assert str(p) in result.removed and p.exists()
 
 
 def test_prune_outside_git_refuses_and_removes_nothing(tmp_path):
     store = TraceStore(tmp_path)
-    p = store.write(_rec()).json_path
+    p = store.write(_trace()).json_path
     result = store.prune(days=0, keep=0)
     assert result.refused and result.removed == [] and p.exists()
 
@@ -604,7 +604,7 @@ def test_protected_eval_trace_holds_aggregates_only(tmp_path, monkeypatch):
     assert types == ["retrieval.query", "retrieval.result"]
 
 
-def test_unknown_mode_is_refused(tmp_path, monkeypatch):
+def test_unknown_retrieval_trace_mode_is_refused(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         _write(tmp_path, monkeypatch, "verbose", "trace-20260929T000000Z-bad00001")
 
