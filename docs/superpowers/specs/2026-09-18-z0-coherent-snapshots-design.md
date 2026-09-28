@@ -565,6 +565,20 @@ a content hash. An in-place same-size write within one nanosecond tick is
 undetectable. The alternative is hashing 135 MB per capture and no observed
 failure justifies it.
 
+**Wired 2026-09-28 — step 2 had built the detector and nobody called it.**
+`observe_external_drift` had no production caller, and `commit_mutation`
+records the manifest of the WHOLE store, so an edit made outside Zurvan was
+absorbed into the next managed revision and labelled MANAGED — reproduced in a
+throwaway store (revision 2 MANAGED, digest covering the hand edit, drift
+detection afterwards `None`). Now `_insert_mutation` calls it before a
+managed operation's first byte (`trigger="activation"`), and every mint is
+kept in `external_observations`, because the managed commit that follows
+overwrites `atomicity`. Bound: no mint while the store is still changing,
+while another operation is in flight, on a SUSPECT store, or with no baseline
+— in those cases the edit is absorbed as before. Cost: one manifest pass per
+activation, 60 ms median on the live store (4,605 files). Capture-time
+detection (§10.2 item 12 as written) remains step 5/6.
+
 ---
 
 ## 6. Derived stores: coherent, current and stale are three states
