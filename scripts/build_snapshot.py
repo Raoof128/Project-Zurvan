@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from scripts import knowledge_revision as kr
 from scripts import knowledge_scope as ks
+from scripts.knowledge_manifest import ManifestUnavailable
 
 
 class BuildSnapshotRefused(RuntimeError):
@@ -125,15 +126,28 @@ def capture_build_inputs(root=None, label="rebuild", attempts=3, wait_s=300) -> 
         before = kr.current(base)
         if before.state != kr.CLEAN:
             continue
-        m_before = _live_manifest(base)
+        try:
+            m_before = _live_manifest(base)
+        except ManifestUnavailable:
+            continue                     # a file vanished mid-manifest: a race
         if m_before != before.manifest_digest:
             continue
         snap = ms.capture(base, label=label, components=ms.BUILD_INPUTS)
-        if _unchanged(base, m_before, before):
-            bs = BuildSnapshot(snap, before.revision, before.atomicity,
-                               before.manifest_digest)
-            (snap.path / "build.json").write_text(json.dumps(bs.stamp(), indent=2))
-            return bs
+        try:
+            unchanged = _unchanged(base, m_before, before)
+            if unchanged:
+                bs = BuildSnapshot(snap, before.revision, before.atomicity,
+                                   before.manifest_digest)
+                (snap.path / "build.json").write_text(json.dumps(bs.stamp(), indent=2))
+                return bs
+        except ManifestUnavailable:
+            unchanged = False            # a file vanished mid-manifest: a race
+        except BaseException:
+            # Any failure after the clone releases it: only check.sh sweeps
+            # data/snapshots, so a leak here would outlive the process
+            # (final review, 2026-09-28).
+            snap.release()
+            raise
         snap.release()
     raise BuildSnapshotNotReady(
         f"the store kept changing across {attempts} attempts; nothing was built")

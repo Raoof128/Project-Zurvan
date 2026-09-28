@@ -199,3 +199,39 @@ def test_the_graph_is_built_from_the_snapshot_and_stamped(store):
     finally:
         conn.close()
     assert "wiki/a.md" in paths and "wiki/after.md" not in paths
+
+
+
+# ── final review fixes: a failed capture leaves nothing, a vanishing file retries
+
+def _snapshots(store):
+    d = store / "data" / "snapshots"
+    return sorted(p.name for p in d.iterdir()) if d.exists() else []
+
+
+def test_a_failure_after_the_clone_releases_the_snapshot(store, monkeypatch):
+    import scripts.build_snapshot as mod
+    def boom(base, m_before, before):
+        raise kr.LedgerError("injected after the clone")
+    monkeypatch.setattr(mod, "_unchanged", boom)
+    with pytest.raises(kr.LedgerError):
+        bsn.capture_build_inputs(store)
+    assert _snapshots(store) == []
+
+
+def test_a_file_vanishing_mid_manifest_is_a_race_to_retry(store, monkeypatch):
+    """A delete between listing and stat raises ManifestUnavailable; that is
+    the store moving, so capture retries instead of crashing."""
+    import scripts.build_snapshot as mod
+    from scripts.knowledge_manifest import ManifestUnavailable
+    calls = {"n": 0}
+    real = mod._live_manifest
+    def flaky(base):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise ManifestUnavailable("cannot manifest wiki/gone.md (injected)")
+        return real(base)
+    monkeypatch.setattr(mod, "_live_manifest", flaky)
+    with bsn.capture_build_inputs(store) as bs:
+        assert bs.revision == kr.current(store).revision
+    assert _snapshots(store) == []

@@ -85,10 +85,82 @@ def test_a_store_with_no_ledger_is_invalid_not_refused(tmp_path, monkeypatch):
 
 
 def test_gate_5_reconcile_then_rebuild_is_current(store):
-    """Gate item 5, second half: reconcile reaches CLEAN without a rebuild,
-    and a rebuild afterwards makes the derived store CURRENT."""
+    """Gate item 5, second half, as the design states it: a writer dies
+    mid-operation (SUSPECT), reconcile reaches CLEAN WITHOUT a rebuild, and a
+    rebuild afterwards makes the derived store CURRENT. The first version of
+    this test never reconciled (final review, 2026-09-28)."""
+    import os, signal, subprocess, sys
+    from scripts import knowledge_reconcile as krec
     _build_graph(store)
-    _write(store, "b.md")
+    child = subprocess.run([sys.executable, "-c", (
+        "import os, signal\n"
+        "from scripts import knowledge_revision as kr\n"
+        "from scripts.safe_write import write_file_safely\n"
+        f"with kr.operation(writer='doomed', root={str(store)!r}):\n"
+        f"    write_file_safely({str(store / 'wiki' / 'torn.md')!r}, 'x')\n"
+        "    os.kill(os.getpid(), signal.SIGKILL)\n")],
+        env={**os.environ, "PYTHONPATH": "."})
+    assert child.returncode == -signal.SIGKILL
+    kr.detect_orphans(store)
+    assert kr.current(store).state == kr.SUSPECT
+    result = krec.reconcile(root=store, accept=True, actor="test", reason="probe")
+    assert result["status"] == "CLEAN" and kr.current(store).state == kr.CLEAN
     assert dh.store_health("graph", store)[0] == dh.STALE
     _build_graph(store)
     assert dh.store_health("graph", store)[0] == dh.CURRENT
+
+
+# ── final review fixes: health never crashes, and never hides SUSPECT ───────
+
+def _graph_db(store):
+    return store / "data" / "graph.sqlite"
+
+
+def test_a_graph_built_before_stamps_existed_is_invalid_not_a_crash(store):
+    import sqlite3
+    (store / "data").mkdir(exist_ok=True)
+    conn = sqlite3.connect(_graph_db(store))
+    conn.execute("CREATE TABLE nodes (node_id TEXT)")
+    conn.commit()
+    conn.close()
+    state, _, _, reason = dh.store_health("graph", store)
+    assert state == dh.INVALID and "unreadable" in reason
+
+
+def test_a_non_numeric_stamp_is_invalid_not_a_crash(store):
+    import os, sqlite3
+    _build_graph(store)
+    os.chmod(_graph_db(store), 0o644)
+    conn = sqlite3.connect(_graph_db(store))
+    conn.execute("UPDATE graph_meta SET value = 'r3' WHERE key = 'built_from_revision'")
+    conn.commit()
+    conn.close()
+    assert dh.store_health("graph", store)[0] == dh.INVALID
+
+
+def test_a_corrupt_store_is_invalid_not_a_crash(store):
+    (store / "data" / "search.sqlite").write_bytes(b"not a database at all")
+    state, _, _, reason = dh.store_health("search", store)
+    assert state == dh.INVALID and "unreadable" in reason
+
+
+def test_a_stamp_whose_manifest_disagrees_is_invalid(store):
+    """At the current revision, the stamp's manifest must be the ledger's -
+    otherwise the store names the right revision number for other bytes."""
+    import os, sqlite3
+    _build_graph(store)
+    os.chmod(_graph_db(store), 0o644)
+    conn = sqlite3.connect(_graph_db(store))
+    conn.execute("UPDATE graph_meta SET value = 'not-the-ledger-digest'"
+                 " WHERE key = 'built_from_manifest'")
+    conn.commit()
+    conn.close()
+    state, _, _, reason = dh.store_health("graph", store)
+    assert state == dh.INVALID and "manifest" in reason
+
+
+def test_health_says_so_when_the_ledger_is_suspect(store):
+    _build_graph(store)
+    kr._mark_suspect(store)
+    state, _, _, reason = dh.store_health("graph", store)
+    assert "SUSPECT" in reason

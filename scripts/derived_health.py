@@ -8,6 +8,7 @@ Stale is normal. Only INVALID means "do not trust this store's provenance".
 """
 
 import os
+import sqlite3
 from pathlib import Path
 
 from scripts import knowledge_revision as kr
@@ -38,18 +39,33 @@ def _meta(kind, base) -> tuple:
 
 def store_health(kind, root=None) -> tuple:
     base = ks.store_root(root)
-    path, meta = _meta(kind, base)
+    try:
+        path, meta = _meta(kind, base)
+    except (sqlite3.Error, OSError) as exc:
+        # A graph built before graph_meta existed, a corrupt file: never a
+        # crash in `knowledge status` (final review, 2026-09-28).
+        return INVALID, None, None, f"{kind} store unreadable: {exc}"
     if meta is None:
         return INVALID, None, None, f"{path.name} is missing"
     built = meta.get("built_from_revision")
     try:
-        now = kr.current(base).revision
+        ledger = kr.current(base)
     except kr.LedgerError:
         return INVALID, built, None, "no ledger to compare against"
+    now = ledger.revision
     if built is None:
         return INVALID, None, now, "no truthful source snapshot (unstamped build)"
-    if int(built) > now:
+    try:
+        built_rev = int(built)
+    except ValueError:
+        return INVALID, built, now, f"stamp {built!r} is not a revision"
+    note = "; ledger is SUSPECT - reconcile" if ledger.state != kr.CLEAN else ""
+    if built_rev > now:
         return INVALID, built, now, "stamp names a revision the ledger has not reached"
-    if int(built) == now:
-        return CURRENT, built, now, ""
-    return STALE, built, now, f"{now - int(built)} revision(s) behind"
+    if built_rev == now:
+        stamped = meta.get("built_from_manifest")
+        if stamped and ledger.manifest_digest and stamped != ledger.manifest_digest:
+            return INVALID, built, now, ("stamp's manifest is not the ledger's "
+                                         "at that revision")
+        return CURRENT, built, now, note.lstrip("; ")
+    return STALE, built, now, f"{now - built_rev} revision(s) behind" + note

@@ -117,7 +117,7 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
   INVALID. Step 6 (purpose/required capture, measurement coherence
   verification, leases, GC) is NOT BUILT. Do not describe measurement
   snapshots as coherence-verified. A rebuild REFUSES a SUSPECT store and WAITS
-  for live operations (up to 300 s).
+  for live operations (300 s per attempt, up to 3 attempts).
 - **Never quote the retrieval instrument verbatim.** The 50-item gold set lives
   in `~/.zurvan/instruments/`, never in git; `eval/search_gold.manifest.json`
   carries a count and one whole-file digest, deliberately with no per-item
