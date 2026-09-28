@@ -864,8 +864,24 @@ validate-before-swap order or the fsyncs each turns named tests red (8 / 5 /
 18 / 3), all behavioural. The fsync tests prove the OS primitive is called,
 never that bytes survive a power cut.
 
-Still NOT BUILT: `built_from_revision`, `built_from_snapshot`,
-snapshot-backed rebuilds (step 5); coherence verification (step 6). Z0 OPEN.
+**Status 2026-09-28 (Z0 step 5).** Rebuilds read a snapshot proven to be
+revision R (`scripts/build_snapshot.py`), stamp `built_from_revision`,
+`built_from_snapshot`, `built_from_atomicity`, `built_from_manifest` inside the
+store they publish, and `zurvan knowledge status` reports each store as
+COHERENT+CURRENT, COHERENT+STALE or INVALID (`scripts/derived_health.py`).
+Addressed, each by a named test: item 17 (`test_gate_17_a_rebuild_stamps_the_revision_it_read`),
+18 (`test_gate_18_a_suspect_store_is_refused`), 12 at capture
+(`test_gate_12_capture_mints_a_completed_unmanaged_edit`), 11
+(`test_a_write_during_capture_is_retried_then_refused`), 5's second half
+(`test_gate_5_reconcile_then_rebuild_is_current`). Item 9 is PARTIAL: the
+authoritative capture and the rebuild from it are built; the measurement
+capture's coherence verification is step 6. Ranking-neutral on a frozen
+corpus: graph content and search chunk set identical to the pre-change build.
+Amendments: `2026-09-18-zurvan-2-amendments.md` §10.
+
+Still NOT BUILT: `purpose`/`required` capture, coherence verification of
+measurement captures, leases, GC (step 6); item 1 BUSY, 8, 10, 13 at capture,
+19. Z0 OPEN.
 
 ### 10.4 Regression floor
 

@@ -421,6 +421,18 @@ on 23, 24 and 26 September and the ledger reported CLEAN throughout. That is
 the EXTERNAL_OBSERVED path of Z0 §5, not the implicit path, and is its own
 change.
 
+
+## 10. Amendment 8 — Z0 step 5: what a rebuild snapshot captures, and how coherence is proven
+
+Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step5-snapshot-backed-rebuilds.md`, each forced by a measurement:
+
+1. **Build inputs, not only `wiki/`.** §6.1's `capture(required={"wiki"})` would drop `docs/` (86 search / 90 graph files) and the root Markdown files — about 1% of chunks, a ranking change. The snapshot captures `wiki/`, `docs/` and `README/AGENTS/CLAUDE/CHANGELOG.md`. `built_from_revision` describes the wiki (the ledger's scope); the rest is git-tracked and outside the ledger — a stated bound.
+2. **Coherence proven on the live side.** The manifest carries `st_ino`; a clone has new inodes, so a snapshot's manifest never equals the live one. The proof is §5.1's double manifest: live before == live after == the ledger digest at R, revision unchanged, no mutation active.
+3. **Snapshots are released after the build.** Retention and leases are step 6; `built_from_snapshot` names a proof, not a replayable directory.
+4. **No ledger baseline builds from live, unstamped** (health INVALID) rather than refusing — a fresh clone has no ledger.
+
+Capture also WAITS for live operations (default 300 s) separately from retrying a race: without it, a rebuild during any ingest failed in 0.64 s blaming the store for changing (measured).
+
 ---
 
 ## 7. Amendment log
@@ -434,6 +446,7 @@ change.
 | 5 | 2026-09-19 | Z0 step 1 `mutations` | `project` split into `store_project` / `execution_project` / `selected_project` / `caller_project` (§8) |
 | 6 | 2026-09-19 | Z0 step 1 boundaries | MCP tools made top-level operation boundaries; live half-operation defect (§8.4) |
 | 7 | 2026-09-28 | Z0 §3.2, amendment 6 | Authoritative writes outside an operation refused; implicit mode only by reasoned migration opt-in; `--project` and project-slug fixes (§9) |
+| 8 | 2026-09-28 | Z0 §6.1 | Rebuild snapshots capture all build inputs; coherence by live double manifest; released after build; no-baseline builds unstamped (§10) |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
 policy), §30 (success definition) or §34 (acceptance gate).

@@ -111,11 +111,13 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
-- **Z0 is OPEN.** Steps 1–4 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
-  are built; gate items 14, 15 and 16 are closed. Gate 14's bound: 0444 stops
-  an accidental in-place write, not the owner (chmod) or root. Coherence
-  verification, `built_from_revision` and snapshot-backed rebuilds are NOT
-  BUILT. Do not describe snapshots as coherence-verified.
+- **Z0 is OPEN.** Steps 1–5 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
+  are built. Rebuilds read a snapshot proven to be revision R and stamp it;
+  `zurvan knowledge status` shows each derived store CURRENT, STALE (normal) or
+  INVALID. Step 6 (purpose/required capture, measurement coherence
+  verification, leases, GC) is NOT BUILT. Do not describe measurement
+  snapshots as coherence-verified. A rebuild REFUSES a SUSPECT store and WAITS
+  for live operations (up to 300 s).
 - **Never quote the retrieval instrument verbatim.** The 50-item gold set lives
   in `~/.zurvan/instruments/`, never in git; `eval/search_gold.manifest.json`
   carries a count and one whole-file digest, deliberately with no per-item
