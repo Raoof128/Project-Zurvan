@@ -215,3 +215,57 @@ def test_knowledge_gc_reclaims_only_what_the_rule_allows(store):
     assert "reclaimed" in out.stdout
     assert not dead.path.exists() and keep.path.exists()
     keep.release()
+
+
+# ── final review fixes ──────────────────────────────────────────────────────
+
+def test_a_lease_with_a_naive_timestamp_is_kept_and_never_stops_gc(store):
+    """Final review I1: a heartbeat with no timezone parses, then the
+    subtraction raised TypeError. GC walks in sorted order, so every snapshot
+    after it was never reclaimed, and check.sh's `--sweep || true` hid it."""
+    bad = _capture(store, label="bad")
+    later = _capture(store, label="zz-dead")
+    _rewrite_lease(bad, owner_pid=_dead_pid(), process_start_identity="gone",
+                   last_heartbeat="2026-01-01T00:00:00")
+    _rewrite_lease(later, owner_pid=_dead_pid(), process_start_identity="gone",
+                   last_heartbeat=_ago(7200))
+    assert ms.collect_garbage(store) == [str(later.path)]
+    [row] = ms.list_snapshots(store)
+    assert row["gc"] == ms.KEEP
+    bad.release()
+
+
+def test_an_identity_recorded_while_ps_failed_is_never_read_as_dead(store):
+    """Final review I2(a): own_identity() caches "<pid>:unknown" when ps fails
+    once. A live owner then never matches its own lease, and an expired lease
+    was reclaimed under a running measurement."""
+    with _capture(store) as s:
+        _rewrite_lease(s, process_start_identity=f"{os.getpid()}:unknown",
+                       last_heartbeat=_ago(7200))
+        assert ms.collect_garbage(store) == []
+        assert s.path.exists()
+
+
+def test_a_ps_that_runs_and_fails_is_unknown_not_dead(monkeypatch):
+    """Final review I2(b): empty stdout was read as "process absent" whatever
+    the exit status. Measured 2026-09-28: an absent pid gives rc 1 with EMPTY
+    stderr; a failing ps says why on stderr."""
+    import subprocess as sp
+
+    def failing_ps(args, **kwargs):
+        return sp.CompletedProcess(args, 1, stdout="", stderr="ps: sysctl failed\n")
+
+    monkeypatch.setattr(kr.subprocess, "run", failing_ps)
+    assert kr.process_state(os.getpid(), "anything") == kr.UNKNOWN
+
+
+def test_a_certainly_absent_pid_is_still_dead(monkeypatch):
+    """The fix must not make death unprovable: ESRCH from the kernel is
+    evidence even when ps is broken."""
+    import subprocess as sp
+
+    def failing_ps(args, **kwargs):
+        return sp.CompletedProcess(args, 1, stdout="", stderr="ps: sysctl failed\n")
+
+    monkeypatch.setattr(kr.subprocess, "run", failing_ps)
+    assert kr.process_state(_dead_pid(), "gone") == kr.DEAD

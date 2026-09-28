@@ -364,10 +364,24 @@ def process_identity(pid: int) -> str | None:
     not. `psutil` is not a dependency of this project; `ps -o lstart=` works on
     macOS and Linux.
     """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None                      # ESRCH: the kernel says it is absent
+    except PermissionError:
+        pass                             # EPERM: it exists, another user's
     out = subprocess.run(["ps", "-p", str(pid), "-o", "lstart="],
                          capture_output=True, text=True, timeout=5)
     started = out.stdout.strip()
-    return f"{pid}:{started}" if started else None
+    if started:
+        return f"{pid}:{started}"
+    # Measured 2026-09-28: a pid that exited gives rc 1 and EMPTY stderr. A ps
+    # that fails says why on stderr, and that is not evidence of absence
+    # (final review I2): reading it as "absent" turned a broken ps into DEAD.
+    if out.returncode == 1 and not out.stderr.strip():
+        return None
+    raise subprocess.SubprocessError(
+        f"ps failed for pid {pid}: rc={out.returncode} {out.stderr.strip()!r}")
 
 
 def own_identity() -> str:

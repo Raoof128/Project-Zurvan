@@ -58,6 +58,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -696,11 +697,24 @@ def gc_verdict(child, now=None) -> tuple:
     try:
         beat = datetime.fromisoformat(lease["last_heartbeat"])
         ttl = float(lease["ttl_s"])
+        # Inside the try: a heartbeat with no timezone PARSES, and only the
+        # subtraction raises. Outside it, one such lease stopped GC for every
+        # snapshot sorted after it (final review I1).
+        expired = (now - beat).total_seconds() > ttl
     except (KeyError, TypeError, ValueError):
         return KEEP, "lease has no usable heartbeat; not reclaimed on a guess"
-    expired = (now - beat).total_seconds() > ttl
-    owner = kr.process_state(lease.get("owner_pid"),
-                             lease.get("process_start_identity"))
+    identity = lease.get("process_start_identity")
+    owner = kr.process_state(lease.get("owner_pid"), identity)
+    if owner == kr.DEAD and str(identity).endswith(":unknown"):
+        # Recorded while `ps` was failing (`own_identity`'s fallback): a live
+        # owner can never match it, so a mismatch proves nothing. Only an
+        # absent pid is evidence (final review I2).
+        try:
+            present = kr.process_identity(int(lease.get("owner_pid"))) is not None
+        except (OSError, TypeError, ValueError, subprocess.SubprocessError):
+            present = True
+        if present:
+            owner = kr.UNKNOWN
     if owner == kr.ALIVE:
         return KEEP, "owner alive"
     if not expired:
