@@ -163,7 +163,38 @@ def _assert_embedding_space_is_safe(db_path: str, probe: dict) -> None:
         )
 
 
-def rebuild_search_index(db_path: str | None = None, root=None):
+INDEX_META = "index_meta"
+
+
+def read_index_meta(db_path) -> dict:
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        try:
+            return dict(conn.execute(f"SELECT key, value FROM {INDEX_META}"))
+        except sqlite3.OperationalError:
+            return {}                      # built before Z0 step 5: unstamped
+    finally:
+        conn.close()
+
+
+def _stamp_index(build_path, fields: dict) -> None:
+    """Write the source stamps into the BUILD file, before publication. The
+    retriever never reads this table (proved in Task 6)."""
+    from datetime import datetime, timezone
+    conn = sqlite3.connect(build_path)
+    try:
+        conn.execute(f"CREATE TABLE {INDEX_META} (key TEXT PRIMARY KEY,"
+                     " value TEXT NOT NULL)")
+        rows = dict(fields)
+        rows["built_at"] = datetime.now(timezone.utc).isoformat()
+        conn.executemany(f"INSERT INTO {INDEX_META} (key, value) VALUES (?, ?)",
+                         sorted(rows.items()))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rebuild_search_index(db_path: str | None = None, root=None, snapshot=None):
     """Rebuild the chunk/FTS/embedding index into a temp file, then swap it in.
 
     ``root`` scopes which markdown tree is indexed. It exists for tests: a
@@ -171,6 +202,11 @@ def rebuild_search_index(db_path: str | None = None, root=None):
     much has been ingested, which at 3,823 pages meant the suite stopped
     finishing. Production callers leave it None and index the repo.
     """
+    if snapshot is not None and root is not None:
+        raise ValueError("pass snapshot OR root, not both")
+    if snapshot is not None:
+        # Design §6.1: no implicit live reads once the build starts.
+        root = snapshot.path
     if db_path is None:
         # ZURVAN_SEARCH_DB lets a test build its index somewhere disposable.
         # Without it the smoke test, which runs under the mock embedding
@@ -224,6 +260,7 @@ def rebuild_search_index(db_path: str | None = None, root=None):
         # atomic: readers see the old index or the new one. Integrity was
         # checked by `check_index_health(deep=True)` above, and a full
         # `integrity_check` over 739 MB would double the cost of publishing.
+        _stamp_index(build_path, snapshot.stamp() if snapshot is not None else {})
         _publication.publish(build_path, db_path, integrity=False)
     finally:
         reusable.close()
@@ -361,4 +398,8 @@ def _install_sigterm_cleanup():
 
 if __name__ == "__main__":
     _install_sigterm_cleanup()
-    rebuild_search_index()
+    from scripts.build_snapshot import inputs_for_rebuild
+    with inputs_for_rebuild() as bs:
+        if bs is None:
+            print("  no ledger baseline: building from the live tree, unstamped")
+        rebuild_search_index(snapshot=bs)

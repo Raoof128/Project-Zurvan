@@ -134,3 +134,47 @@ def test_release_removes_the_snapshot(store):
     path = bs.path
     bs.release()
     assert not path.exists()
+
+
+# ── Task 3: the search index ────────────────────────────────────────────────
+
+@pytest.fixture
+def mock_env(monkeypatch):
+    monkeypatch.setenv("ZURVAN_EMBED_PROVIDER", "mock")
+    monkeypatch.setenv("ZURVAN_EMBED_MODEL", "mock_model")
+
+
+def _sources(db):
+    import sqlite3
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return {r[0] for r in conn.execute("SELECT DISTINCT source_path FROM chunks")}
+    finally:
+        conn.close()
+
+
+def test_gate_17_a_rebuild_stamps_the_revision_it_read(store, mock_env):
+    """The corpus advances while the rebuild runs. The stamp is the revision
+    that was READ, and the page written afterwards is not in the index -
+    proof the build read the snapshot, not live."""
+    from scripts.rebuild_search_index import rebuild_search_index, read_index_meta
+    # Not data/search.sqlite: under ZURVAN_ROOT that is the CANONICAL path,
+    # which refuses mock embeddings (the exact-provider invariant).
+    db = store / "data" / "s.sqlite"
+    with bsn.capture_build_inputs(store) as bs:
+        read_at = bs.revision
+        _managed_write(store, "after.md")                # live moves on
+        rebuild_search_index(str(db), snapshot=bs)
+    meta = read_index_meta(db)
+    assert meta["built_from_revision"] == str(read_at)
+    assert kr.current(store).revision == read_at + 1
+    assert "wiki/after.md" not in _sources(db)
+    assert "wiki/a.md" in _sources(db)
+
+
+def test_snapshot_and_root_cannot_both_be_given(store, mock_env):
+    from scripts.rebuild_search_index import rebuild_search_index
+    with bsn.capture_build_inputs(store) as bs:
+        with pytest.raises(ValueError):
+            rebuild_search_index(str(store / "data" / "s.sqlite"), root=store,
+                                 snapshot=bs)
