@@ -318,3 +318,35 @@ def test_the_metrics_carry_snapshot_coherence(store, tmp_path):
             gold_file=str(gold), hybrid=True, as_json=True,
             index_path=str(bs.path / "search.sqlite"))
     assert metrics["snapshot_coherence"]["status"] == "VERIFIED"
+
+
+def test_gate_4_a_killed_writer_blocks_snapshots_not_writes_until_reconciled(store):
+    """§10.1 item 4 as one sequence, with a REAL kill: the revision becomes
+    SUSPECT, snapshots of it are refused, live writes continue, SUSPECT
+    propagates across a later unrelated operation, and only reconcile clears
+    it. Before this, the parts were proven separately and the refusal only
+    against a simulated SUSPECT (`_mark_suspect`)."""
+    import signal
+    from scripts import knowledge_reconcile as krec
+    child = subprocess.run([sys.executable, "-c", (
+        "import os, signal\n"
+        "from scripts import knowledge_revision as kr\n"
+        "from scripts.safe_write import write_file_safely\n"
+        f"with kr.operation(writer='doomed', root={str(store)!r}):\n"
+        f"    write_file_safely({str(store / 'wiki' / 'torn.md')!r}, 'x')\n"
+        "    os.kill(os.getpid(), signal.SIGKILL)\n")],
+        env={**os.environ, "PYTHONPATH": "."})
+    assert child.returncode == -signal.SIGKILL
+    kr.detect_orphans(store)
+    suspect = kr.current(store)
+    assert suspect.state == kr.SUSPECT
+    with pytest.raises(bsn.BuildSnapshotRefused, match="SUSPECT"):
+        bsn.capture_coherent(store, purpose="measurement", required=("wiki",))
+    _write(store, "unrelated.md")                  # live writes continue
+    later = kr.current(store)
+    assert later.revision == suspect.revision + 1
+    assert later.state == kr.SUSPECT               # advancing is not repair
+    result = krec.reconcile(root=store, accept=True, actor="test", reason="gate 4")
+    assert result["status"] == "CLEAN"
+    with bsn.capture_coherent(store, purpose="measurement", required=("wiki",)) as bs:
+        assert bs.revision == kr.current(store).revision
