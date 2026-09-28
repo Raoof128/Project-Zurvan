@@ -15,10 +15,11 @@ from scripts.config import PROJECT_ROOT
 def generate_node_id(path: str) -> str:
     return hashlib.sha256(path.encode('utf-8')).hexdigest()
 
-def get_file_content(path: str) -> str:
+def get_file_content(path: str, root=None) -> str:
     # Node identity is kept relative (e.g. "wiki/foo.md") but content is read
     # from an absolute location so building is CWD-independent.
-    abs_path = path if os.path.isabs(path) else os.path.join(PROJECT_ROOT, path)
+    abs_path = path if os.path.isabs(path) else os.path.join(
+        str(root) if root is not None else PROJECT_ROOT, path)
     with open(abs_path, 'r', encoding='utf-8') as f:
         return f.read()
 
@@ -132,9 +133,13 @@ def extract_edges(path: str, content: str, nodes_dict: Dict[str, Dict]) -> List[
                 
     return edges
 
-def _collect_graph():
-    """(nodes_dict, edges_list) for the corpus under PROJECT_ROOT. The logic is
-    the pre-2026-09-28 body of build_graph, moved, not changed."""
+def _collect_graph(source_root=None):
+    """(nodes_dict, edges_list) for the corpus under `source_root` (default
+    PROJECT_ROOT). The logic is the pre-2026-09-28 body of build_graph.
+
+    `source_root`, not `root`: the body uses `root` as its os.walk loop
+    variable, which would shadow a parameter of that name after the first
+    directory (found by the Z0 step 5 gauntlet)."""
     target_dirs = ['wiki', 'docs']
     target_files = ['AGENTS.md', 'CHANGELOG.md', 'README.md']
     # 'traces' holds derived, self-referential trace replay mirrors — the search
@@ -146,9 +151,10 @@ def _collect_graph():
     # Pass 1: Gather nodes
     paths_to_process = []
     
-    for root, dirs, files in os.walk(PROJECT_ROOT):
+    base = str(source_root) if source_root is not None else PROJECT_ROOT
+    for root, dirs, files in os.walk(base):
         dirs[:] = [d for d in dirs if d not in exclude_dirs and not d.startswith('.')]
-        rel_root = os.path.relpath(root, PROJECT_ROOT)
+        rel_root = os.path.relpath(root, base)
         top = rel_root.split(os.sep)[0] if rel_root != "." else "."
         # Only descend into the repo root and the target directories.
         if top != "." and top not in target_dirs:
@@ -166,7 +172,7 @@ def _collect_graph():
 
     for p in paths_to_process:
         try:
-            content = get_file_content(p)
+            content = get_file_content(p, root=base)
             node_data = extract_node_data(p, content)
             nodes_dict[node_data['node_id']] = node_data
         except Exception as e:
@@ -176,7 +182,7 @@ def _collect_graph():
     edges_list = []
     for p in paths_to_process:
         try:
-            content = get_file_content(p)
+            content = get_file_content(p, root=base)
             edges = extract_edges(p, content, nodes_dict)
             edges_list.extend(edges)
         except Exception as e:
@@ -185,7 +191,7 @@ def _collect_graph():
     return nodes_dict, edges_list
 
 
-def _write_graph(build_path, nodes_dict, edges_list) -> None:
+def _write_graph(build_path, nodes_dict, edges_list, stamp=None) -> None:
     import uuid
     from datetime import datetime, timezone
     from scripts.graph_schema import GRAPH_SCHEMA_VERSION
@@ -209,13 +215,13 @@ def _write_graph(build_path, nodes_dict, edges_list) -> None:
             ("built_at", datetime.now(timezone.utc).isoformat()),
             ("node_count", str(len(nodes_dict))),
             ("edge_count", str(len(edges_list))),
-        ])
+        ] + sorted((stamp or {}).items()))
         conn.commit()
     finally:
         conn.close()
 
 
-def build_graph(db_path: str = DB_PATH):
+def build_graph(db_path: str = DB_PATH, snapshot=None):
     """Build the graph beside the canonical file and publish it atomically.
 
     Until 2026-09-28 this DELETEd and re-INSERTed into the canonical file, so
@@ -237,8 +243,9 @@ def build_graph(db_path: str = DB_PATH):
         # ~3 s. Created only in `_write_graph`, a second build started in that
         # window passed the sweep (found by the final review, 2026-09-28).
         open(build_path, "xb").close()
-        nodes_dict, edges_list = _collect_graph()
-        _write_graph(build_path, nodes_dict, edges_list)
+        nodes_dict, edges_list = _collect_graph(snapshot.path if snapshot is not None else None)
+        _write_graph(build_path, nodes_dict, edges_list,
+                     stamp=snapshot.stamp() if snapshot is not None else None)
         sp.publish(build_path, db_path, integrity=True)
     finally:
         sp.discard_build(build_path)   # absent after a successful replace
@@ -249,4 +256,6 @@ def build_graph(db_path: str = DB_PATH):
 
 
 if __name__ == "__main__":
-    build_graph()
+    from scripts.build_snapshot import inputs_for_rebuild
+    with inputs_for_rebuild() as bs:
+        build_graph(snapshot=bs)

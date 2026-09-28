@@ -116,7 +116,7 @@ def test_a_failed_build_leaves_the_published_graph_untouched(tree, monkeypatch):
     gb.build_graph(db)
     before = _bytes(db)
 
-    def disk_full(build_path, nodes_dict, edges_list):
+    def disk_full(build_path, nodes_dict, edges_list, stamp=None):
         # A real mid-write failure: the build file exists and a write
         # transaction is open when the error lands. Replacing _write_graph
         # without creating the file made the cleanup assertion vacuous — the
@@ -206,7 +206,7 @@ def test_a_build_still_collecting_already_blocks_a_second(tree, tmp_path):
         f"sys.path.insert(0, {str(REPO)!r})\n"
         "import scripts.graph_build as gb\n"
         f"gb.PROJECT_ROOT = {str(root)!r}\n"
-        "def slow_collect():\n"
+        "def slow_collect(source_root=None):\n"
         f"    open({str(marker)!r}, 'w').close()\n"
         "    time.sleep(30)\n"
         "    return {}, []\n"

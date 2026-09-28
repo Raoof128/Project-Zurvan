@@ -178,3 +178,24 @@ def test_snapshot_and_root_cannot_both_be_given(store, mock_env):
         with pytest.raises(ValueError):
             rebuild_search_index(str(store / "data" / "s.sqlite"), root=store,
                                  snapshot=bs)
+
+
+# ── Task 4: the graph ───────────────────────────────────────────────────────
+
+def test_the_graph_is_built_from_the_snapshot_and_stamped(store):
+    import scripts.graph_build as gb
+    from scripts.graph_schema import read_graph_meta
+    db = str(store / "data" / "graph.sqlite")
+    with bsn.capture_build_inputs(store) as bs:
+        read_at = bs.revision
+        _managed_write(store, "after.md")
+        gb.build_graph(db, snapshot=bs)
+    meta = read_graph_meta(db)
+    assert meta["built_from_revision"] == str(read_at)
+    import sqlite3
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        paths = {r[0] for r in conn.execute("SELECT path FROM nodes")}
+    finally:
+        conn.close()
+    assert "wiki/a.md" in paths and "wiki/after.md" not in paths
