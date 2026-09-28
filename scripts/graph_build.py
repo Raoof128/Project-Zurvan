@@ -257,5 +257,5 @@ def build_graph(db_path: str = DB_PATH, snapshot=None):
 
 if __name__ == "__main__":
     from scripts.build_snapshot import inputs_for_rebuild
-    with inputs_for_rebuild() as bs:
+    with inputs_for_rebuild(purpose="rebuild_graph") as bs:
         build_graph(snapshot=bs)

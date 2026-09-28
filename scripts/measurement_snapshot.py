@@ -777,6 +777,12 @@ if __name__ == "__main__":
                         help="remove snapshots left by processes that are gone")
     parser.add_argument("--path-only", action="store_true",
                         help="print only the snapshot index path, for shell callers")
+    parser.add_argument("--purpose", default=None,
+                        help="what this snapshot is for; recorded in its lease")
+    parser.add_argument("--require", default=None,
+                        help="comma-separated components that must be coherent at "
+                             "one knowledge revision, e.g. wiki,search,graph; "
+                             "refuses with SNAPSHOT_NOT_READY otherwise")
     args = parser.parse_args()
 
     if args.sweep:
@@ -784,7 +790,9 @@ if __name__ == "__main__":
             print(f"swept {path}")
         raise SystemExit(0)
 
-    s = capture(label=args.label, deep=args.deep)
+    required = tuple(p for p in args.require.split(",") if p) if args.require else None
+    s = capture(label=args.label, deep=args.deep, purpose=args.purpose,
+                required=required)
     if args.path_only:
         # The caller owns the release: a snapshot captured by one process and
         # used by another cannot be freed by a context manager.

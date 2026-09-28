@@ -399,7 +399,7 @@ def _install_sigterm_cleanup():
 if __name__ == "__main__":
     _install_sigterm_cleanup()
     from scripts.build_snapshot import inputs_for_rebuild
-    with inputs_for_rebuild() as bs:
+    with inputs_for_rebuild(purpose="rebuild_search") as bs:
         if bs is None:
             print("  no ledger baseline: building from the live tree, unstamped")
         rebuild_search_index(snapshot=bs)
