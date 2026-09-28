@@ -1119,6 +1119,14 @@ def _main():
             print(f"atomicity:  {rev.atomicity}")
             print("baseline:   " + ("recorded" if rev.manifest_digest
                                     else "ABSENT — run `zurvan knowledge bootstrap`"))
+            if rev.manifest_digest:
+                # Read-only: reports the gap, never mints. Until 2026-09-28 a
+                # hand edit left this command saying CLEAN with no hint.
+                from scripts.knowledge_manifest import authoritative_manifest
+                live = authoritative_manifest()
+                print("drift:      " + ("none" if live == rev.manifest_digest else
+                      "UNRECORDED — the wiki changed outside Zurvan; the next "
+                      "write records it as EXTERNAL_OBSERVED"))
         elif args.action == "bootstrap":
             print(f"bootstrapped at revision {kr.bootstrap(actor='cli')}")
         elif args.action == "callers":

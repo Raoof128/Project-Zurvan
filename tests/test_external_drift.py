@@ -152,3 +152,14 @@ def test_the_cli_records_a_hand_edit_end_to_end(root):
     assert result.returncode == 0, result.stderr
     [row] = kr.external_observations(root)
     assert row[1] == "activation"
+
+
+def test_status_reports_unrecorded_drift_without_writing(root):
+    (root / "wiki" / "a.md").write_text("# a\nhand edit\n")
+    fingerprint = kr.ledger_fingerprint(root)
+    env = {**os.environ, "ZURVAN_ROOT": str(root), "PYTHONPATH": str(REPO)}
+    out = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "cli.py"), "knowledge", "status"],
+        cwd=str(root), env=env, capture_output=True, text=True).stdout
+    assert "drift:      UNRECORDED" in out
+    assert kr.ledger_fingerprint(root) == fingerprint
