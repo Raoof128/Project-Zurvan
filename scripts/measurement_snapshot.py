@@ -391,10 +391,57 @@ class Snapshot:
         return self._released
 
 
+BUILD_ROOT_FILES = ("README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md")
+
+
+def capture_docs(root, into) -> Component:
+    """`docs/` is read by both rebuilders (amendment 1). Git-tracked, outside
+    the ledger: captured for input identity, not for revision coherence. An
+    absent tree is captured as absent - a fresh store may have none."""
+    from scripts.immutable_bytes import ImmutableBytesError, clone_tree
+    source = Path(root) / "docs"
+    destination = Path(into) / "docs"
+    if not source.is_dir():
+        return Component(name="docs", path=destination, backend="absent",
+                         logical_bytes=0, captured_scope=FULL_TREE,
+                         authoritative_scope=WHOLE_COMPONENT)
+    try:
+        mechanism = clone_tree(source, destination)
+    except ImmutableBytesError as exc:
+        raise SnapshotComponentError(f"docs capture failed: {exc}") from exc
+    total = sum(p.stat().st_size for p in destination.rglob("*") if p.is_file())
+    return Component(name="docs", path=destination, backend=mechanism,
+                     logical_bytes=total, captured_scope=FULL_TREE,
+                     authoritative_scope=WHOLE_COMPONENT)
+
+
+def capture_roots(root, into) -> Component:
+    """The root Markdown files the rebuilders read: the union of search's
+    ROOT_INDEX_FILES and the graph's target_files."""
+    from scripts.immutable_bytes import ImmutableBytesError, clone_file
+    total, mechanism = 0, "absent"
+    for name in BUILD_ROOT_FILES:
+        source = Path(root) / name
+        if source.is_file():
+            try:
+                mechanism = clone_file(source, Path(into) / name)
+            except ImmutableBytesError as exc:
+                raise SnapshotComponentError(f"{name} capture failed: {exc}") from exc
+            total += source.stat().st_size
+    return Component(name="roots", path=Path(into), backend=mechanism,
+                     logical_bytes=total, captured_scope=SINGLE_FILE,
+                     authoritative_scope=WHOLE_COMPONENT)
+
+
+BUILD_INPUTS = ("wiki", "docs", "roots")
+
+
 _COMPONENTS = {
     "wiki": capture_wiki,
     "search": capture_search,
     "graph": capture_graph,
+    "docs": capture_docs,
+    "roots": capture_roots,
 }
 
 DEFAULT_COMPONENTS = ("search",)

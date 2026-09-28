@@ -310,3 +310,33 @@ def test_capture_refuses_an_index_whose_committed_state_is_not_in_the_file(
 
     with pytest.raises(ms.SnapshotComponentError):
         ms.capture_search(store, into)
+
+
+# ── build inputs: docs and root files (Z0 step 5) ───────────────────────────
+
+def test_build_inputs_capture_exactly_what_the_indexer_reads(store, into):
+    """Amendment 1: the index reads docs/ and root files too. A snapshot of
+    the build inputs must give scan_markdown_files the same list as live."""
+    from scripts.chunk import scan_markdown_files
+    (store / "docs").mkdir()
+    (store / "docs" / "guide.md").write_text("# Guide\n")
+    (store / "docs" / "evaluation").mkdir()
+    (store / "docs" / "evaluation" / "x.md").write_text("# excluded by the indexer\n")
+    (store / "README.md").write_text("# Readme\n")
+    (store / "CHANGELOG.md").write_text("# Changes\n")
+    (store / "wiki" / "p.md").write_text("# Page\n")
+    snap = ms.capture(store, label="t", components=ms.BUILD_INPUTS)
+    try:
+        assert sorted(scan_markdown_files(snap.path)) == sorted(scan_markdown_files(store))
+        assert (snap.path / "CHANGELOG.md").is_file()      # the graph reads it
+    finally:
+        snap.release()
+
+
+def test_a_missing_docs_tree_is_captured_as_absent_not_refused(store, into):
+    snap = ms.capture(store, label="t", components=("docs", "roots"))
+    try:
+        assert not (snap.path / "docs").exists()
+        assert "docs" in snap.identity["components"]
+    finally:
+        snap.release()
