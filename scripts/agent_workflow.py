@@ -304,9 +304,13 @@ def agent_postedit(summary: str, files: list[str], checks: str) -> str:
         checks=checks
     )
     
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write("\n" + content + "\n")
-        
+    # Through safe_write, never a raw open(): the raw append bypassed the
+    # mutation barrier, so every session's write-back left unrecorded drift
+    # that was later minted EXTERNAL_OBSERVED (2026-09-28, revision 250).
+    from scripts.safe_write import append_file_safely
+    if not append_file_safely(str(LOG_FILE), "\n" + content + "\n"):
+        raise RuntimeError(f"could not append the post-edit entry to {LOG_FILE}")
+
     return "✅ Post-edit memory recorded."
 
 if __name__ == "__main__":

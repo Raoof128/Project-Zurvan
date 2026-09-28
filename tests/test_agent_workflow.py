@@ -28,7 +28,14 @@ def test_agent_preflight(tmp_path, monkeypatch):
     assert "Context: Dummy Context" in result
 
 def test_agent_postedit(tmp_path, monkeypatch):
-    monkeypatch.setattr("scripts.agent_workflow.LOG_FILE", tmp_path / "log.md")
+    # Inside a store and an operation: postedit now writes through safe_write,
+    # which refuses a log outside the store root and a write with no operation
+    # (fail-closed writes). Every assertion below is unchanged.
+    from scripts import knowledge_revision as kr
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "data").mkdir()
+    monkeypatch.setattr("scripts.agent_workflow.LOG_FILE", tmp_path / "wiki" / "log.md")
     monkeypatch.setattr("scripts.agent_workflow.ROOT", tmp_path)
     # CODE_ROOT is where templates are read from; the store root no longer
     # implies it, so a fixture template needs this redirected too.
@@ -38,9 +45,10 @@ def test_agent_postedit(tmp_path, monkeypatch):
     with open(tmp_path / "scripts" / "templates" / "postedit.md", "w") as f:
         f.write("Time: {timestamp} Summary: {summary} Files: {files} Checks: {checks}")
         
-    agent_postedit("Did work", ["file1.txt", "file2.txt"], "make test")
-    
-    with open(tmp_path / "log.md", "r") as f:
+    with kr.operation(writer="test", root=tmp_path):
+        agent_postedit("Did work", ["file1.txt", "file2.txt"], "make test")
+
+    with open(tmp_path / "wiki" / "log.md", "r") as f:
         content = f.read()
         
     assert "Summary: Did work" in content
@@ -202,3 +210,36 @@ def test_agent_prime_fix_stale_skips_when_fresh(monkeypatch):
     with _patch("scripts.rebuild_search_index.rebuild_search_index") as rb:
         agent_prime(fix_stale=True)
     rb.assert_not_called()
+
+
+def test_postedit_is_a_managed_write_not_unrecorded_drift(tmp_path):
+    """`zurvan agent postedit` appended to wiki/log.md with a raw open(),
+    bypassing safe_write and the mutation barrier: the write-back CLAUDE.md
+    prescribes at every session's end left `knowledge status` reporting
+    unrecorded drift, later minted EXTERNAL_OBSERVED as if an editor had
+    touched the wiki (found 2026-09-28, revision 250). It must advance the
+    ledger as one MANAGED revision and leave no drift."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from scripts import knowledge_revision as kr
+    from scripts.knowledge_manifest import authoritative_manifest
+    repo = Path(__file__).resolve().parents[1]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "log.md").write_text("# Log\n")
+    kr.ensure_schema(tmp_path)
+    kr.bootstrap(tmp_path, actor="test")
+    before = kr.current(tmp_path).revision
+    out = subprocess.run(
+        [sys.executable, str(repo / "scripts" / "cli.py"), "agent", "postedit",
+         "--summary", "did work", "--files", "a.py", "--checks", "pytest"],
+        capture_output=True, text=True, cwd=repo,
+        env={**os.environ, "ZURVAN_ROOT": str(tmp_path), "PYTHONPATH": str(repo)})
+    assert out.returncode == 0, out.stderr
+    assert "did work" in (tmp_path / "wiki" / "log.md").read_text()
+    after = kr.current(tmp_path)
+    assert after.revision == before + 1
+    assert after.atomicity == kr.MANAGED
+    assert authoritative_manifest(tmp_path) == after.manifest_digest   # no drift
