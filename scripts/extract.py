@@ -128,5 +128,5 @@ if __name__ == "__main__":
     # line commit as a single revision, and `safe_write` refuses them without
     # a boundary (2026-09-28).
     from scripts import knowledge_revision as _kr
-    with _kr.operation(writer="extract", caller="scripts.extract:__main__"):
+    with _kr.operation(writer="extract", caller="scripts.extract:__main__", eager=True):
         extract_source(args.source)

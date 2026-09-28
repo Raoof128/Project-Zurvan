@@ -51,10 +51,12 @@ individual file write. `decision add` writes a page and then appends
 - `decision add --project <slug>` works (only a `--project` BEFORE the
   subcommand switches workspace). A malformed slug (`ClientX`) is refused, never
   stamped `unknown` and never lowercased for you.
-- **An edit made outside Zurvan is recorded before the next managed write**
-  as its own `EXTERNAL_OBSERVED` revision (`external_observations` keeps the
-  record). Before 2026-09-28 it was silently absorbed into that write's MANAGED
-  revision. `zurvan knowledge status` prints `drift: UNRECORDED` meanwhile.
+- **A change made outside the mutation barrier is recorded before the next
+  managed write** as its own `EXTERNAL_OBSERVED` revision (`external_observations`
+  keeps the record) — an editor, or a Zurvan writer that bypasses `safe_write`.
+  A writer that writes wiki files directly INSIDE an operation must open it with
+  `operation(eager=True)` (ingest and extract do), or its own writes are minted
+  as external. `zurvan knowledge status` prints `drift:` meanwhile.
 - A crash mid-mutation leaves the store **SUSPECT**. Only
   `zurvan knowledge reconcile` clears it, and it mints a NEW clean revision
   rather than flipping a flag — reaching CLEAN by editing the old row is

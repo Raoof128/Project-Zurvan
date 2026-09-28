@@ -163,3 +163,90 @@ def test_status_reports_unrecorded_drift_without_writing(root):
         cwd=str(root), env=env, capture_output=True, text=True).stdout
     assert "drift:      UNRECORDED" in out
     assert kr.ledger_fingerprint(root) == fingerprint
+
+
+# ── final review fixes ──────────────────────────────────────────────────────
+
+def test_an_ingest_is_not_recorded_as_an_external_edit(root):
+    """Final review, Important 1. `ingest.py` writes its source page and the
+    wiki index directly, and reaches `safe_write` only at the log line; with
+    lazy activation, its own direct writes were minted as an external edit
+    underneath the running operation. Its operation now activates eagerly."""
+    raw = root / "raw" / "notes"
+    raw.mkdir(parents=True)
+    (raw / "note.txt").write_text("A small source document about provenance.\n")
+    start = kr.current(root).revision
+    env = {**os.environ, "ZURVAN_ROOT": str(root), "PYTHONPATH": str(REPO),
+           "ZURVAN_EMBED_PROVIDER": "mock", "ZURVAN_EMBED_MODEL": "mock_model"}
+    result = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "ingest.py"), str(raw / "note.txt")],
+        cwd=str(root), env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert kr.external_observations(root) == []
+    assert kr.current(root).revision == start + 1
+
+
+def test_a_dead_writers_row_does_not_disable_absorption(root):
+    """Final review, Important 2. A crashed writer left an ACTIVE row; every
+    later write then skipped absorption and the hand edit was laundered."""
+    dead = kr.Operation(root=root, writer="crashed")
+    dead.mutation_id = kr._insert_mutation(dead)
+    conn = kr._connect(root)
+    try:
+        conn.execute("UPDATE mutations SET owner_pid = 999999,"
+                     " owner_identity = '999999:gone' WHERE mutation_id = ?",
+                     (dead.mutation_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    (root / "wiki" / "a.md").write_text("# a\nhand edit\n")
+    _managed_write(root)
+    [row] = kr.external_observations(root)
+    assert row[1] == "activation"
+
+
+def test_status_does_not_promise_a_mint_it_will_not_make(root):
+    """Final review, Minor 4 (fixed with Important 2 - same code). On a
+    SUSPECT store the next write does not record drift; the line said it did."""
+    kr._mark_suspect(root)
+    (root / "wiki" / "a.md").write_text("# a\nhand edit\n")
+    env = {**os.environ, "ZURVAN_ROOT": str(root), "PYTHONPATH": str(REPO)}
+    out = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "cli.py"), "knowledge", "status"],
+        cwd=str(root), env=env, capture_output=True, text=True).stdout
+    assert "drift:      UNRECORDED" in out
+    assert "reconcile" in out.split("drift:")[1]
+    assert "the next write records it" not in out
+
+
+def test_the_source_registry_follows_zurvan_root(tmp_path, monkeypatch):
+    """Found while fixing Important 1: `scripts/db.py` pinned `sources` to the
+    repo's `data/registry.sqlite` whatever ZURVAN_ROOT said, while the ledger
+    in the same file followed it. A subprocess ingest test therefore wrote a
+    row into the LIVE registry (removed by hand; backup in ~/.zurvan/forensics).
+    A read is used here so a red run cannot contaminate anything."""
+    import scripts.db as db
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    db.find_source_by_hash("no-such-hash")
+    assert (tmp_path / "data" / "registry.sqlite").is_file()
+
+
+def test_an_eager_operation_that_changes_nothing_mints_nothing(root):
+    """An ingest that finds its source already ingested writes nothing; its
+    eager mutation must end ABORTED, not mint an empty revision. Written after
+    the code, so its failure is shown by falsification instead of first-run."""
+    start = kr.current(root).revision
+    with kr.operation(writer="ingest", root=root, eager=True):
+        pass
+    assert kr.current(root).revision == start
+    assert kr.mutations_in(kr.COMMITTED, root) == []
+
+
+def test_an_eager_operations_direct_writes_are_its_own_revision(root):
+    """The eager case the ingest test exercises end to end, in-process."""
+    start = kr.current(root).revision
+    with kr.operation(writer="ingest", root=root, eager=True):
+        (root / "wiki" / "direct.md").write_text("written without safe_write\n")
+    assert kr.current(root).revision == start + 1
+    assert kr.current(root).atomicity == kr.MANAGED
+    assert kr.external_observations(root) == []

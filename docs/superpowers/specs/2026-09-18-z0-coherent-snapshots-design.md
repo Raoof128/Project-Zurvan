@@ -575,9 +575,13 @@ managed operation's first byte (`trigger="activation"`), and every mint is
 kept in `external_observations`, because the managed commit that follows
 overwrites `atomicity`. Bound: no mint while the store is still changing,
 while another operation is in flight, on a SUSPECT store, or with no baseline
-— in those cases the edit is absorbed as before. Cost: one manifest pass per
-activation, 60 ms median on the live store (4,605 files). Capture-time
-detection (§10.2 item 12 as written) remains step 5/6.
+— or when the edit lands during a managed operation; in those cases it is
+absorbed as before. Operations whose writers write wiki files directly
+(ingest, extract) activate eagerly, or their own writes would be minted as
+external underneath them; `wiki_merge.append_log_event` writes `wiki/log.md`
+directly, so a standalone ingest never reached the barrier at all. Cost: one
+manifest pass per activation, 60 ms median on the live store (4,605 files).
+Capture-time detection (§10.2 item 12 as written) remains step 5/6.
 
 ---
 

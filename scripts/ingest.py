@@ -463,5 +463,5 @@ if __name__ == "__main__":
     # above it (2026-09-28); the source page itself is written directly and is
     # seen by the ledger only as an external change.
     from scripts import knowledge_revision as _kr
-    with _kr.operation(writer="ingest", caller="scripts.ingest:main"):
+    with _kr.operation(writer="ingest", caller="scripts.ingest:main", eager=True):
         main()

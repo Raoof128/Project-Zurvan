@@ -1,11 +1,25 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'registry.sqlite')
+#: An explicit override (tests set it). None means: resolve per call from the
+#: store root, which follows ZURVAN_ROOT. Until 2026-09-28 this was pinned to
+#: the repo's own data/registry.sqlite, so `sources` ignored ZURVAN_ROOT while
+#: the knowledge ledger in the same file followed it - and a subprocess ingest
+#: test wrote a row into the LIVE registry.
+DB_PATH = None
+
+
+def _db_path() -> str:
+    if DB_PATH is not None:
+        return DB_PATH
+    from scripts import knowledge_scope as ks
+    return str(ks.store_root() / "data" / "registry.sqlite")
+
 
 def get_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    path = _db_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
     conn.execute('''
         CREATE TABLE IF NOT EXISTS sources (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1124,9 +1124,19 @@ def _main():
                 # hand edit left this command saying CLEAN with no hint.
                 from scripts.knowledge_manifest import authoritative_manifest
                 live = authoritative_manifest()
-                print("drift:      " + ("none" if live == rev.manifest_digest else
-                      "UNRECORDED — the wiki changed outside Zurvan; the next "
-                      "write records it as EXTERNAL_OBSERVED"))
+                if live == rev.manifest_digest:
+                    print("drift:      none")
+                elif rev.state != kr.CLEAN:
+                    print("drift:      UNRECORDED — the store is SUSPECT; "
+                          "reconcile first (the next write will not record it)")
+                elif kr.mutations_in(kr.ACTIVE):
+                    print("drift:      UNRECORDED — an operation is in flight; "
+                          "the change may be its own writes")
+                else:
+                    print("drift:      UNRECORDED — the wiki changed outside the "
+                          "mutation barrier (an editor, or a writer that bypasses "
+                          "safe_write); the next write records it as "
+                          "EXTERNAL_OBSERVED")
         elif args.action == "bootstrap":
             print(f"bootstrapped at revision {kr.bootstrap(actor='cli')}")
         elif args.action == "callers":

@@ -521,6 +521,12 @@ class Operation:
     caller: str | None = None
     implicit: bool = False
     implicit_reason: str | None = None
+    #: Activate at open instead of at the first planned write. For writers that
+    #: write authoritative files directly before (or instead of) reaching
+    #: `safe_write` - ingest, extract. Lazily activated, their own direct
+    #: writes were minted as an external edit underneath them (final review,
+    #: 2026-09-28).
+    eager: bool = False
     mutation_id: str | None = None
     depth: int = 0          # nesting depth; join-only, never used to commit
 
@@ -696,6 +702,13 @@ def _absorb_external_drift(base):
     except LedgerError:
         return None
     if not state.manifest_digest or state.state != CLEAN:
+        return None
+    # A crashed writer's ACTIVE row is not an operation in flight. Without
+    # this, one SIGKILL disabled absorption until someone ran reconcile
+    # (final review, 2026-09-28). DEAD owners only; a torn one makes the
+    # store SUSPECT, which is loud, instead of silently absorbing.
+    detect_orphans(base)
+    if current(base).state != CLEAN:
         return None
     if mutations_in(ACTIVE, base):
         return None
@@ -889,15 +902,36 @@ def abandon_mutation(mutation_id, reason, root=None) -> str:
 def _finish(op: Operation, ok: bool, reason: str = "") -> None:
     if op.mutation_id is None:
         return                       # nothing was ever planned; no row exists
+    if ok and op.eager and not _mutation_planned(op):
+        # An eager operation that wrote nothing through safe_write: commit
+        # only if its direct writes changed the store, else it minted nothing.
+        from scripts.knowledge_manifest import authoritative_manifest
+        live = authoritative_manifest(op.root)
+        if live == current(op.root).manifest_digest:
+            abandon_mutation(op.mutation_id, "eager operation changed nothing",
+                             root=op.root)
+            return
+        commit_mutation(op.mutation_id, manifest_digest=live, root=op.root)
+        return
     if ok:
         commit_mutation(op.mutation_id, root=op.root)
     else:
         abandon_mutation(op.mutation_id, reason, root=op.root)
 
 
+def _mutation_planned(op: Operation) -> bool:
+    conn = _connect_ro(op.root)
+    try:
+        row = conn.execute("SELECT planned_paths FROM mutations"
+                           " WHERE mutation_id = ?", (op.mutation_id,)).fetchone()
+    finally:
+        conn.close()
+    return bool(json.loads((row[0] if row else None) or "[]"))
+
+
 @contextmanager
 def operation(writer=None, caller=None, root=None, store_project=None,
-              execution_project=None, selected_project=None):
+              execution_project=None, selected_project=None, eager=False):
     """Scope one logical operation. Joins an enclosing one on the same store.
 
     No database row is created here. The mutation activates on the first
@@ -930,10 +964,12 @@ def operation(writer=None, caller=None, root=None, store_project=None,
     op = Operation(root=base, store_project=store_project,
                    execution_project=execution_project,
                    selected_project=selected_project,
-                   writer=writer, caller=caller)
+                   writer=writer, caller=caller, eager=eager)
     token = _CTX.set(op)
     try:
         try:
+            if eager:
+                op.mutation_id = _insert_mutation(op)
             yield op
         except SystemExit as exc:
             # `sys.exit` is control flow, not a crash: `scripts/cli.py` uses it
