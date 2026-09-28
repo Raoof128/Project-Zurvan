@@ -111,12 +111,15 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
-- **Z0 is OPEN.** Steps 1–5 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
-  are built. Rebuilds read a snapshot proven to be revision R and stamp it;
-  `zurvan knowledge status` shows each derived store CURRENT, STALE (normal) or
-  INVALID. Step 6 (purpose/required capture, measurement coherence
-  verification, leases, GC) is NOT BUILT. Do not describe measurement
-  snapshots as coherence-verified. A rebuild REFUSES a SUSPECT store and WAITS
+- **Z0 is OPEN.** Steps 1–6 of `docs/superpowers/specs/2026-09-18-z0-coherent-snapshots-design.md`
+  are built. A measurement capture declares what must be coherent —
+  `measurement_snapshot.py --require wiki,search,graph` — and refuses with
+  `SNAPSHOT_NOT_READY` unless each required store is CURRENT at the revision
+  it pins; `zurvan knowledge status` shows CURRENT, STALE (normal) or INVALID.
+  Snapshots hold leases; `zurvan knowledge gc` reclaims only an expired lease
+  with a dead owner. Step 7 (implicit-mutation inventory driven to empty) is
+  NOT BUILT. check.sh gate 6 is a LEGACY capture and reports UNVERIFIED — never
+  describe its number as a coherent Z0 measurement. A rebuild REFUSES a SUSPECT store and WAITS
   for live operations (300 s per attempt, up to 3 attempts).
 - **Never quote the retrieval instrument verbatim.** The 50-item gold set lives
   in `~/.zurvan/instruments/`, never in git; `eval/search_gold.manifest.json`

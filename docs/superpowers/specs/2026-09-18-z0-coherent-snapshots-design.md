@@ -883,6 +883,24 @@ Still NOT BUILT: `purpose`/`required` capture, coherence verification of
 measurement captures, leases, GC (step 6); item 1 BUSY, 8, 10, 13 at capture,
 19. Z0 OPEN.
 
+**Status 2026-09-28 (Z0 step 6).** `capture(purpose=..., required=...)`
+(`build_snapshot.capture_coherent`) verifies every required derived store's
+stamps on the FROZEN copy against the revision it pins, and publishes nothing
+otherwise; every snapshot holds a lease; GC reclaims only an expired lease with
+a dead owner; `zurvan knowledge snapshots|gc`. Closed, each by a named test:
+item 1 (`test_gate_1_a_capture_between_the_two_writes_of_decision_add_is_busy`),
+8 (`test_gate_8_disagreeing_components_fail_closed_naming_the_gap`), 9
+(`test_gate_9_no_deadlock_from_a_stale_index`; was PARTIAL), 10
+(`test_gate_10_a_measurement_keeps_resolving_to_E_while_live_moves_to_E1`), 13
+(`test_gate_13_a_snapshot_of_an_external_revision_says_so`, and at the eval,
+`test_eval_reports_the_coherence_of_the_snapshot_it_scored`), 19
+(`test_gate_19_an_unadapted_claims_ledger_fails_capture_closed`). First live
+measurement capture: VERIFIED at revision 242, 3.28 s. Amendments:
+`2026-09-18-zurvan-2-amendments.md` §11.
+
+Still NOT BUILT: step 7 — the implicit-mutation inventory driven to empty
+(§10.1 items 2–3). Z0 OPEN.
+
 ### 10.4 Regression floor
 
 20. Full `pytest` 0 failed; `check.sh` all 24 gates; `public_repo_guard`;

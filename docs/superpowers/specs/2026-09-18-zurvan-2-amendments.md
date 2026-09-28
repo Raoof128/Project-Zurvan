@@ -435,6 +435,22 @@ Capture also WAITS for live operations (default 300 s) separately from retrying 
 
 ---
 
+## 11. Amendment 9 — Z0 step 6: purpose/required capture, leases, GC
+
+Made 2026-09-28 in `docs/superpowers/plans/2026-09-28-z0-step6-coherent-capture.md`:
+
+1. **CLI is `zurvan knowledge snapshots|gc`**, not §8's `zurvan snapshot list|gc`, which is the release-archive command.
+2. **Coherence is verified before publication**, on the `.building-<pid>` directory; a refused capture never exists under a final name.
+3. **`required` must contain `"wiki"`**; `"claims"` cannot be required (UNSUPPORTED_BY_DESIGN until Z2).
+4. **GC removes the whole snapshot directory**; §8's optional metadata-outlives-artifacts is not taken.
+5. **A directory with no lease keeps the pid rule** (`.building-<pid>` and pre-step-6 snapshots).
+6. **`check.sh` gate 6 stays a legacy capture and reports `UNVERIFIED`**; requiring `search` there would fail the gate on any other project's write.
+7. **Lease TTL defaults to 3600 s**; GC also requires a dead owner, so the TTL bounds only a dead process's snapshot.
+8. **A live-stamp pre-check runs before the freeze** — a fast path (11.69 s → 0.17 s to refuse, measured), never the proof.
+9. **Liveness: EPERM means alive; a failing `ps` is UNKNOWN, never DEAD.** The kernel (`os.kill(pid, 0)` → ESRCH) is asked first.
+
+---
+
 ## 7. Amendment log
 
 | # | Date | Amends | Summary |
@@ -447,6 +463,7 @@ Capture also WAITS for live operations (default 300 s) separately from retrying 
 | 6 | 2026-09-19 | Z0 step 1 boundaries | MCP tools made top-level operation boundaries; live half-operation defect (§8.4) |
 | 7 | 2026-09-28 | Z0 §3.2, amendment 6 | Authoritative writes outside an operation refused; implicit mode only by reasoned migration opt-in; `--project` and project-slug fixes (§9) |
 | 8 | 2026-09-28 | Z0 §6.1 | Rebuild snapshots capture all build inputs; coherence by live double manifest; released after build; no-baseline builds unstamped (§10) |
+| 9 | 2026-09-28 | Z0 §7-§8 | Coherence verified on frozen copies before publication; `knowledge snapshots|gc`; leases with expired-AND-dead GC; gate 6 stays UNVERIFIED; liveness never guessed (§11) |
 
 No amendment to date changes §3 (non-negotiable invariants), §9 (evaluation
 policy), §30 (success definition) or §34 (acceptance gate).
