@@ -54,6 +54,42 @@ Copied verbatim from the governing documents. Every task's requirements implicit
 | `tests/test_graph_publication.py` (new) | Graph built aside, stamped, SIGKILL-safe, equivalent |
 | `tests/test_snapshot_components.py` (modify) | Gate 14 flips from "reproduced" to "enforced" |
 
+## Measured inputs (gauntlet, 2026-09-28, before execution)
+
+Every premise below was settled by running it, not by reading it. Four of them
+changed the plan.
+
+```text
+0444 published file            read ok; INSERT -> "attempt to write a readonly database";
+                               open(r+b) -> errno 13; no sidecar; os.replace onto it ok;
+                               hardlinked snapshot keeps its bytes; BEGIN IMMEDIATE still
+                               succeeds (a lock, not a write) and leaves no sidecar
+WAL build, closed cleanly      no -wal/-shm left; mode=ro open reports journal_mode=wal
+corruption (28 KB test db)     512 bytes at offset 4196 -> integrity_check "ok"  (MISSES)
+                               page-2 type byte / truncation / header page count /
+                               cell-pointer array -> sqlite3.DatabaseError "malformed"
+                               raised BY THE PRAGMA, not returned as rows
+graph build determinism        two builds of one frozen corpus: same 4,682 nodes /
+                               3,946 edges, DIFFERENT digest. Cause: edge_id is
+                               uuid4() per build (graph_build.py:84). Digest without
+                               edge_id: identical (7 duplicate edge groups preserved)
+integrity_check, live graph    10-13 ms (13 MB)      quick_check, live search 1.3-1.8 s
+F_FULLFSYNC after real write   13 MB: 16 ms; 746 MB: 5 ms; directory fsync < 0.1 ms
+                               (a lower bound: dirty-page state at flush is uncontrolled;
+                               a clone-copy measured first was INVALID - no dirty data)
+read-only fallout, simulated   10 existing tests write a published store in place:
+                               test_hybrid_search (3, fixture injects chunks) and
+                               test_index_integrity (5, deliberate corruption) +
+                               test_snapshot_components (2, the hazard tests rewritten here)
+in-place writers in scripts/   none: graph readers only read; snapshot.py only tars;
+                               db.py / decision_memory.py open other files
+```
+
+Changes the gauntlet forced: `assert_publishable` wraps every `sqlite3.Error`;
+the corruption test damages the page-type byte; `content_digest` excludes
+`edge_id`; the live search index is republished inside Task 2, not Task 5,
+because `capture_search` will refuse the current writable one.
+
 ## Review Focus
 
 Failure modes the design implies but no happy path exercises, most likely first. Each has its test in the owning task.
@@ -101,7 +137,7 @@ EOF
 
 - [ ] **Step 3: Write the digest script both halves of the comparison will use**
 
-One script, saved once, so "before" and "after" cannot differ in how they measure. Timestamps are excluded because `extract_node_data` defaults `created_at`/`updated_at` to `datetime.now()`.
+One script, saved once, so "before" and "after" cannot differ in how they measure. Timestamps are excluded because `extract_node_data` defaults `created_at`/`updated_at` to `datetime.now()`; `edge_id` is excluded because it is `uuid4()` per build — the gauntlet measured two builds of one frozen corpus differing in every edge_id and nothing else.
 
 ```bash
 cat > ~/.zurvan/measurements/z0-step4/digest.py <<'EOF'
@@ -111,7 +147,9 @@ def graph(path):
     h = hashlib.sha256()
     for r in c.execute("SELECT node_id, node_type, title, path, slug, content_hash, tags FROM nodes ORDER BY node_id"):
         h.update(repr(r).encode())
-    for r in c.execute("SELECT edge_id, from_node_id, to_node_id, edge_type, evidence, source_path FROM edges ORDER BY edge_id"):
+    # edge_id is uuid4() per build (graph_build.py:84): excluded, or two builds
+    # of the same corpus never match. Duplicates kept; order is by content.
+    for r in c.execute("SELECT from_node_id, to_node_id, edge_type, evidence, source_path FROM edges ORDER BY from_node_id, to_node_id, edge_type, evidence, source_path"):
         h.update(repr(r).encode())
     n = c.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
     e = c.execute("SELECT COUNT(*) FROM edges").fetchone()[0]
@@ -313,12 +351,15 @@ def test_a_wal_mode_build_is_not_published(live):
 
 
 def test_a_corrupt_build_is_not_published(live):
+    """Page 2's b-tree type byte. Measured 2026-09-28: 512 bytes of 0xff at
+    offset 4196 landed in unused space and integrity_check said "ok" - a
+    corruption test that corrupts nothing proves nothing."""
     before = _bytes(live)
     build = _db(sp.build_path_for(live), rows=range(2000))
-    with open(build, "r+b") as f:             # damage a page past the header
-        f.seek(4096 + 100)
-        f.write(b"\xff" * 512)
-    with pytest.raises((sp.PublicationError, sqlite3.DatabaseError)):
+    with open(build, "r+b") as f:
+        f.seek(4096)
+        f.write(b"\x00")
+    with pytest.raises(sp.PublicationError, match="not a readable database|integrity"):
         sp.publish(build, live, integrity=True)
     assert _bytes(live) == before
 
@@ -405,6 +446,36 @@ def test_discarding_a_build_removes_its_sidecars_and_tolerates_absence(tmp_path)
     sp.discard_build(build)
     sp.discard_build(build)
     assert not os.path.exists(build) and not os.path.exists(build + "-journal")
+
+
+def test_fsync_falls_back_where_full_fsync_does_not_exist(tmp_path, monkeypatch):
+    """Linux has no F_FULLFSYNC. The fallback is a peer path, so it runs."""
+    import types
+    calls = []
+    monkeypatch.setattr(sp, "fcntl", types.SimpleNamespace())
+    monkeypatch.setattr(sp.os, "fsync", lambda fd: calls.append(fd))
+    sp._fsync_file(_db(tmp_path / "f.sqlite"))
+    assert len(calls) == 1
+
+
+def test_full_fsync_is_used_where_it_exists(tmp_path, monkeypatch):
+    """The effect, not the call order: removing the flush must turn a test red,
+    and `test_the_protocol_runs_in_order` cannot see it (its spies record the
+    name even when the body is gone - found by the gauntlet's dry run)."""
+    import types
+    seen = []
+    fake = types.SimpleNamespace(F_FULLFSYNC=51,
+                                 fcntl=lambda fd, op: seen.append(op))
+    monkeypatch.setattr(sp, "fcntl", fake)
+    sp._fsync_file(_db(tmp_path / "f.sqlite"))
+    assert seen == [51]
+
+
+def test_the_directory_is_fsynced(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(sp.os, "fsync", lambda fd: calls.append(fd))
+    sp._fsync_dir(str(tmp_path))
+    assert len(calls) == 1
 ```
 
 - [ ] **Step 2: Run them and watch every one fail for the right reason**
@@ -513,13 +584,21 @@ def assert_publishable(build_path, integrity=True) -> None:
             raise PublicationError(
                 f"{os.path.basename(build_path)} has a {suffix.lstrip('-')} "
                 "sidecar: its committed state is not all in the file")
-    conn = sqlite3.connect(f"file:{build_path}?mode=ro", uri=True)
+    # Measured: real corruption makes the PRAGMA itself raise
+    # `DatabaseError: database disk image is malformed` rather than return
+    # rows, so every sqlite3 error here is a refusal to publish.
     try:
-        mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
-        result = (conn.execute("PRAGMA integrity_check").fetchall()
-                  if integrity else [("ok",)])
-    finally:
-        conn.close()
+        conn = sqlite3.connect(f"file:{build_path}?mode=ro", uri=True)
+        try:
+            mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+            result = (conn.execute("PRAGMA integrity_check").fetchall()
+                      if integrity else [("ok",)])
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise PublicationError(
+            f"{os.path.basename(build_path)} is not a readable database: {exc}"
+        ) from exc
     if mode != "delete":
         raise PublicationError(
             f"{os.path.basename(build_path)} is in {mode} mode; a published "
@@ -738,12 +817,37 @@ In `scripts/measurement_snapshot.py`, `capture_search`, immediately after `asser
 
 Run: `PYTHONPATH=. python -m pytest -q -p no:cacheprovider tests/test_snapshot_components.py tests/test_index_integrity.py tests/test_measurement_snapshot.py tests/test_snapshot_backend_equivalence.py`
 
-Any failure of the form `attempt to write a readonly database` is a test that mutated a published index in place — the hazard itself. Fix each by choosing what it actually meant: a test simulating corruption of a published store makes that explicit with `os.chmod(path, 0o644)` and a one-line comment saying it is simulating the forbidden write; a test that merely needed a fixture index builds it with `_make_index`-style direct creation instead of publishing. Never weaken the protocol to make a test pass.
+The gauntlet simulated this step and found exactly these in-place writers. Fix each by what it means; never weaken the protocol to make a test pass.
 
-- [ ] **Step 5: Commit**
+| Test | What it does | Fix |
+|---|---|---|
+| `test_hybrid_search.py` — `test_search_hybrid`, `test_fts_porter_stemming_matches_inflected_terms`, `test_vectorised_scoring_matches_the_reference_cosine_fusion` | `_insert_chunk` injects rows into a rebuilt index: a published store used as a scratch fixture | the index-building helper ends with the unlock below, once |
+| `test_index_integrity.py` — `test_a_partial_index_is_not_healthy`, `test_chunks_must_equal_embeddings`, `test_the_wrong_model_fails_health`, `test_a_mixed_provider_index_fails_health`, `test_a_wrong_width_vector_fails_deep_health` | deliberately corrupt a published index to exercise health checks | the unlock below, immediately before the corruption |
+
+```python
+def _unlock_published_for_fixture(db) -> None:
+    """Deliberately undo publication's read-only bit. These tests simulate the
+    forbidden in-place write (or use a published store as scratch); saying so
+    here keeps it from looking like an accident."""
+    os.chmod(db, 0o644)
+```
+
+Define it once in each of the two files (they share no helper module today).
+
+- [ ] **Step 5: Republish the live index now, not in Task 5**
+
+From this commit `capture_search` refuses a writable index, and the live one is writable until it is republished. `check.sh` would self-heal (its gate 5 rebuilds before gate 6 captures), but any other session measuring in between would be refused.
 
 ```bash
-git add scripts/rebuild_search_index.py scripts/measurement_snapshot.py tests/test_snapshot_components.py tests/test_index_integrity.py
+pgrep -f "rebuild_search_index|check.sh" && echo "BUSY - stop" || echo clear
+ZURVAN_EMBED_PROVIDER=sentence_transformers ZURVAN_EMBED_MODEL=all-MiniLM-L6-v2 scripts/zurvan index search
+stat -f '%Sp %N' data/search.sqlite          # -r--r--r--
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/rebuild_search_index.py scripts/measurement_snapshot.py tests/test_snapshot_components.py tests/test_index_integrity.py tests/test_hybrid_search.py
 git commit -m "zurvan: gate 14 - a published index refuses an in-place write"
 ```
 
@@ -854,6 +958,23 @@ def test_the_same_corpus_gives_the_same_content(tree):
     assert gs.content_digest(db) == first
 
 
+def test_edge_ids_are_random_which_is_why_the_digest_ignores_them(tree):
+    """Recorded, not endorsed: `graph_build.py:84` mints uuid4() edge ids, so a
+    rebuild renames every edge. If this ever fails, edge ids became
+    deterministic - then put edge_id back into content_digest."""
+    _, db = tree
+    def ids():
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            return {r[0] for r in conn.execute("SELECT edge_id FROM edges")}
+        finally:
+            conn.close()
+    gb.build_graph(db)
+    first = ids()
+    gb.build_graph(db)
+    assert first and first.isdisjoint(ids())
+
+
 def test_the_published_graph_is_self_contained(tree):
     _, db = tree
     gb.build_graph(db)
@@ -894,7 +1015,13 @@ def test_a_second_concurrent_build_refuses(tree):
 
 def test_a_sigkilled_build_leaves_the_published_graph_untouched(tree, tmp_path):
     """No `finally` runs under SIGKILL. The child builds, then kills itself at
-    the last moment before the swap."""
+    the last moment before the swap.
+
+    Bound: the sweep decides "dead" with `os.kill(pid, 0)`, so if the OS
+    reuses the child's pid before the next build, that build refuses as if a
+    builder were live. Inherited from the search sweep; the ledger's
+    pid+start-time identity would fix it and is not in scope.
+    """
     root, db = tree
     gb.build_graph(db)
     before = _bytes(db)
@@ -970,8 +1097,14 @@ def read_graph_meta(db_path) -> dict:
 
 
 def content_digest(db_path) -> str:
-    """What the graph SAYS, without when it was built: node and edge content,
-    timestamps excluded (`extract_node_data` defaults them to now())."""
+    """What the graph SAYS, without when it was built or what it was called.
+
+    Excluded: timestamps (`extract_node_data` defaults them to now()) and
+    `edge_id`, which is `uuid4()` per build (`graph_build.py:84`). Measured
+    2026-09-28: two builds of one frozen corpus differ in every edge_id and in
+    nothing else. Edges are ordered by content, duplicates kept (7 groups on
+    the live corpus), so a lost or doubled edge still changes the digest.
+    """
     import hashlib
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -981,8 +1114,9 @@ def content_digest(db_path) -> str:
                 " FROM nodes ORDER BY node_id"):
             h.update(repr(row).encode())
         for row in conn.execute(
-                "SELECT edge_id, from_node_id, to_node_id, edge_type, evidence,"
-                " source_path FROM edges ORDER BY edge_id"):
+                "SELECT from_node_id, to_node_id, edge_type, evidence, source_path"
+                " FROM edges ORDER BY from_node_id, to_node_id, edge_type,"
+                " evidence, source_path"):
             h.update(repr(row).encode())
         return h.hexdigest()
     finally:
@@ -1147,9 +1281,9 @@ Required:
 | `falsify_no_chmod` | every `..._fails_loudly` test, `test_a_published_store_is_read_only`, `test_the_first_build_publishes_where_nothing_existed` |
 | `falsify_no_selfcontained` | the three sidecar cases, `test_a_wal_mode_build_is_not_published`, `test_a_corrupt_build_is_not_published` |
 | `falsify_swap_first` | the sidecar, WAL and corrupt cases (the canonical bytes change before the refusal) |
-| `falsify_no_fsync` | `test_the_protocol_runs_in_order` only |
+| `falsify_no_fsync` | `test_fsync_falls_back_where_full_fsync_does_not_exist`, `test_full_fsync_is_used_where_it_exists`, `test_the_directory_is_fsynced` — and NOT `test_the_protocol_runs_in_order`, which checks order, not effect |
 
-`falsify_no_fsync` turning only the order test red is the honest result: durability cannot be observed without power-cutting the machine. Record it that way rather than claiming the fsyncs are tested.
+What these prove is that the OS primitive is called, never that bytes survived a power cut; durability itself is not observable here. Record it that way. (The gauntlet's dry run found the first draft of this table claiming the order test would catch a missing fsync. It does not.)
 
 - [ ] **Step 3: Record the results table in the task's commit message and move on**
 
@@ -1188,12 +1322,11 @@ PYTHONPATH=. python -c "from scripts.graph_schema import content_digest; print(c
 
 Required: both `IDENTICAL`, and `content_digest` equal to the hash in `after-graph.digest`. Any difference is a ranking-relevant change and stops the step (design §11).
 
-- [ ] **Step 2: Republish the live stores through the new path**
+- [ ] **Step 2: Republish the live graph through the new path (the index was republished in Task 2)**
 
 ```bash
 pgrep -f "rebuild_search_index|graph_build|check.sh" && echo "BUSY - stop" || echo clear
 scripts/zurvan graph rebuild
-ZURVAN_EMBED_PROVIDER=sentence_transformers ZURVAN_EMBED_MODEL=all-MiniLM-L6-v2 scripts/zurvan index search
 stat -f '%Sp %N' data/graph.sqlite data/search.sqlite      # both -r--r--r--
 PYTHONPATH=. python -c "from scripts.graph_schema import read_graph_meta; print(read_graph_meta('data/graph.sqlite'))"
 ls data | grep -E 'building|journal|-wal|-shm' || echo "no sidecars"
@@ -1302,5 +1435,10 @@ snapshot-backed rebuilds, CURRENT/STALE          NOT BUILT (step 5)
 coherence verification, leases, GC               NOT BUILT (step 6)
 hand edits invisible between reconciles          OPEN — separate change, before Z0 closes
 graph readers open read-write                    OPEN — reader change, not publication
+edge_id is uuid4() per build                     OPEN — a rebuild renames every edge; any
+                                                 consumer that caches edge ids is wrong
+                                                 across generations. Content-addressed ids
+                                                 are a format change: step 5 or Z1, filed
+sweep liveness by bare pid (reuse race)          OPEN — inherited; pid+start-time identity
 Z0 OPEN
 ```
