@@ -390,6 +390,19 @@ class Snapshot:
     def released(self) -> bool:
         return self._released
 
+    @property
+    def lease_path(self) -> Path:
+        return self.path / LEASE_NAME
+
+    def heartbeat(self) -> None:
+        """Renew the lease. A measurement that outlives its TTL calls this; GC
+        still needs the owner DEAD as well as the lease expired (design §8)."""
+        if self._released:
+            raise SnapshotComponentError("cannot heartbeat a released snapshot")
+        lease = json.loads(self.lease_path.read_text(encoding="utf-8"))
+        lease["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        _write_json_atomic(self.lease_path, lease)
+
 
 BUILD_ROOT_FILES = ("README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md")
 
@@ -446,6 +459,60 @@ _COMPONENTS = {
 
 DEFAULT_COMPONENTS = ("search",)
 
+LEASE_NAME = "lease.json"
+
+#: Amendment 9.7: a full gate run fits inside an hour. GC also requires the
+#: owner DEAD, so this bounds only how long a dead process's snapshot lives.
+DEFAULT_LEASE_TTL_S = 3600
+
+CLAIMS_LEDGER = ("data", "claims.sqlite")
+
+CLAIMS_STATUS = {"status": "UNSUPPORTED_BY_DESIGN",
+                 "reason": "structured claim ledger introduced in Z2"}
+
+LEGACY_COHERENCE = {
+    "status": "UNVERIFIED",
+    "reason": "legacy capture: no required components declared",
+    "components": {"claims": CLAIMS_STATUS},
+}
+
+
+def assert_no_unadapted_claims_ledger(base) -> None:
+    """Design §7.3: the structured claim ledger is Z2. If one appears before it
+    registers a capture adapter, every snapshot would be silently blind to it,
+    so capture fails closed instead."""
+    path = Path(base).joinpath(*CLAIMS_LEDGER)
+    if path.exists() and "claims" not in _COMPONENTS:
+        raise SnapshotComponentError(
+            f"{path} exists and no claims capture adapter is registered; "
+            "refusing a snapshot that would be blind to it (design §7.3)")
+
+
+def _write_json_atomic(path, data) -> None:
+    path = Path(path)
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _new_lease(snapshot_id, purpose, revision, names, ttl_s) -> dict:
+    """Design §8's fields. `process_start_identity` pairs the pid with its
+    start time, because a pid alone is recycled."""
+    from scripts.knowledge_revision import own_identity
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "snapshot_id": snapshot_id,
+        "knowledge_revision": revision,
+        "purpose": purpose,
+        "created_at": now,
+        "last_heartbeat": now,
+        "ttl_s": ttl_s,
+        "owner_pid": os.getpid(),
+        "process_start_identity": own_identity(),
+        "state": "HELD",
+        "referenced_artifacts": list(names),
+    }
+
 
 def _fsync_dir(directory) -> None:
     """Make the rename durable. Bounds the crash window; does not remove it.
@@ -461,26 +528,8 @@ def _fsync_dir(directory) -> None:
         os.close(fd)
 
 
-def capture(root=None, label="measurement", deep=False, components=None) -> Snapshot:
-    """Freeze the declared components. Returns a `Snapshot`.
-
-    `components=None` means `DEFAULT_COMPONENTS`, which is today's behaviour
-    exactly: `check.sh` gate 6 calls this on every run and reads only the
-    index, so cloning 135 MB of wiki would be a 47 ms tax on bytes nobody
-    opens.
-
-    This is NOT Step 6's `required`. `components` says which bytes to freeze;
-    `required` will add coherence verification and `SNAPSHOT_NOT_READY` on top.
-    They are kept apart so the seam is reviewable.
-
-    Captured into `<id>.building-<pid>` and published with one rename. Python
-    cleanup handles an exception; it cannot handle SIGKILL or power loss, and
-    those would otherwise leave a directory under the FINAL name holding some
-    of the components — indistinguishable from a whole snapshot to every later
-    reader. Any failure discards the partial capture (design §7.1).
-    """
-    base = _root(root)
-    names = tuple(components) if components is not None else DEFAULT_COMPONENTS
+def _validate_names(names) -> tuple:
+    names = tuple(names)
     unknown = [n for n in names if n not in _COMPONENTS]
     if unknown:
         raise SnapshotComponentError(
@@ -491,7 +540,21 @@ def capture(root=None, label="measurement", deep=False, components=None) -> Snap
         # `clone_tree` with "destination already exists", which reads as a
         # filesystem problem rather than a caller mistake.
         raise SnapshotComponentError(f"duplicate component names in {names}")
+    return names
 
+
+def _freeze(base, label, deep, names, purpose, revision, lease_ttl_s, verify):
+    """Freeze `names` into `<id>.building-<pid>`, verify, lease, publish.
+
+    Published with one rename. Python cleanup handles an exception; it cannot
+    handle SIGKILL or power loss, and those would otherwise leave a directory
+    under the FINAL name holding some of the components, indistinguishable
+    from a whole snapshot to every later reader. Any failure, including a
+    `verify` refusal, discards the partial capture (design §7.1), so a
+    snapshot that failed coherence never exists under a final name
+    (amendment 9.2).
+    """
+    assert_no_unadapted_claims_ledger(base)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     snapshot_id = f"{label}-{stamp}-{os.getpid()}"
     final = snapshots_dir(base) / snapshot_id
@@ -508,6 +571,7 @@ def capture(root=None, label="measurement", deep=False, components=None) -> Snap
         identity = {
             "snapshot_id": snapshot_id,
             "captured_at": datetime.now(timezone.utc).isoformat(),
+            "purpose": purpose,
             "components": {
                 name: {
                     "capture_backend": component.backend,
@@ -522,12 +586,16 @@ def capture(root=None, label="measurement", deep=False, components=None) -> Snap
         }
         if "search" in captured:
             index_path = captured["search"].path
-            identity["index_path"] = str(_canonical_index(root))
+            identity["index_path"] = str(_canonical_index(base))
             identity["index_inode"] = index_path.stat().st_ino
             identity["link"] = captured["search"].backend
             identity.update(index_identity(index_path, deep=deep))
+        identity["coherence"] = (verify(working) if verify is not None
+                                 else json.loads(json.dumps(LEGACY_COHERENCE)))
         (working / "manifest.json").write_text(
             json.dumps(identity, indent=2, default=str), encoding="utf-8")
+        _write_json_atomic(working / LEASE_NAME, _new_lease(
+            snapshot_id, purpose, revision, names, lease_ttl_s))
         os.rename(working, final)
         _fsync_dir(final.parent)
     except BaseException:
@@ -537,6 +605,36 @@ def capture(root=None, label="measurement", deep=False, components=None) -> Snap
         index_path = final / INDEX_NAME
     return Snapshot(snapshot_id=snapshot_id, path=final,
                     index_path=index_path, identity=identity)
+
+
+def capture(root=None, label="measurement", deep=False, components=None,
+            purpose=None, required=None, lease_ttl_s=DEFAULT_LEASE_TTL_S) -> Snapshot:
+    """Freeze the measurement input. Returns a `Snapshot`.
+
+    Two contracts, kept apart so the seam is reviewable:
+
+    - `components=` (legacy): which bytes to freeze. `None` means
+      `DEFAULT_COMPONENTS`, which is exactly today's behaviour: `check.sh`
+      gate 6 calls this on every run and reads only the index. Its manifest
+      says `coherence: UNVERIFIED`, because it proves no revision
+      (design §9.1).
+    - `required=` (design §2.1, step 6): the components that must describe
+      ONE knowledge revision. Delegates to `build_snapshot.capture_coherent`,
+      which refuses with `SnapshotNotReady` rather than publish a disagreement.
+    """
+    if required is not None:
+        if components is not None:
+            raise SnapshotComponentError(
+                "pass components OR required, not both: `required` decides "
+                "what a coherent capture freezes")
+        from scripts.build_snapshot import capture_coherent
+        return capture_coherent(_root(root), purpose=purpose or label,
+                                required=required, label=label, deep=deep,
+                                lease_ttl_s=lease_ttl_s).snapshot
+    names = _validate_names(components if components is not None
+                            else DEFAULT_COMPONENTS)
+    return _freeze(_root(root), label, deep, names, purpose or "legacy", None,
+                   lease_ttl_s, None)
 
 
 def sweep_abandoned(root=None) -> list:
