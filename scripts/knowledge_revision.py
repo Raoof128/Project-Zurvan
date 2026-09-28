@@ -682,10 +682,34 @@ def declare_store_project(name, op=None) -> None:
             conn.close()
 
 
+def _absorb_external_drift(base):
+    """Record an external edit as its own revision before a managed write.
+
+    Without this, `commit_mutation` records the whole store's manifest and
+    the edit is laundered into the managed revision (reproduced 2026-09-28).
+    Skipped - and bounded, not fixed - when drift cannot be attributed: no
+    baseline, SUSPECT (reconcile owns it), another operation in flight, or
+    the store still changing.
+    """
+    try:
+        state = current(base)
+    except LedgerError:
+        return None
+    if not state.manifest_digest or state.state != CLEAN:
+        return None
+    if mutations_in(ACTIVE, base):
+        return None
+    try:
+        return observe_external_drift(base, trigger="activation")
+    except DriftUnobservable:
+        return None
+
+
 def _insert_mutation(op: Operation) -> str:
     mutation_id = f"m{uuid.uuid4().hex[:12]}"
     pid = os.getpid()
     ensure_schema(op.root)
+    _absorb_external_drift(op.root)
     conn = _connect(op.root)
     try:
         conn.execute("BEGIN IMMEDIATE")
