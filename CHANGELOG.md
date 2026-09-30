@@ -1,5 +1,13 @@
 ## Change Log
 
+### 2026-09-30 (Australia/Sydney) — Simurgh communication artwork handover
+**Raouf:**
+- **Scope:** records only; local project handover and navigation, no application changes.
+- **Summary:** Recorded user acceptance of the Simurgh LinkedIn agent-liability graphic and completed layout audit. The private artifact handover preserves final files, originals, source notes, previews, SHA-256 checksums and the explicit limit that the artwork does not certify model/deployment safety.
+- **Attribution:** The knowledge record explicitly names `project: simurgh`; the globally selected workspace is not used for ownership. Wiki navigation and the write-back log use the mutation barrier.
+- **Verification:** Final-artwork audit reports 35 text elements, zero overlaps/clipping/divider collisions and minimum text contrast 5.20:1. Logging gates: 1350 tests passed, 4 skipped, 0 failed; public_repo_guard and git diff --check passed.
+- **Follow-ups:** Project source-log synchronization remains pending because its registered checkout is missing. LinkedIn publication and live upload/crop/compression remain unverified. No remote push was performed.
+
 ### 2026-09-29 (Australia/Sydney) — overnight: another session's decision was mis-attributed, then hand-fixed outside the barrier
 **Raouf:**
 - **Scope:** records only, no code.

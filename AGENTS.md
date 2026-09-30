@@ -88,6 +88,14 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-09-30 (Australia/Sydney) — Simurgh communication artwork handover
+**Raouf:**
+- **Scope:** records only; local project handover and navigation, no application changes.
+- **Summary:** Recorded user acceptance of the Simurgh LinkedIn agent-liability graphic and completed layout audit. The private artifact handover preserves final files, originals, source notes, previews, SHA-256 checksums and the explicit limit that the artwork does not certify model/deployment safety.
+- **Attribution:** The knowledge record explicitly names `project: simurgh`; the globally selected workspace is not used for ownership. Wiki navigation and the write-back log use the mutation barrier.
+- **Verification:** Final-artwork audit reports 35 text elements, zero overlaps/clipping/divider collisions and minimum text contrast 5.20:1. Logging gates: 1350 tests passed, 4 skipped, 0 failed; public_repo_guard and git diff --check passed.
+- **Follow-ups:** Project source-log synchronization remains pending because its registered checkout is missing. LinkedIn publication and live upload/crop/compression remain unverified. No remote push was performed.
+
 ### 2026-09-29 (Australia/Sydney) — overnight: another session's decision was mis-attributed, then hand-fixed outside the barrier
 **Raouf:**
 - **Scope:** records only, no code.
@@ -95,14 +103,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
 - **How it is recorded.** The next managed write mints that edit as its own EXTERNAL_OBSERVED revision (§5.2) — the honest label for a change made outside the barrier. The page now names the client; the ledger row for revision 259 still says `zurvan`. History is not rewritten; this entry is the reconciliation of the two.
 - **The rule that would have avoided both:** `zurvan --project <slug> decision add …` or `decision add --project <slug>` (CLAUDE.md). Filed as a question: whether `decision add` should refuse, or warn, when run for a subject whose slug differs from the active workspace.
 - **Also:** the third 2026-09-28 session push (`9bd4637..5983d5f`) is recorded in 28h.
-
-### 2026-09-28h (Australia/Sydney) — session record: two pushes close Z0; the write-back itself was bypassing the barrier
-**Raouf:**
-- **Scope:** `scripts/agent_workflow.py` (`agent_postedit` appends through `append_file_safely`), `tests/test_agent_workflow.py` (+1 barrier test; the old unit test moved into a store and an operation, assertions unchanged); records.
-- **Pushes, each at Raouf's explicit request with `ZURVAN_ALLOW_PUSH=1` for that push only:** `c72479c..fbf7139` (11 commits: the session record, the Z0 step-6 plan and its gauntlet, Z0 step 6) and `fbf7139..9bd4637` (6 commits: Z0 step 7, closure). Both fast-forwards of the exact tree that passed the full suite; `public_repo_guard` passed before each. A third, 2026-09-29 at Raouf's request: `9bd4637..5983d5f` (the postedit fix and this record), after a re-run of the full suite on that tip (1345 passed / 0 failed).
-- **Found while writing back: `zurvan agent postedit` bypassed the mutation barrier.** It appended to `wiki/log.md` with a raw `open(..., "a")`, so the write-back CLAUDE.md prescribes at the end of every session left `knowledge status` reporting unrecorded drift (revision 250), which the next managed write mints as EXTERNAL_OBSERVED — a Zurvan writer recorded as if an editor had touched the wiki. Now one MANAGED revision with no drift, by a test through the real CLI (red before the fix). The drift already on the live store is recorded honestly by the next write as EXTERNAL_OBSERVED; it is not rewritten.
-- **Same bypass, filed not fixed:** `zurvan session start|close` (`scripts/session.py` writes a session page and `wiki/log.md` raw) and `scripts/rebuild_index.py` (`wiki/index.md`) — neither activates eagerly the way ingest and extract do (28c).
-- **Boundary is not configured on this machine.** `~/.zurvan/boundary` is absent, so `check.sh` gate 0 and the pre-push scan both report NOT CONFIGURED; the two pushes were checked by `public_repo_guard` only. Earlier sessions ran it (27/27 red-team). Filed.
-- **A process lesson, saved to memory:** a scripted anchor edit duplicated ~590 lines of `cli.py` while every test stayed green; only `git diff --stat` caught it. Compare the diff size with the plan before committing any scripted edit.
-- **Verification.** pytest **1345 passed / 4 skipped / 0 failed**; `public_repo_guard` passed; `git diff --check` clean.
-- **Next.** Z1 (retire the burned retrieval instrument; content-addressed edge ids); route `session` and `rebuild_index` through the barrier; re-configure Boundary; the deferred minors in 28f and 28g; the public mirror (repository name still to be chosen).
