@@ -1,0 +1,13 @@
+{
+  "schema": "zurvan.eval.datasets.v1",
+  "note": "Whole-file digests only. No per-item digest may ever appear here: it is a confirmation oracle. Reference items by index.",
+  "datasets": {
+    "search_gold": {
+      "state": "RETIRED",
+      "sha256": "34a533f2d74fc3994d4cf0a80e21a558986609bb5ce09d5224d2e781d5571018",
+      "n_items": 50,
+      "retired_on": "2026-09-29",
+      "reason": "public in the repository 2026-05-30..2026-09-16; kept as historical regression and diagnostics (spec §9.1), never a promotion gate"
+    }
+  }
+}
