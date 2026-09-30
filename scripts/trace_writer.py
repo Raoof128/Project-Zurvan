@@ -1,10 +1,63 @@
+import contextvars
 import json
-from dataclasses import dataclass
+import os
+import subprocess
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
 from scripts.config import PROJECT_ROOT
 from scripts.trace_schema import TraceRecord, require_safe_trace_id
+
+
+DIR_MODE = 0o700
+FILE_MODE = 0o600
+RETENTION_DAYS = 30
+RETENTION_KEEP = 500
+
+_PROTECTED = contextvars.ContextVar("zurvan_protected_eval", default=False)
+
+
+class ProtectedTraceError(RuntimeError):
+    """A non-protected trace was about to be written inside a protected
+    evaluation (design §3.1). Raised before any byte lands."""
+    code = "PROTECTED_TRACE"
+
+
+@contextmanager
+def protected_eval_context():
+    """Everything written inside is forced to `protected_eval` or refused.
+    A flag cannot downgrade it: the guard is in the writer, not the caller."""
+    token = _PROTECTED.set(True)
+    try:
+        yield
+    finally:
+        _PROTECTED.reset(token)
+
+
+def in_protected_eval() -> bool:
+    return _PROTECTED.get()
+
+
+def _private_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, DIR_MODE)
+
+
+def _write_private(path: Path, text: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.chmod(path, FILE_MODE)  # O_CREAT's mode does not apply to an existing file
+
+
+@dataclass
+class PruneResult:
+    removed: List[str] = field(default_factory=list)
+    kept_tracked: int = 0
+    refused: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,15 +87,68 @@ class TraceStore:
             raise ValueError(f"unsafe trace path: {path}")
 
     def write(self, record: TraceRecord) -> TracePaths:
+        if in_protected_eval() and record.trace_mode != "protected_eval":
+            raise ProtectedTraceError(
+                f"PROTECTED_TRACE: a {record.trace_mode!r} trace cannot be written "
+                "inside a protected evaluation")
         paths = self._paths_for(record.trace_id)
-        paths.json_path.parent.mkdir(parents=True, exist_ok=True)
-        paths.markdown_path.parent.mkdir(parents=True, exist_ok=True)
-        paths.json_path.write_text(
-            json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        paths.markdown_path.write_text(render_trace_markdown(record), encoding="utf-8")
+        _private_dir(paths.json_path.parent)
+        _write_private(paths.json_path,
+                       json.dumps(record.to_dict(), indent=2, sort_keys=True) + "\n")
+        if record.trace_mode == "full":
+            _private_dir(paths.markdown_path.parent)
+            _write_private(paths.markdown_path, render_trace_markdown(record))
+        self.prune()
         return paths
+
+    def _tracked_names(self) -> dict | None:
+        """Basenames git tracks under data/traces and wiki/traces, or None when
+        they cannot be listed — and then nothing may be pruned."""
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(self.project_root), "ls-files", "-z", "--",
+                 "data/traces", "wiki/traces"],
+                capture_output=True, check=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            return None
+        names = {"data": set(), "wiki": set()}
+        for rel in filter(None, out.decode("utf-8", "replace").split("\0")):
+            parts = rel.split("/")
+            if parts[:2] == ["data", "traces"]:
+                names["data"].add(parts[-1])
+            elif parts[:2] == ["wiki", "traces"]:
+                names["wiki"].add(parts[-1])
+        return names
+
+    def prune(self, *, days: int = RETENTION_DAYS, keep: int = RETENTION_KEEP,
+              now: float | None = None, dry_run: bool = False) -> PruneResult:
+        """Retention (design §3.2): remove untracked traces older than `days`
+        or beyond the newest `keep`. A git-tracked trace is a frozen research
+        artifact and is never removed."""
+        tracked = self._tracked_names()
+        if tracked is None:
+            return PruneResult(refused="cannot list git-tracked traces; pruning nothing")
+        now = time.time() if now is None else now
+        cutoff = now - days * 86400
+        candidates, kept_tracked = [], 0
+        for path in (self.data_dir.glob("trace-*.json") if self.data_dir.exists() else []):
+            if path.name in tracked["data"]:
+                kept_tracked += 1
+                continue
+            candidates.append((path.stat().st_mtime, path.stem))
+        candidates.sort(reverse=True)  # newest first
+        removed = []
+        for position, (mtime, trace_id) in enumerate(candidates):
+            if position < keep and mtime >= cutoff:
+                continue
+            for path, kind in ((self.data_dir / f"{trace_id}.json", "data"),
+                               (self.wiki_dir / f"{trace_id}.md", "wiki")):
+                if path.name in tracked[kind] or not path.exists():
+                    continue
+                removed.append(str(path))
+                if not dry_run:
+                    path.unlink()
+        return PruneResult(removed=removed, kept_tracked=kept_tracked)
 
     def trace_path(self, trace_id: str) -> Path:
         return self._paths_for(trace_id).json_path

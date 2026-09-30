@@ -319,6 +319,10 @@ def _main():
 
     trace_replay = trace_sub.add_parser("replay", help="Render a deterministic trace replay")
     trace_replay.add_argument("trace_id")
+    trace_prune = trace_sub.add_parser("prune", help="Apply trace retention (never touches git-tracked traces)")
+    trace_prune.add_argument("--days", type=int, default=30)
+    trace_prune.add_argument("--keep", type=int, default=500)
+    trace_prune.add_argument("--dry-run", action="store_true")
     
     # zurvan remember
     remember_parser = subparsers.add_parser("remember", help="Remember a project note")
@@ -890,6 +894,13 @@ def _main():
             except (FileNotFoundError, ValueError) as exc:
                 print(str(exc))
                 sys.exit(1)
+        elif args.trace_action == "prune":
+            result = store.prune(days=args.days, keep=args.keep, dry_run=args.dry_run)
+            if result.refused:
+                print(f"Refused: {result.refused}", file=sys.stderr)
+                sys.exit(1)
+            verb = "Would remove" if args.dry_run else "Removed"
+            print(f"{verb} {len(result.removed)} trace file(s); kept {result.kept_tracked} tracked.")
         else:
             trace_parser.print_help()
 
