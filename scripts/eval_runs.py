@@ -9,7 +9,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.eval_datasets import DatasetInfo, DatasetNotEligible, require_itemised_allowed
+from scripts.eval_datasets import (
+    DatasetInfo, DatasetNotEligible, dataset_for_digest, require_itemised_allowed,
+)
 
 RUNS_DIR = Path.home() / ".zurvan" / "eval-runs"
 
@@ -45,8 +47,14 @@ def movers(a: dict, b: dict) -> list:
     info_a, info_b = _info(a), _info(b)
     require_itemised_allowed(info_a)
     require_itemised_allowed(info_b)
+    # A run file's stored state can be stale: re-resolve from the registry so a
+    # dataset promoted to HOLDOUT/RESERVE after the run was saved stays sealed.
+    require_itemised_allowed(dataset_for_digest(info_a.sha256))
+    require_itemised_allowed(dataset_for_digest(info_b.sha256))
     if info_a.sha256 != info_b.sha256:
         raise DatasetNotEligible("DATASET_MISMATCH", "runs were scored on different datasets")
+    if {r["index"] for r in a["rows"]} != {r["index"] for r in b["rows"]}:
+        raise DatasetNotEligible("ITEMS_MISMATCH", "runs cover different sets of items")
     rank_b = {r["index"]: r["first_hit_rank"] for r in b["rows"]}
     return [{"index": r["index"], "rank_a": r["first_hit_rank"], "rank_b": rank_b.get(r["index"])}
             for r in a["rows"] if rank_b.get(r["index"]) != r["first_hit_rank"]]

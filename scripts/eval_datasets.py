@@ -37,7 +37,10 @@ def file_sha256(path) -> str:
 
 
 def dataset_for_file(path) -> DatasetInfo:
-    digest = file_sha256(path)
+    return dataset_for_digest(file_sha256(path))
+
+
+def dataset_for_digest(digest: str) -> DatasetInfo:
     for name, entry in _load_registry().get("datasets", {}).items():
         if entry.get("sha256") == digest:
             state = entry.get("state")

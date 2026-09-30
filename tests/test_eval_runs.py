@@ -69,3 +69,24 @@ def test_cli_movers_prints_indices_and_refuses_sealed(tmp_path, monkeypatch, cap
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 2
+
+
+def test_movers_refuses_a_dataset_promoted_to_holdout_after_the_run(tmp_path, monkeypatch):
+    from scripts import eval_datasets as ed
+    a = er.load_run(er.save_run(METRICS, _rows(1, 2), DEV, runs_dir=tmp_path / "a"))
+    b = er.load_run(er.save_run(METRICS, _rows(1, 3), DEV, runs_dir=tmp_path / "b"))
+    monkeypatch.setattr(ed, "_load_registry", lambda: {"datasets": {
+        "promoted": {"sha256": "a" * 64, "state": "HOLDOUT"}}})
+    with pytest.raises(DatasetNotEligible) as exc:
+        er.movers(a, b)
+    assert exc.value.code == "SEALED_DATASET"
+
+
+def test_movers_refuses_runs_with_different_index_sets(tmp_path, monkeypatch):
+    from scripts import eval_datasets as ed
+    monkeypatch.setattr(ed, "_load_registry", lambda: {"datasets": {}})
+    full = er.load_run(er.save_run(METRICS, _rows(1, 2, 3), DEV, runs_dir=tmp_path / "a"))
+    cut = er.load_run(er.save_run(METRICS, _rows(1, 2), DEV, runs_dir=tmp_path / "b"))
+    with pytest.raises(DatasetNotEligible) as exc:
+        er.movers(full, cut)
+    assert exc.value.code == "ITEMS_MISMATCH"
