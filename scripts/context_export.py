@@ -142,6 +142,11 @@ def _result_trace_payload(result: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _summary_result_payload(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Ids, ranks and scores; no heading or text (design §3.1 summary)."""
+    return {k: v for k, v in _result_trace_payload(result).items() if k != "heading"}
+
+
 def _graph_trace_payload(node: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "path": _trace_source_path(str(node.get("path", ""))),
@@ -264,81 +269,63 @@ def _write_retrieval_trace(
     graph_depth: int = 0,
     graph_nodes: List[Dict[str, Any]] | None = None,
     trace_id: str | None = None,
+    trace_mode: str = "summary",
+    timings: Dict[str, float] | None = None,
 ) -> str:
+    if trace_mode not in ("summary", "full", "protected_eval"):
+        raise ValueError(f"unknown trace_mode: {trace_mode!r}")
     final_trace_id = create_trace_id(trace_id)
+    full = trace_mode == "full"
+    protected = trace_mode == "protected_eval"
+
+    query_payload: Dict[str, Any] = {"command": command, "mode": mode, "limit": limit}
+    if full:
+        query_payload["query"] = query
+    elif not protected:
+        query_payload["query_sha256"] = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        query_payload["query_len"] = len(query)
+
+    result_payload: Dict[str, Any] = {"command": command, "result_count": len(results)}
+    if not protected:
+        result_payload["results"] = [
+            _result_trace_payload(r) if full else _summary_result_payload(r) for r in results]
+    if timings is not None:
+        result_payload["timings_ms"] = dict(timings)
+
     events = [
-        TraceEvent(
-            event_id="evt-001",
-            event_type="retrieval.query",
-            timestamp=utc_now(),
-            actor="zurvan",
-            payload={
-                "command": command,
-                "query": query,
-                "mode": mode,
-                "limit": limit,
-            },
-        ),
-        TraceEvent(
-            event_id="evt-002",
-            event_type="retrieval.result",
-            timestamp=utc_now(),
-            actor="zurvan",
-            payload={
-                "command": command,
-                "result_count": len(results),
-                "results": [_result_trace_payload(result) for result in results],
-            },
-        ),
+        TraceEvent(event_id="evt-001", event_type="retrieval.query", timestamp=utc_now(),
+                   actor="zurvan", payload=query_payload),
+        TraceEvent(event_id="evt-002", event_type="retrieval.result", timestamp=utc_now(),
+                   actor="zurvan", payload=result_payload),
     ]
-
     next_event_number = 3
-    if mode == "hybrid":
-        events.append(
-            TraceEvent(
-                event_id=f"evt-{next_event_number:03d}",
-                event_type="retrieval.fusion",
-                timestamp=utc_now(),
-                actor="zurvan",
-                payload=_fusion_payload(results),
-            )
-        )
+    if mode == "hybrid" and not protected:
+        events.append(TraceEvent(event_id=f"evt-{next_event_number:03d}",
+                                 event_type="retrieval.fusion", timestamp=utc_now(),
+                                 actor="zurvan", payload=_fusion_payload(results)))
         next_event_number += 1
-
-    if command == "context":
-        events.append(
-            TraceEvent(
-                event_id=f"evt-{next_event_number:03d}",
-                event_type="context.assembled",
-                timestamp=utc_now(),
-                actor="zurvan",
-                payload=_assembled_context_payload(results, dropped=dropped),
-            )
-        )
+    if command == "context" and not protected:
+        events.append(TraceEvent(event_id=f"evt-{next_event_number:03d}",
+                                 event_type="context.assembled", timestamp=utc_now(),
+                                 actor="zurvan",
+                                 payload=_assembled_context_payload(results, dropped=dropped)))
         next_event_number += 1
-
-    if graph_enabled:
+    if graph_enabled and not protected:
         nodes = graph_nodes or []
-        events.append(
-            TraceEvent(
-                event_id=f"evt-{next_event_number:03d}",
-                event_type="graph_context",
-                timestamp=utc_now(),
-                actor="zurvan",
-                payload={
-                    "enabled": True,
-                    "depth": graph_depth,
-                    "node_count": len(nodes),
-                    "nodes": [_graph_trace_payload(node) for node in nodes],
-                },
-            )
-        )
+        events.append(TraceEvent(
+            event_id=f"evt-{next_event_number:03d}", event_type="graph_context",
+            timestamp=utc_now(), actor="zurvan",
+            payload={"enabled": True, "depth": graph_depth, "node_count": len(nodes),
+                     "nodes": [_graph_trace_payload(n) if full else
+                               {k: v for k, v in _graph_trace_payload(n).items() if k != "title"}
+                               for n in nodes]}))
 
     record = TraceRecord(
         trace_id=final_trace_id,
-        title=f"Retrieval context: {query}",
-        summary=f"Opt-in retrieval trace for zurvan {command}.",
+        title=f"Retrieval context: {query}" if full else f"Retrieval trace: {command}",
+        summary=f"Opt-in {trace_mode} retrieval trace for zurvan {command}.",
         events=events,
+        trace_mode=trace_mode,
     )
     paths = TraceStore(project_root=PROJECT_ROOT).write(record)
     return str(paths.json_path)
@@ -365,6 +352,7 @@ def search_memory(
     trace: bool = False,
     trace_id: str | None = None,
     as_json: bool = False,
+    trace_mode: str = "summary",
 ):
     """
     Search wiki and print list of matches (human text, or JSON with as_json).
@@ -387,6 +375,7 @@ def search_memory(
             limit=10,
             results=results,
             trace_id=trace_id,
+            trace_mode=trace_mode,
         )
     if as_json:
         payload: Dict[str, Any] = {
@@ -414,6 +403,7 @@ def export_context(
     trace: bool = False,
     trace_id: str | None = None,
     max_per_source: int = 2,
+    trace_mode: str = "summary",
 ) -> str:
     """Exports a Markdown context bundle based on search results."""
 
@@ -497,6 +487,7 @@ def export_context(
             graph_depth=depth if graph else 0,
             graph_nodes=graph_nodes,
             trace_id=trace_id,
+            trace_mode=trace_mode,
         )
         trace_line = f"\n\nTrace written: {trace_path}"
 

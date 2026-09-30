@@ -390,6 +390,8 @@ def _main():
     search_parser.add_argument("--save", action="store_true", help="File results into wiki/syntheses/")
     search_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
     search_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
+    search_parser.add_argument("--trace-mode", choices=["summary", "full"], default=None,
+                               help="summary (default): no raw query/snippets; full: raw text (local debugging). Implies --trace")
     search_parser.add_argument("--json", action="store_true", dest="as_json",
                                help="Emit machine-parseable JSON (compact snippets) instead of text")
 
@@ -403,6 +405,8 @@ def _main():
     context_parser.add_argument("--save", action="store_true", help="File answer back into wiki/syntheses/")
     context_parser.add_argument("--trace", action="store_true", help="Write an opt-in retrieval trace")
     context_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
+    context_parser.add_argument("--trace-mode", choices=["summary", "full"], default=None,
+                               help="summary (default): no raw query/snippets; full: raw text (local debugging). Implies --trace")
     context_parser.add_argument("--max-per-source", type=int, default=2,
                                 help="Cap chunks per source file before budgeting (0 disables; default 2)")
     context_parser.add_argument(
@@ -988,7 +992,8 @@ def _main():
                 args.query,
                 args.hybrid,
                 save=getattr(args, "save", False),
-                trace=getattr(args, "trace", False),
+                trace=getattr(args, "trace", False) or bool(getattr(args, "trace_mode", None)),
+                trace_mode=getattr(args, "trace_mode", None) or "summary",
                 trace_id=getattr(args, "trace_id", None),
                 as_json=getattr(args, "as_json", False),
             )
@@ -1002,7 +1007,8 @@ def _main():
                 args.topic, args.limit, args.hybrid, args.graph, args.depth,
                 save=getattr(args, "save", False),
                 fmt=getattr(args, "output_format", "markdown"),
-                trace=getattr(args, "trace", False),
+                trace=getattr(args, "trace", False) or bool(getattr(args, "trace_mode", None)),
+                trace_mode=getattr(args, "trace_mode", None) or "summary",
                 trace_id=getattr(args, "trace_id", None),
                 max_per_source=getattr(args, "max_per_source", 2),
             )

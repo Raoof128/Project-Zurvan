@@ -46,6 +46,7 @@ def test_export_context_trace_writes_retrieval_and_graph_events(tmp_path, monkey
         graph=True,
         depth=2,
         trace=True,
+        trace_mode="full",
         trace_id="trace-20260614T121314Z-r2000001",
     )
 
