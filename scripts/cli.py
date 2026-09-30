@@ -392,6 +392,7 @@ def _main():
     search_parser.add_argument("--trace-id", help="Optional trace ID for deterministic audit runs")
     search_parser.add_argument("--trace-mode", choices=["summary", "full"], default=None,
                                help="summary (default): no raw query/snippets; full: raw text (local debugging). Implies --trace")
+    search_parser.add_argument("--explain", action="store_true", help="Print per-stage timings")
     search_parser.add_argument("--json", action="store_true", dest="as_json",
                                help="Emit machine-parseable JSON (compact snippets) instead of text")
 
@@ -996,6 +997,7 @@ def _main():
                 trace_mode=getattr(args, "trace_mode", None) or "summary",
                 trace_id=getattr(args, "trace_id", None),
                 as_json=getattr(args, "as_json", False),
+                explain=getattr(args, "explain", False),
             )
         except ValueError as exc:
             print(str(exc))

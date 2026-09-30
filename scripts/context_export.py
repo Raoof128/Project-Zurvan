@@ -4,6 +4,7 @@ import sys
 import json
 import datetime
 import hashlib
+import time
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -14,7 +15,8 @@ from scripts.trace_schema import TraceEvent, TraceRecord, create_trace_id, utc_n
 from scripts.trace_writer import TraceStore
 
 def _search_internal(
-    query: str, hybrid: bool = False, limit: int = 10, root: str | Path | None = None
+    query: str, hybrid: bool = False, limit: int = 10, root: str | Path | None = None,
+    timings: Dict[str, float] | None = None,
 ) -> List[Dict[str, Any]]:
     """Search one project's knowledge base. `root` defaults to this repo;
     federation passes another registered project's root, so knowledge-only
@@ -23,7 +25,9 @@ def _search_internal(
     if hybrid:
         from scripts.hybrid_search import search_hybrid
         from scripts.config import get_search_db_path
-        return search_hybrid(query, limit, db_path=str(get_search_db_path()))
+        return search_hybrid(query, limit, db_path=str(get_search_db_path()), timings=timings)
+
+    t0 = time.perf_counter_ns()
 
     # Scan the same corpus the search index does (wiki/ + docs/): keyword mode
     # previously globbed wiki/ only, so `zurvan search <term>` silently could
@@ -55,6 +59,9 @@ def _search_internal(
             continue
 
     matches.sort(key=lambda x: x['hybrid_score'], reverse=True)
+    if timings is not None:
+        elapsed = round((time.perf_counter_ns() - t0) / 1e6, 3)
+        timings.update({"keyword_scan": elapsed, "total": elapsed})
     return matches[:limit]
 
 def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> None:
@@ -353,11 +360,13 @@ def search_memory(
     trace_id: str | None = None,
     as_json: bool = False,
     trace_mode: str = "summary",
+    explain: bool = False,
 ):
     """
     Search wiki and print list of matches (human text, or JSON with as_json).
     """
-    results = _search_internal(query, hybrid, limit=10)
+    timings: Dict[str, float] = {}
+    results = _search_internal(query, hybrid, limit=10, timings=timings)
     lines = []
     for i, res in enumerate(results, 1):
         lines.append(
@@ -376,6 +385,7 @@ def search_memory(
             results=results,
             trace_id=trace_id,
             trace_mode=trace_mode,
+            timings=timings,
         )
     if as_json:
         payload: Dict[str, Any] = {
@@ -384,11 +394,17 @@ def search_memory(
         }
         if trace_path:
             payload["trace_path"] = trace_path
+        if explain:
+            payload["timings_ms"] = timings
         print(json.dumps(payload, indent=2))
     else:
         print(f"Found {len(results)} matches for '{query}':\n")
         for line in lines:
             print(line)
+        if explain:
+            print("\nStage timings (ms):")
+            for name, value in timings.items():
+                print(f"  {name:<12} {value:>10.3f}")
         if trace_path:
             print(f"Trace written: {trace_path}")
 

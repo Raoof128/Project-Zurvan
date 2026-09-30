@@ -3,8 +3,17 @@ import json
 import os
 import sys
 import math
+import time
 from typing import List, Dict
 from scripts.embed import get_embedding
+
+#: Stages recorded by `search_hybrid(timings=...)` — observation only.
+STAGES = ("fts", "embed_query", "vector_scan", "hydrate", "fuse", "total")
+
+
+def _ms(start_ns: int) -> float:
+    return round((time.perf_counter_ns() - start_ns) / 1e6, 3)
+
 
 def cosine_similarity(v1: List[float], v2: List[float]) -> float:
     dot = sum(a * b for a, b in zip(v1, v2))
@@ -28,7 +37,8 @@ def _index_embedding_config(cursor) -> tuple:
         return (None, None)
 
 
-def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> List[Dict]:
+def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
+                  timings: dict | None = None) -> List[Dict]:
     from scripts.config import get_search_db_path
     if db_path is None:
         db_path = str(get_search_db_path())
@@ -41,6 +51,8 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
         )
         return []
 
+    stage = {}
+    t_total = time.perf_counter_ns()
     # read-only: the query path must never create or modify the index
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     from scripts import vec_storage
@@ -48,6 +60,7 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
     cursor = conn.cursor()
     
     # Keyword search using FTS5 (BM25 rank)
+    t = time.perf_counter_ns()
     import re
     terms = [t for t in re.split(r'\W+', query) if t]
     if terms:
@@ -79,17 +92,30 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None) -> Li
                 # mapping max_score (worst) -> 0, min_score (best) -> 1
                 norm_score = (max_score - score) / (max_score - min_score)
                 fts_scores[chunk_id] = norm_score
+    stage["fts"] = _ms(t)
 
     # Semantic search — embed the query with the SAME provider/model the
     # index was built with (never the env), so scores stay meaningful.
     index_provider, index_model = _index_embedding_config(cursor)
+    t = time.perf_counter_ns()
     query_emb = get_embedding(query, provider=index_provider, model=index_model)['vector']
-    
+    stage["embed_query"] = _ms(t)
+
+    t = time.perf_counter_ns()
     top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
+    stage["vector_scan"] = _ms(t)
+    t = time.perf_counter_ns()
     scored = _hydrate(cursor, top)
+    stage["hydrate"] = _ms(t)
     conn.close()
 
-    return _fuse(scored)[:limit]
+    t = time.perf_counter_ns()
+    fused = _fuse(scored)[:limit]
+    stage["fuse"] = _ms(t)
+    stage["total"] = _ms(t_total)
+    if timings is not None:
+        timings.update(stage)
+    return fused
 
 
 class _Ranked:
