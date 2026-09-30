@@ -1,10 +1,12 @@
+import hashlib
+import math
 import os
 import json
 import sys
 from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from typing import List, Dict, Any
-from scripts.metrics import calculate_top_k_hit, calculate_reciprocal_rank, calculate_mean_reciprocal_rank, calculate_accuracy
+from scripts.metrics import get_rank, calculate_top_k_hit, calculate_reciprocal_rank, calculate_mean_reciprocal_rank, calculate_accuracy
 # We need a keyword search implementation or we can just reuse hybrid search without the semantic part, 
 # but the prompt says to use keyword or hybrid search.
 from scripts.hybrid_search import search_hybrid
@@ -30,21 +32,21 @@ def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
     if not os.path.exists(filepath):
         print(f"Error: Gold dataset '{filepath}' not found.")
         sys.exit(1)
-        
+
     dataset = []
     with open(filepath, 'r', encoding='utf-8') as f:
-        for line in f:
+        for lineno, line in enumerate(f, 1):
             line = line.strip()
             if not line:
                 continue
             try:
                 data = json.loads(line)
                 if 'query' not in data or 'expected_paths' not in data:
-                    print(f"Warning: Skipping malformed line (missing required fields): {line}")
+                    print(f"Warning: Skipping malformed line {lineno} (missing required fields)")
                     continue
                 dataset.append(data)
             except json.JSONDecodeError:
-                print(f"Warning: Skipping malformed JSON line: {line}")
+                print(f"Warning: Skipping malformed JSON line {lineno}")
     return dataset
 
 def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
@@ -67,9 +69,84 @@ def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
         print(f"Gold dataset '{filepath}' validated successfully.")
     return True
 
+def _keyword_retrieve(query: str) -> List[str]:
+    """The non-hybrid baseline: a substring scan over wiki/ + docs/."""
+    import glob
+    wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True) + \
+        glob.glob(str(PROJECT_ROOT / "docs" / "**" / "*.md"), recursive=True)
+    keywords = query.lower().split()
+    matches = []
+    for filepath in wiki_files:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            score = sum(1 for k in keywords if k in content.lower())
+            if score > 0:
+                matches.append((score, filepath))
+        except Exception:
+            continue
+    matches.sort(key=lambda x: x[0], reverse=True)
+    return [m[1] for m in matches[:10]]
+
+
+def _percentile(values, pct):
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    k = max(0, min(len(ordered) - 1, math.ceil(pct / 100 * len(ordered)) - 1))  # nearest rank
+    return round(ordered[k], 3)
+
+
+def result_digest(rows, metrics) -> str:
+    """SHA-256 over what the ranking produced: per-item ranked ids and the
+    quality metrics. Timings, timestamps and resources are excluded — they
+    vary by nature (design §3.5)."""
+    body = {"rows": [{"index": r["index"], "retrieved": r["retrieved"]} for r in rows],
+            "top1": metrics["top1_accuracy"], "top3": metrics["top3_accuracy"],
+            "mrr": metrics["mrr"]}
+    encoded = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def evaluate(dataset, *, index_path, hybrid=True):
+    """Pure core: no printing, no exit. Returns (metrics, rows). Rows name
+    items by INDEX; no query text leaves this function."""
+    rows, rrs, stage_samples = [], [], {}
+    top1 = top3 = 0
+    for index, item in enumerate(dataset):
+        expected = item["expected_paths"]
+        if hybrid:
+            timings = {}
+            results = search_hybrid(item["query"], limit=10, db_path=index_path, timings=timings)
+            for name, value in timings.items():
+                stage_samples.setdefault(name, []).append(value)
+            retrieved = [r["source_path"] for r in results]
+        else:
+            retrieved = _keyword_retrieve(item["query"])
+        first = get_rank(expected, retrieved) or None  # the same matcher the metrics use
+        rows.append({"index": index, "retrieved": retrieved, "first_hit_rank": first})
+        top1 += calculate_top_k_hit(expected, retrieved, 1)
+        top3 += calculate_top_k_hit(expected, retrieved, 3)
+        rrs.append(calculate_reciprocal_rank(expected, retrieved))
+    n = len(dataset)
+    metrics = {
+        "queries": n,
+        "top1_accuracy": calculate_accuracy(top1, n),
+        "top3_accuracy": calculate_accuracy(top3, n),
+        "mrr": calculate_mean_reciprocal_rank(rrs),
+        "failing_items": [r["index"] for r in rows
+                          if r["first_hit_rank"] is None or r["first_hit_rank"] > 3],
+        "stage_latency_ms": {name: {"p50": _percentile(v, 50), "p95": _percentile(v, 95)}
+                             for name, v in stage_samples.items()},
+    }
+    metrics["failures"] = len(metrics["failing_items"])
+    metrics["result_digest"] = result_digest(rows, metrics)
+    return metrics, rows
+
+
 def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3: float = 0.0,
                           as_json: bool = False, max_queries: int | None = None,
-                          index_path: str | None = None):
+                          index_path: str | None = None, keep_rows: bool = False):
     """Score retrieval against the gold set.
 
     ``index_path`` names the index to score. It defaults to the canonical one,
@@ -101,88 +178,25 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
     if max_queries is not None:
         dataset = dataset[:max(1, int(max_queries))]
 
-    total_queries = len(dataset)
-    top1_hits = 0
-    top3_hits = 0
-    reciprocal_ranks = []
-    failures = 0
-    # The IDs, not just the count: "still 14 failures" does not prove the SAME
-    # 14, and every before/after gate across a corpus change needs that proof.
-    failing_queries = []
-
     if not as_json:
-        print(f"Running Evaluation on {total_queries} queries (Hybrid: {hybrid})...")
-    
-    for item in dataset:
-        query = item['query']
-        expected_paths = item['expected_paths']
-        
-        # If hybrid=False, we ideally want pure keyword search. 
-        # But Phase 3.6 search_memory only printed results. 
-        # For evaluation, we need structured results. 
-        # Since Phase 4 added `search_hybrid`, we will use it and rely on its FTS scoring if semantic is disabled, 
-        # but `search_hybrid` hardcodes 0.6 keyword + 0.4 semantic.
-        # So we'll just run `search_hybrid` to get paths. If hybrid is false, we can still use it, 
-        # or we could parse standard search_memory output, but `search_hybrid` returns structured dicts.
-        # For simplicity, we just use search_hybrid for both, or implement a basic keyword search wrapper.
-        # Let's just use search_hybrid for now, as it serves the eval purpose and is robust.
-        
-        if hybrid:
-            results = search_hybrid(query, limit=10, db_path=index_path)
-            retrieved_paths = [r['source_path'] for r in results]
-        else:
-            # Basic keyword search using FTS5 (since search_hybrid relies on FTS5 anyway)
-            # We'll just call search_hybrid and rely on its BM25 component implicitly or just use search_hybrid directly.
-            # To be strict, if hybrid is False, we just use standard search_memory logic which scans files.
-            import glob
-            wiki_files = glob.glob(str(PROJECT_ROOT / "wiki" / "**" / "*.md"), recursive=True) + \
-                glob.glob(str(PROJECT_ROOT / "docs" / "**" / "*.md"), recursive=True)
-            keywords = query.lower().split()
-            matches = []
-            for filepath in wiki_files:
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    score = sum(1 for k in keywords if k in content.lower())
-                    if score > 0:
-                        matches.append((score, filepath))
-                except Exception:
-                    continue
-            matches.sort(key=lambda x: x[0], reverse=True)
-            retrieved_paths = [m[1] for m in matches[:10]]
+        print(f"Running Evaluation on {len(dataset)} queries (Hybrid: {hybrid})...")
 
-        # Calculate metrics for this query
-        if calculate_top_k_hit(expected_paths, retrieved_paths, 1):
-            top1_hits += 1
-        if calculate_top_k_hit(expected_paths, retrieved_paths, 3):
-            top3_hits += 1
-        else:
-            failures += 1
-            failing_queries.append(query)
-            
-        rr = calculate_reciprocal_rank(expected_paths, retrieved_paths)
-        reciprocal_ranks.append(rr)
-        
-    top1_accuracy = calculate_accuracy(top1_hits, total_queries)
-    top3_accuracy = calculate_accuracy(top3_hits, total_queries)
-    mrr = calculate_mean_reciprocal_rank(reciprocal_ranks)
-
-    metrics = {
-        "queries": total_queries,
-        "top1_accuracy": top1_accuracy,
-        "top3_accuracy": top3_accuracy,
-        "mrr": mrr,
-        "failures": failures,
-        "failing_queries": failing_queries,
+    core, rows = evaluate(dataset, index_path=index_path, hybrid=hybrid)
+    total_queries, failures = core["queries"], core["failures"]
+    top1_accuracy, top3_accuracy, mrr = core["top1_accuracy"], core["top3_accuracy"], core["mrr"]
+    metrics = dict(core)
+    metrics.update({
         "min_top3": min_top3,
         "passed": top3_accuracy >= min_top3,
         "index_path": index_path,
         "index_identity": _identity_of(index_path),
         "snapshot_coherence": _coherence_of(index_path),
-    }
+    })
+    if keep_rows:
+        metrics["_rows"] = rows
 
     if as_json:
-        print(json.dumps(metrics, indent=2))
+        print(json.dumps({k: v for k, v in metrics.items() if not k.startswith("_")}, indent=2))
     else:
         print("\nSearch Evaluation Results")
         if total_queries < full_size:

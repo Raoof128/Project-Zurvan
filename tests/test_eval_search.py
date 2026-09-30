@@ -163,9 +163,10 @@ def test_max_queries_is_clamped_to_at_least_one(tmp_path, monkeypatch, capsys):
     assert "Queries: 1" in capsys.readouterr().out
 
 
-def test_metrics_name_the_failing_queries(tmp_path, monkeypatch, capsys):
+def test_metrics_name_the_failing_items(tmp_path, monkeypatch, capsys):
     # A failure COUNT cannot support a before/after gate: "still 14" does not
     # prove the same 14. Any comparison across a corpus change needs the IDs.
+    # Indices serve the before/after need without quoting the instrument.
     import json
 
     from scripts import eval_search as es
@@ -177,4 +178,5 @@ def test_metrics_name_the_failing_queries(tmp_path, monkeypatch, capsys):
     metrics = json.loads(capsys.readouterr().out)
 
     assert metrics["failures"] == 3
-    assert metrics["failing_queries"] == ["q0", "q1", "q2"]
+    assert metrics["failing_items"] == [0, 1, 2]
+    assert "failing_queries" not in metrics
