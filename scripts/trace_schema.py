@@ -7,7 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 
-SCHEMA_VERSION = "zurvan.trace.v1"
+SCHEMA_VERSION = "zurvan.trace.v2"
+#: v1 predates trace modes and always stored raw payloads. Still read and
+#: validated: the committed RQ1 traces are frozen research artifacts.
+LEGACY_SCHEMA_VERSIONS = ("zurvan.trace.v1",)
+SUPPORTED_SCHEMA_VERSIONS = (SCHEMA_VERSION,) + LEGACY_SCHEMA_VERSIONS
+#: summary: no raw query/snippets (default); full: explicit local debugging;
+#: protected_eval: forced inside a protected evaluation, aggregates only.
+TRACE_MODES = ("summary", "full", "protected_eval")
 TRACE_ID_RE = re.compile(r"^trace-[A-Za-z0-9][A-Za-z0-9_.-]{7,127}$")
 EVENT_ID_RE = re.compile(r"^evt-[A-Za-z0-9][A-Za-z0-9_.-]{2,63}$")
 ALLOWED_EVENT_TYPES = {
@@ -90,11 +97,17 @@ class TraceRecord:
     events: List[TraceEvent] = field(default_factory=list)
     created_at: str = field(default_factory=utc_now)
     schema_version: str = SCHEMA_VERSION
+    trace_mode: str = "full"
     validate_id: bool = True
 
     def __post_init__(self) -> None:
-        if self.schema_version != SCHEMA_VERSION:
-            raise ValueError(f"schema_version must be {SCHEMA_VERSION}")
+        if self.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError(f"schema_version must be one of {SUPPORTED_SCHEMA_VERSIONS}")
+        if self.schema_version == SCHEMA_VERSION:
+            if self.trace_mode not in TRACE_MODES:
+                raise ValueError(f"trace_mode must be one of {TRACE_MODES}")
+        elif self.trace_mode != "full":
+            raise ValueError("trace_mode: a v1 trace predates modes and is always 'full'")
         if self.validate_id:
             require_safe_trace_id(self.trace_id)
         if not self.title.strip():
@@ -103,7 +116,7 @@ class TraceRecord:
             raise ValueError("summary is required")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "schema_version": self.schema_version,
             "trace_id": self.trace_id,
             "created_at": self.created_at,
@@ -111,6 +124,9 @@ class TraceRecord:
             "summary": self.summary,
             "events": [event.to_dict() for event in self.events],
         }
+        if self.schema_version == SCHEMA_VERSION:
+            data["trace_mode"] = self.trace_mode
+        return data
 
 
 def event_from_dict(data: Dict[str, Any]) -> TraceEvent:
@@ -127,6 +143,7 @@ def event_from_dict(data: Dict[str, Any]) -> TraceEvent:
 def record_from_dict(data: Dict[str, Any]) -> TraceRecord:
     return TraceRecord(
         schema_version=data["schema_version"],
+        trace_mode=data.get("trace_mode", "full"),
         trace_id=data["trace_id"],
         created_at=data["created_at"],
         title=data["title"],

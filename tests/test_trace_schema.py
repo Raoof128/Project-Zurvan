@@ -21,7 +21,7 @@ def test_trace_record_requires_minimum_audit_fields():
 
     data = record.to_dict()
 
-    assert data["schema_version"] == "zurvan.trace.v1"
+    assert data["schema_version"] == "zurvan.trace.v2"
     assert data["trace_id"] == "trace-20260614T000000Z-a1b2c3d4"
     assert data["events"][0]["payload_hash"] == hash_payload(event.payload)
 

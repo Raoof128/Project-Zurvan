@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
-from scripts.trace_schema import SCHEMA_VERSION, ALLOWED_EVENT_TYPES, TRACE_ID_RE, EVENT_ID_RE, hash_payload
+from scripts.trace_schema import SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, TRACE_MODES, ALLOWED_EVENT_TYPES, TRACE_ID_RE, EVENT_ID_RE, hash_payload
 
 
 REQUIRED_TRACE_FIELDS = ("schema_version", "trace_id", "created_at", "title", "summary", "events")
@@ -35,8 +35,11 @@ def _validate_trace_dict(data: Dict[str, Any], issues: List[str]) -> None:
         if field_name not in data:
             issues.append(f"missing required field: {field_name}")
 
-    if data.get("schema_version") != SCHEMA_VERSION:
-        issues.append(f"schema_version must be {SCHEMA_VERSION}")
+    version = data.get("schema_version")
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
+        issues.append(f"schema_version must be one of {SUPPORTED_SCHEMA_VERSIONS}")
+    elif version == SCHEMA_VERSION and data.get("trace_mode") not in TRACE_MODES:
+        issues.append(f"trace_mode must be one of {TRACE_MODES}")
 
     trace_id = data.get("trace_id")
     if trace_id is not None and not TRACE_ID_RE.fullmatch(str(trace_id)):
