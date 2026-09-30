@@ -98,7 +98,10 @@ class TraceStore:
         if record.trace_mode == "full":
             _private_dir(paths.markdown_path.parent)
             _write_private(paths.markdown_path, render_trace_markdown(record))
-        self.prune()
+        try:
+            self.prune()
+        except OSError:
+            pass  # retention is best-effort: the trace already landed
         return paths
 
     def _tracked_names(self) -> dict | None:
@@ -135,7 +138,10 @@ class TraceStore:
             if path.name in tracked["data"]:
                 kept_tracked += 1
                 continue
-            candidates.append((path.stat().st_mtime, path.stem))
+            try:
+                candidates.append((path.stat().st_mtime, path.stem))
+            except FileNotFoundError:
+                continue  # removed by another process since the glob
         candidates.sort(reverse=True)  # newest first
         removed = []
         for position, (mtime, trace_id) in enumerate(candidates):
@@ -147,7 +153,7 @@ class TraceStore:
                     continue
                 removed.append(str(path))
                 if not dry_run:
-                    path.unlink()
+                    path.unlink(missing_ok=True)
         return PruneResult(removed=removed, kept_tracked=kept_tracked)
 
     def trace_path(self, trace_id: str) -> Path:

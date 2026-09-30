@@ -135,3 +135,24 @@ def test_prune_never_removes_a_tracked_markdown_twin(tmp_path):
     result = store.prune(now=now)
     assert result.removed == [str(paths.json_path)]
     assert paths.markdown_path.exists()
+
+
+def test_a_prune_failure_never_fails_a_write_that_landed(tmp_path, monkeypatch):
+    store = TraceStore(tmp_path)
+
+    def boom(*a, **k):
+        raise OSError("prune blew up")
+
+    monkeypatch.setattr(TraceStore, "prune", boom)
+    paths = store.write(_trace())
+    assert paths.json_path.exists()
+
+
+def test_prune_tolerates_a_trace_that_vanishes_mid_scan(tmp_path, monkeypatch):
+    _git_repo(tmp_path)
+    store = TraceStore(tmp_path)
+    store.data_dir.mkdir(parents=True)
+    ghost = store.data_dir / "trace-20260929T000000Z-ghost001.json"
+    monkeypatch.setattr(type(ghost), "glob", lambda self, pat: iter([ghost]))
+    result = store.prune(days=0, keep=0)
+    assert result.refused is None and result.removed == []
