@@ -443,6 +443,11 @@ def _main():
     eval_search_parser.add_argument("--hybrid", action="store_true")
     eval_search_parser.add_argument("--min-top3", type=float, default=0.0)
     eval_search_parser.add_argument("--json", action="store_true", dest="as_json")
+    eval_search_parser.add_argument("--save-run", action="store_true", help="Save per-item rows (by index) for `zurvan eval movers`")
+
+    eval_movers_parser = eval_sub.add_parser("movers", help="Items whose rank moved between two saved runs (by index)")
+    eval_movers_parser.add_argument("run_a")
+    eval_movers_parser.add_argument("run_b")
 
     eval_provenance_parser = eval_sub.add_parser("provenance", help="Evaluate retrieval trace provenance")
     eval_provenance_parser.add_argument("--gold", default="eval/provenance_gold.jsonl")
@@ -1052,7 +1057,19 @@ def _main():
             "--gold", _resolved_gold(args.gold),
             "--min-top3", str(args.min_top3),
         ] + (["--hybrid"] if args.hybrid else [])
-          + (["--json"] if getattr(args, "as_json", False) else []))
+          + (["--json"] if getattr(args, "as_json", False) else [])
+          + (["--save-run"] if getattr(args, "save_run", False) else []))
+    elif args.command == "eval" and args.action == "movers":
+        from scripts.eval_datasets import DatasetNotEligible
+        from scripts.eval_runs import load_run, movers
+        try:
+            moved = movers(load_run(args.run_a), load_run(args.run_b))
+        except DatasetNotEligible as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(2)
+        for m in moved:
+            print(f"item {m['index']:>4}: rank {m['rank_a']} -> {m['rank_b']}")
+        print(f"{len(moved)} item(s) moved.")
     elif args.command == "eval" and args.action == "validate-gold":
         _run_script("eval_search.py", ["--gold", _resolved_gold(args.gold), "--validate"])
     elif args.command == "eval" and args.action == "provenance":

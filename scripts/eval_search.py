@@ -300,10 +300,19 @@ if __name__ == "__main__":
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--json", action="store_true", dest="as_json",
                         help="Emit a single machine-parseable JSON object instead of the text report")
+    parser.add_argument("--save-run", action="store_true",
+                        help="Save per-item rows (by index) to ~/.zurvan/eval-runs for `zurvan eval movers`")
     args = parser.parse_args()
 
     if args.validate:
         validate_gold_dataset(args.gold or _default_gold())
     else:
-        run_search_evaluation(args.gold, args.hybrid, args.min_top3, as_json=args.as_json,
-                              max_queries=args.max_queries, index_path=args.index_path)
+        gold = args.gold or _default_gold()
+        metrics = run_search_evaluation(gold, args.hybrid, args.min_top3, as_json=args.as_json,
+                                        max_queries=args.max_queries, index_path=args.index_path,
+                                        keep_rows=args.save_run)
+        if args.save_run:
+            from scripts.eval_datasets import dataset_for_file
+            from scripts.eval_runs import save_run
+            path = save_run(metrics, metrics.pop("_rows"), dataset_for_file(_resolve(gold)))
+            print(f"Run saved: {path}", file=sys.stderr if args.as_json else sys.stdout)
