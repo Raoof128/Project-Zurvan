@@ -58,3 +58,27 @@ def movers(a: dict, b: dict) -> list:
     rank_b = {r["index"]: r["first_hit_rank"] for r in b["rows"]}
     return [{"index": r["index"], "rank_a": r["first_hit_rank"], "rank_b": rank_b.get(r["index"])}
             for r in a["rows"] if rank_b.get(r["index"]) != r["first_hit_rank"]]
+
+
+REPRODUCE_REQUIRED = ("wiki", "search", "graph")
+
+
+def reproduce(gold_path, *, runs: int = 2, capture_fn=None, evaluate_fn=None) -> dict:
+    """Design §3.5 gate: score the gold set `runs` times on ONE coherent Z0
+    snapshot and compare result digests (ranked ids + quality metrics only)."""
+    from scripts.eval_search import _coherence_of, evaluate, load_gold_dataset
+    if capture_fn is None:
+        from scripts.measurement_snapshot import capture as capture_fn
+    evaluate_fn = evaluate_fn or evaluate
+    dataset = load_gold_dataset(str(gold_path))
+    # `required=` alone: capture() refuses it together with `components=`.
+    snap = capture_fn(label="z1a-reproduce", purpose="measurement",
+                      required=REPRODUCE_REQUIRED)
+    try:
+        digests = [evaluate_fn(dataset, index_path=str(snap.index_path), hybrid=True)[0]["result_digest"]
+                   for _ in range(runs)]
+        return {"equal": len(set(digests)) == 1, "digests": digests,
+                "coherence": _coherence_of(str(snap.index_path)),
+                "snapshot_index": str(snap.index_path)}
+    finally:
+        snap.release()

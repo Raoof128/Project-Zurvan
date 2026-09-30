@@ -449,6 +449,9 @@ def _main():
     eval_movers_parser.add_argument("run_a")
     eval_movers_parser.add_argument("run_b")
 
+    eval_repro_parser = eval_sub.add_parser("reproduce", help="Score the gold set twice on one coherent Z0 snapshot; compare result digests")
+    eval_repro_parser.add_argument("--gold", default=None)
+
     eval_provenance_parser = eval_sub.add_parser("provenance", help="Evaluate retrieval trace provenance")
     eval_provenance_parser.add_argument("--gold", default="eval/provenance_gold.jsonl")
     eval_provenance_parser.add_argument("--validate", action="store_true")
@@ -1070,6 +1073,17 @@ def _main():
         for m in moved:
             print(f"item {m['index']:>4}: rank {m['rank_a']} -> {m['rank_b']}")
         print(f"{len(moved)} item(s) moved.")
+    elif args.command == "eval" and args.action == "reproduce":
+        import json  # this function binds `json` locally elsewhere (line ~853)
+        from scripts.build_snapshot import VERIFIED, SnapshotNotReady
+        from scripts.eval_runs import reproduce
+        try:
+            out = reproduce(_resolved_gold(args.gold))
+        except SnapshotNotReady as exc:
+            print(f"SNAPSHOT_NOT_READY: {exc}", file=sys.stderr)
+            sys.exit(2)
+        print(json.dumps(out, indent=2))
+        sys.exit(0 if out["equal"] and out["coherence"].get("status") == VERIFIED else 1)
     elif args.command == "eval" and args.action == "validate-gold":
         _run_script("eval_search.py", ["--gold", _resolved_gold(args.gold), "--validate"])
     elif args.command == "eval" and args.action == "provenance":
