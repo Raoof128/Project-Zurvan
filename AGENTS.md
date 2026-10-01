@@ -88,6 +88,39 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-10-01 (Australia/Sydney) — waiting items: the 07:34 drift explained, barrier bypasses closed, gauntlet isolated, Boundary rebuilt
+**Raouf:**
+- **Scope:** `scripts/memory.py`, `cli.py`, `session.py`, `rebuild_index.py`, `run_reliability_gauntlet.py`, `eval_search.py`. New tests: `test_decision_set_project.py`, `test_session_index_barrier.py`, `test_gauntlet_isolation.py`. Adapted: `test_session.py`, `test_check_gate_index_rebuild.py`. Docs: the mirror plan (name) and the Z1a execution record (#19). Done inline, test first.
+- **The 07:34 drift (rev 301/302), root cause found.** Acme session `ed112e1a` met `project: "unknown"` on decisions it had just added. It had run `decision add` from `Job_Projects/Acme`, which isn't registered, so resolution failed closed, as designed. It then fixed the pages with `sed -i` in `wiki/decisions`, outside the ledger. In the same run it changed every `"acme"` to `"Acme"`, which isn't a valid slug. `sed -i` rewrote all 77 `acme-*` pages, 52 of them byte-identical, so they all share one mtime.
+  - The gap was that Zurvan had no managed way to correct a subject.
+  - **Now:** `zurvan decision set-project PAGE... --project <slug>` validates the slug the same way `decision add` does. It rewrites only the frontmatter line, checks every page before writing any, and declares the subject to the ledger: one revision, MANAGED.
+  - `decision add` now prints a warning naming that command whenever it stamps `unknown`.
+  - The 77 pages were relabelled to `acme` (Raouf's choice) through the new command.
+- **Barrier bypasses (filed 2026-09-28), closed:**
+  - `session start|close` and `index rebuild` now write through `safe_write`. `index rebuild` runs in-process inside the CLI operation and targets the store, not the cwd.
+  - The reliability gauntlet (check.sh gate 3) copies its `raw/` sources into a throwaway store and runs ingest, extract and audit there. It used to ingest 5 sources into the live corpus on every gate.
+- **Z1a #19:** keyword-mode eval rows are store-relative, so the result digest is the same from any checkout. Before/after on the live wiki: top-10 lists for all 50 items byte-identical (`ee674618aef5`), metrics identical (top-1 0.0, top-3 0.0, MRR 0.0022, 50 failures), so ranking is unchanged.
+- **Boundary configured (Raouf's choice of protected set, revised once):**
+  - **First build (wrong), now removed:** every gitignored `wiki/sources` page plus `sources/` (10,585 files, 225 MB; 12,676,118 fingerprints; red-team 27/27). The batch audit blocked 67 of 453 tracked files, including LICENSE and README. `wiki/sources` holds ingested public papers and Zurvan's own docs, so their text matched the repo: the same ingestion round-trip AGENTS.md records for the invalid 11/200 measurement. My protected-set estimate (11 MB) came from the spec's 2026-09-15 sample and was wrong.
+  - **Current store:** INSTRUMENT is the 50-item gold set. PRIVATE is the repo's `sources/`. That gives 2 origins, 782 fingerprints, 100 literals, health `healthy`. Red-team 27/27. `boundary_guard` (check.sh gate 0) is clean.
+  - **Audit: 22 of 453 tracked files blocked, all D2 INSTRUMENT literals.**
+    - Gold item 0's query, in 5 files: the frozen eval and trace artifacts the mirror plan already allows for.
+    - The `notes` annotation field of items 7, 20, 29, 37, 39 and 46, in 17 files. These notes are 10-30 characters of generic phrasing, so registering them as literals is too broad (`_instrument_literals` registers every string field of at least 8 characters).
+    - Filed, not changed: limiting the registration to `query` changes what Boundary protects and needs a Boundary re-measurement. Until then, a manual `boundary scan-diff` that stages one of those files will block.
+  - **`boundary audit` is unusably slow at scale:** it calls `scan_blob` per file, and each call re-reads the protected state. It ran more than 1h30 against the large store before I stopped it. `batch_scan` (one frozen view) did the same 453 files in 2 minutes.
+- **Public mirror:** named `Raoof128/zurvan`. Not built or published. Plan Tasks 1-3 remain, and Task 4 needs an explicit yes.
+- **MCP:** `zurvan_decision_add` gained `project=`. Its result names the stamped project and, for `unknown`, the managed fix. The new tool `zurvan_decision_set_project` does that fix (the e2e smoke now requires it). The same Acme session sed-edited a decision again at 14:14 (rev 317) because the MCP tool could not name a subject. An MCP server started earlier must be restarted to get the parameter.
+- **Suite regressions found and fixed:**
+  - `test_shelled_commands_stay_silent_on_success` mocked `subprocess` and ran `index rebuild`, which is now in-process. It regenerated the LIVE `wiki/index.md` once (rev 312, managed, no drift, identical to `zurvan index rebuild`). It now uses `audit`.
+  - The gauntlet skips missing sources.
+  - `agent prime` caps each recent-activity line at 200 chars (it reached 5,558 chars against a 4,000 budget).
+- **Acme pages:** the 77 `acme-*` decisions were relabelled `"Acme"` -> `"acme"` with `decision set-project` (rev 311, MANAGED, no drift).
+- **Verification:**
+  - Full suite on `main` (`1cc9d5f`): **1460 passed, 4 skipped, 0 failed, 0 errors** (27m28s).
+  - An earlier run (1456 passed, 1 error) tripped the live-index guard. Acme session `2d85a7de` ran `zurvan index search && graph rebuild` mid-suite. That was a concurrent writer, not a test, and that run is not counted.
+  - Two tests take 21 of the 27 minutes: a full live 50-query eval (997 s) and a live-index instrument scan (262 s). At 08:44 the whole suite took 9 minutes on the same index, so the slowdown is probably a cold disk cache, not code.
+  - public_repo_guard passed. `git diff --check` is clean.
+
 ### 2026-10-01 (Australia/Sydney) — Z1a hardening: the deferred review minors
 **Raouf:**
 - **Scope:** `scripts/trace_writer.py`, `trace_validate.py`, `cli.py`, `eval_datasets.py`, `eval_runs.py`, `eval_search.py`; new `tests/test_z1a_hardening_{traces,eval}.py`; `tests/test_trace_modes.py`, `tests/test_instruments.py`. Done inline, test first (red, then green).
@@ -120,29 +153,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
   - No ranking or indexing change: metric computation is untouched, and the RETIRED live instrument still lists its failing items.
   - The affected suites in the worktree: 188 passed. The 4 failures are environmental, because the worktree lacks the untracked wiki pages and graph DB.
   - On merged `main` (`1cb538f`): full suite **1445 passed, 4 skipped, 0 failed** (8m55s).
-
-### 2026-10-01 (Australia/Sydney) — Z1a built: retrieval observability without leaks; ranking unchanged vs BASE
-**Raouf:**
-- **Scope:** branch `z1a-observability` (from `a79b26b`): `scripts/trace_schema.py`, `trace_validate.py`, `trace_writer.py`, `context_export.py`, `hybrid_search.py`, `eval_search.py`, `cli.py`; new `scripts/eval_datasets.py`, `scripts/eval_runs.py`, `eval/datasets.json`; 10 test files (8 new); spec §3.2 and status; CLAUDE.md bullet. Plan `docs/superpowers/plans/2026-09-29-z1a-observability.md`, executed task by task with an implementer and a reviewer per task (subagents on Sonnet; Task 9 inline).
-- **Summary:**
-  - Traces are schema v2 with `trace_mode`. `--trace` defaults to `summary`: no raw query (sha256 and length only), no snippets, no headings or node titles, no Markdown twin. `--trace-mode full` is explicit, and `protected_eval` is forced inside a protected evaluation and is never a CLI choice. v1 traces still read and validate unchanged.
-  - Trace files are 0600 in 0700 dirs. Every write prunes untracked traces (30 days, newest 500), never a git-tracked one, and a prune failure never fails the write.
-  - Stage timings (`fts`, `embed_query`, `vector_scan`, `hydrate`, `fuse`, `total`) and `search --explain` are observation only.
-  - `evaluate()` returns per-item rows by index and a timing-free `result_digest`. `failing_queries` became `failing_items`, and the gold loader's malformed-line warning no longer echoes the line.
-  - Dataset registry: the burned 50-item instrument is `RETIRED` by whole-file digest. `eval search --save-run` and `eval movers` refuse HOLDOUT/RESERVE: before writing, and by re-resolving the current registry state, so a dataset sealed after a run was saved stays sealed. Movers also refuse runs with different item sets. `eval reproduce` compares digests on one coherent snapshot.
-- **Review fixes beyond the plan text:** a prune race could fail a landed write (Task 2). Movers trusted a stale stored state and compared truncated runs (Task 7). The closure matrix overclaimed: it now maps every gate to the tests that demonstrate it, and `LIVE_PROOF` names gates 1, 4, 7 and 8 as needing the live run.
-- **Live store reconciled first (2026-10-01):** rev 301 had UNRECORDED drift, because 77 `wiki/decisions` pages were rewritten in one batch at 07:34 outside the barrier. The graph was 6 revisions stale. Two dead rebuild snapshots were reclaimed by `knowledge gc`. The search rebuild's capture minted the drift as rev 302 EXTERNAL_OBSERVED, and search (297,992 chunks, 21 embeddings recomputed) and graph (11,484 nodes) were rebuilt to 302 CLEAN, with no drift.
-- **Verification (live, rev 302):**
-  - Ranking unchanged vs BASE `a79b26b`, on one VERIFIED snapshot. The top-10 lists for all 50 items are byte-identical (`6cce77720b64`). `eval_search --hybrid`, before and after: queries 50, top-1 0.72, top-3 0.74, MRR 0.74, failures 13.
-  - `eval reproduce`: equal digests `0982995bc307…` x2, VERIFIED.
-  - A default `search --trace` wrote a summary trace: 0600, query string absent from the file bytes, no twin.
-  - `trace prune --dry-run`: 0 removed, 33 tracked kept.
-  - RQ1 pilot `eval_provenance` is byte-identical BASE vs HEAD: source recall 0.861, raw-leak 0, hash integrity 1.0.
-  - Worktree suite: 15 failed / 1401 passed. All 15 are environmental, identical before and after every task, and caused by the worktree lacking the untracked `.private-projects`, wiki pages and graph DB. Gate 8 closes only on a 0-failed suite on merged `main`.
-  - **Gate 8, merged `main` (`62feaed`, fast-forward):** full suite **1417 passed, 4 skipped, 0 failed** (8m44s; 7 warnings, pre-existing DeprecationWarnings). **Z1a CLOSED 2026-10-01.**
-- **Follow-ups:**
-  - The ranking proof took 12.5 min (the dry run measured 3m18s), so the corpus is ~61% larger. The plan's 15-minute background limit killed the first run and leaked a snapshot, which gc reclaimed.
-  - Rulings and deferred review minors are recorded in the plan's "Execution record (2026-10-01)" section. The most relevant to Z1b is that `eval search --json` prints `failing_items` indices for any dataset, sealed or not.
-  - The 07:34 batch writer is still unidentified.
-  - Gate 6 closes on the guard function: the Z1b promotion workflow must call `require_promotion_eligible`.
-  - The "35 tracked traces" figure was a miscount; it is 33.

@@ -1,5 +1,38 @@
 ## Change Log
 
+### 2026-10-01 (Australia/Sydney) — waiting items: the 07:34 drift explained, barrier bypasses closed, gauntlet isolated, Boundary rebuilt
+**Raouf:**
+- **Scope:** `scripts/memory.py`, `cli.py`, `session.py`, `rebuild_index.py`, `run_reliability_gauntlet.py`, `eval_search.py`. New tests: `test_decision_set_project.py`, `test_session_index_barrier.py`, `test_gauntlet_isolation.py`. Adapted: `test_session.py`, `test_check_gate_index_rebuild.py`. Docs: the mirror plan (name) and the Z1a execution record (#19). Done inline, test first.
+- **The 07:34 drift (rev 301/302), root cause found.** Acme session `ed112e1a` met `project: "unknown"` on decisions it had just added. It had run `decision add` from `Job_Projects/Acme`, which isn't registered, so resolution failed closed, as designed. It then fixed the pages with `sed -i` in `wiki/decisions`, outside the ledger. In the same run it changed every `"acme"` to `"Acme"`, which isn't a valid slug. `sed -i` rewrote all 77 `acme-*` pages, 52 of them byte-identical, so they all share one mtime.
+  - The gap was that Zurvan had no managed way to correct a subject.
+  - **Now:** `zurvan decision set-project PAGE... --project <slug>` validates the slug the same way `decision add` does. It rewrites only the frontmatter line, checks every page before writing any, and declares the subject to the ledger: one revision, MANAGED.
+  - `decision add` now prints a warning naming that command whenever it stamps `unknown`.
+  - The 77 pages were relabelled to `acme` (Raouf's choice) through the new command.
+- **Barrier bypasses (filed 2026-09-28), closed:**
+  - `session start|close` and `index rebuild` now write through `safe_write`. `index rebuild` runs in-process inside the CLI operation and targets the store, not the cwd.
+  - The reliability gauntlet (check.sh gate 3) copies its `raw/` sources into a throwaway store and runs ingest, extract and audit there. It used to ingest 5 sources into the live corpus on every gate.
+- **Z1a #19:** keyword-mode eval rows are store-relative, so the result digest is the same from any checkout. Before/after on the live wiki: top-10 lists for all 50 items byte-identical (`ee674618aef5`), metrics identical (top-1 0.0, top-3 0.0, MRR 0.0022, 50 failures), so ranking is unchanged.
+- **Boundary configured (Raouf's choice of protected set, revised once):**
+  - **First build (wrong), now removed:** every gitignored `wiki/sources` page plus `sources/` (10,585 files, 225 MB; 12,676,118 fingerprints; red-team 27/27). The batch audit blocked 67 of 453 tracked files, including LICENSE and README. `wiki/sources` holds ingested public papers and Zurvan's own docs, so their text matched the repo: the same ingestion round-trip AGENTS.md records for the invalid 11/200 measurement. My protected-set estimate (11 MB) came from the spec's 2026-09-15 sample and was wrong.
+  - **Current store:** INSTRUMENT is the 50-item gold set. PRIVATE is the repo's `sources/`. That gives 2 origins, 782 fingerprints, 100 literals, health `healthy`. Red-team 27/27. `boundary_guard` (check.sh gate 0) is clean.
+  - **Audit: 22 of 453 tracked files blocked, all D2 INSTRUMENT literals.**
+    - Gold item 0's query, in 5 files: the frozen eval and trace artifacts the mirror plan already allows for.
+    - The `notes` annotation field of items 7, 20, 29, 37, 39 and 46, in 17 files. These notes are 10-30 characters of generic phrasing, so registering them as literals is too broad (`_instrument_literals` registers every string field of at least 8 characters).
+    - Filed, not changed: limiting the registration to `query` changes what Boundary protects and needs a Boundary re-measurement. Until then, a manual `boundary scan-diff` that stages one of those files will block.
+  - **`boundary audit` is unusably slow at scale:** it calls `scan_blob` per file, and each call re-reads the protected state. It ran more than 1h30 against the large store before I stopped it. `batch_scan` (one frozen view) did the same 453 files in 2 minutes.
+- **Public mirror:** named `Raoof128/zurvan`. Not built or published. Plan Tasks 1-3 remain, and Task 4 needs an explicit yes.
+- **MCP:** `zurvan_decision_add` gained `project=`. Its result names the stamped project and, for `unknown`, the managed fix. The new tool `zurvan_decision_set_project` does that fix (the e2e smoke now requires it). The same Acme session sed-edited a decision again at 14:14 (rev 317) because the MCP tool could not name a subject. An MCP server started earlier must be restarted to get the parameter.
+- **Suite regressions found and fixed:**
+  - `test_shelled_commands_stay_silent_on_success` mocked `subprocess` and ran `index rebuild`, which is now in-process. It regenerated the LIVE `wiki/index.md` once (rev 312, managed, no drift, identical to `zurvan index rebuild`). It now uses `audit`.
+  - The gauntlet skips missing sources.
+  - `agent prime` caps each recent-activity line at 200 chars (it reached 5,558 chars against a 4,000 budget).
+- **Acme pages:** the 77 `acme-*` decisions were relabelled `"Acme"` -> `"acme"` with `decision set-project` (rev 311, MANAGED, no drift).
+- **Verification:**
+  - Full suite on `main` (`1cc9d5f`): **1460 passed, 4 skipped, 0 failed, 0 errors** (27m28s).
+  - An earlier run (1456 passed, 1 error) tripped the live-index guard. Acme session `2d85a7de` ran `zurvan index search && graph rebuild` mid-suite. That was a concurrent writer, not a test, and that run is not counted.
+  - Two tests take 21 of the 27 minutes: a full live 50-query eval (997 s) and a live-index instrument scan (262 s). At 08:44 the whole suite took 9 minutes on the same index, so the slowdown is probably a cold disk cache, not code.
+  - public_repo_guard passed. `git diff --check` is clean.
+
 ### 2026-10-01 (Australia/Sydney) — Z1a hardening: the deferred review minors
 **Raouf:**
 - **Scope:** `scripts/trace_writer.py`, `trace_validate.py`, `cli.py`, `eval_datasets.py`, `eval_runs.py`, `eval_search.py`; new `tests/test_z1a_hardening_{traces,eval}.py`; `tests/test_trace_modes.py`, `tests/test_instruments.py`. Done inline, test first (red, then green).
