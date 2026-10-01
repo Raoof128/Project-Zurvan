@@ -39,6 +39,7 @@ REQUIRED_TOOLS = {
     "zurvan_validate_gold",
     "zurvan_remember",
     "zurvan_decision_add",
+    "zurvan_decision_set_project",
     "zurvan_claim_add",
     "zurvan_question_add",
 }

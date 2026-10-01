@@ -316,14 +316,38 @@ def tool_zurvan_decision_add(title: str, reason: str, status: str, tags: List[st
     `public_repo_guard` gates publication on. Left unset it is resolved from the
     working directory, never from whichever workspace is globally selected.
     """
-    from scripts.memory import InvalidProjectError
+    from scripts.memory import InvalidProjectError, resolve_project, write_decision
     try:
-        ok = add_decision(title, reason, status, tags, project=project)
+        path = write_decision(title, reason, status, tags, project=project)
     except InvalidProjectError as exc:
         return f"Error: {exc}"
-    if ok:
-        return f"Decision added successfully: {title}"
-    return "Failed to add decision."
+    if path is None:
+        return "Failed to add decision."
+    subject = resolve_project(project)
+    message = f"Decision added successfully (project: {subject}): {title}"
+    if subject == "unknown":
+        # Said in the result, where an MCP caller sees it (stderr does not reach
+        # one). Silence here is what sent agents to `sed -i` on 2026-10-01.
+        message += ("\nWarning: project stamped \"unknown\" (none was named and the "
+                    "server's working directory is in no registered project). Fix it "
+                    "inside the ledger: zurvan_decision_set_project(pages=["
+                    f"{path!r}], project=\"<slug>\"), and pass project= next time. "
+                    "Never edit wiki/decisions directly.")
+    return message
+
+
+@_protocol_safe
+@enforce_read_only
+@mcp_operation
+def tool_zurvan_decision_set_project(pages: List[str], project: str) -> str:
+    """Set the `project:` subject of existing decision pages inside the ledger."""
+    from scripts.memory import InvalidProjectError, set_decision_project
+    try:
+        changed = set_decision_project(pages, project)
+    except (InvalidProjectError, ValueError) as exc:
+        return f"Error: {exc} Nothing was written."
+    return "\n".join([f"Set project to {project} on {len(changed)} page(s):"]
+                     + [f"- {p}: was {old}" for p, old in changed])
 
 @_protocol_safe
 @enforce_read_only

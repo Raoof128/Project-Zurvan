@@ -214,13 +214,32 @@ def zurvan_decision_add(
     reason: Annotated[str, Field(description="The rationale and any considered alternatives.")],
     status: Annotated[Literal["proposed", "accepted", "rejected", "superseded", "deprecated"], Field(description="Lifecycle state of the decision.")],
     tags: Annotated[list[str], Field(description="Topical tags.")],
+    project: Annotated[str | None, Field(description=(
+        "The decision's SUBJECT project slug (lowercase letters, digits, '-', '_'), "
+        "e.g. \"acme\". Written to the page's `project:` field, which gates "
+        "publication. Omit only when the server runs inside that project's "
+        "registered directory; otherwise it is stamped \"unknown\"."))] = None,
 ) -> str:
     """Record an architectural/engineering decision (ADR-style) in Zurvan.
 
     Use whenever a non-trivial choice is made so future agents respect it.
-    Requires write mode (ZURVAN_MCP_READONLY=0).
+    Name the subject with `project`. Requires write mode (ZURVAN_MCP_READONLY=0).
     """
-    return tools.tool_zurvan_decision_add(title, reason, status, tags)
+    return tools.tool_zurvan_decision_add(title, reason, status, tags, project=project)
+
+
+@mcp.tool(title="Set a decision's project", annotations=ADDITIVE_WRITE)
+def zurvan_decision_set_project(
+    pages: Annotated[list[str], Field(description="Paths of decision pages under wiki/decisions.")],
+    project: Annotated[str, Field(description="The subject project slug to set, e.g. \"acme\".")],
+) -> str:
+    """Correct the `project:` subject of existing decisions INSIDE the ledger.
+
+    Use this, never a direct file edit, when a decision was stamped "unknown" or
+    with the wrong project. The slug is validated; only the frontmatter line
+    changes; one call is one ledger revision. Requires write mode.
+    """
+    return tools.tool_zurvan_decision_set_project(pages, project)
 
 @mcp.tool(title="Record an evidenced claim", annotations=ADDITIVE_WRITE)
 def zurvan_claim_add(

@@ -130,6 +130,14 @@ def current_project_name() -> str:
 
 def add_decision(title: str, reason: str, status: str, tags: List[str],
                  project: str | None = None):
+    return write_decision(title, reason, status, tags, project=project) is not None
+
+
+def write_decision(title: str, reason: str, status: str, tags: List[str],
+                   project: str | None = None) -> str | None:
+    """`add_decision`, returning the written page's path (None on a refused
+    write) so a caller can report it — the MCP tool names the page to fix when
+    the subject resolved to `unknown`."""
     require_active_operation("memory.add_decision()")
     filepath = _unique_path("wiki/decisions", _make_note_slug(title))
     subject = resolve_project(project)
@@ -174,10 +182,10 @@ tags:
                   f"`zurvan decision set-project {filepath} --project <slug>`, or pass "
                   "`--project <slug>` next time. Never edit wiki/decisions by hand.",
                   file=_sys.stderr)
-        return True
+        return filepath
     else:
         print(f"Failed to securely write to {filepath}")
-        return False
+        return None
 
 
 _PROJECT_LINE = re.compile(r"^project:.*$", re.M)
