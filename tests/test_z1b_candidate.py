@@ -1066,5 +1066,5 @@ def test_t9_adapter_chunk_to_page_unit():
 def test_t9_adapter_default_search_requires_the_db_env_and_never_guesses(monkeypatch):
     monkeypatch.delenv("ZURVAN_SEARCH_DB", raising=False)
     with pytest.raises(SystemExit) as ei:
-        z1b_candidate.main([])
+        z1b_candidate.adapter_main([])
     assert ei.value.code == 2

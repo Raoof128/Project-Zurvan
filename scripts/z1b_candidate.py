@@ -41,7 +41,7 @@ def chunk_to_page(source_path, wiki_root):
     return page
 
 
-def _parse_request(line):
+def _adapter_parse_request(line):
     """Strict {"qid": int, "q": str}; returns (qid, q) or None."""
     try:
         def no_dupes(pairs):
@@ -63,7 +63,7 @@ def _parse_request(line):
     return qid, query
 
 
-def _answer(qid, chunks, wiki_root, limit):
+def _adapter_answer(qid, chunks, wiki_root, limit):
     results = []
     for chunk in list(chunks or [])[:limit * 4]:
         page = chunk_to_page(chunk.get("source_path"), wiki_root)
@@ -87,15 +87,15 @@ def serve(stdin, stdout, search_fn, wiki_root="wiki", limit=TOP_K):
                 return 0
             if len(line) > MAX_LINE or not line.endswith(b"\n"):
                 return 2
-            parsed = _parse_request(line)
+            parsed = _adapter_parse_request(line)
             if parsed is None:
                 return 2
             qid, query = parsed
-            stdout.write(_answer(qid, search_fn(query, limit), wiki_root, limit))
+            stdout.write(_adapter_answer(qid, search_fn(query, limit), wiki_root, limit))
             stdout.flush()
 
 
-def main(argv=None):
+def adapter_main(argv=None):
     db = os.environ.get("ZURVAN_SEARCH_DB")
     if not db or not os.path.exists(db):
         sys.exit(2)
@@ -111,4 +111,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    adapter_main()

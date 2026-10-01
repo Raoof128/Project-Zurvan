@@ -31,7 +31,7 @@ SEALED_IDS = ("eval_home", "keys_dir", "sets_dir", "runs_dir", "incidents_dir", 
 _RUN_ID = re.compile(r"[0-9a-f]{16}")
 
 
-def _check_run_id(run_id) -> str:
+def _cr_check_run_id(run_id) -> str:
     if type(run_id) is not str or not _RUN_ID.fullmatch(run_id):
         raise SealRefusal("BAD_ARGS")
     return run_id
@@ -39,7 +39,7 @@ def _check_run_id(run_id) -> str:
 
 # ---------------------------------------------------------------- launching
 
-def _default_launcher(cmd, env, cwd, timeout=None) -> int:
+def _cr_default_launcher(cmd, env, cwd, timeout=None) -> int:
     """stdin/stdout inherited, stderr discarded, own process group so a timeout kills every child."""
     with open(os.devnull, "wb") as devnull:
         proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdin=None, stdout=None, stderr=devnull,
@@ -47,14 +47,14 @@ def _default_launcher(cmd, env, cwd, timeout=None) -> int:
         try:
             rc = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            _kill_group(proc.pid)
+            _cr_kill_group(proc.pid)
             proc.wait()
             raise SealRefusal("CANDIDATE_FAILED") from None
-        _kill_group(proc.pid)  # reap grandchildren the candidate left behind
+        _cr_kill_group(proc.pid)  # reap grandchildren the candidate left behind
         return rc
 
 
-def _kill_group(pgid: int) -> None:
+def _cr_kill_group(pgid: int) -> None:
     try:
         os.killpg(pgid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
@@ -64,8 +64,8 @@ def _kill_group(pgid: int) -> None:
 def run(run_id: str, paths: SealPaths, *, sandbox: bool = True, launcher=None, python: str = None,
         timeout: int = DEFAULT_TIMEOUT, dev_home: Path = None) -> int:
     """Clone stage/<run_id>.bundle into scratch/<run_id>/repo and exec the candidate. Returns its exit code."""
-    _check_run_id(run_id)
-    launcher = launcher or _default_launcher
+    _cr_check_run_id(run_id)
+    launcher = launcher or _cr_default_launcher
     python = python or str(paths.runtime_dir / "bin" / "python3")
     dev_home = Path(dev_home) if dev_home is not None else DEFAULT_DEV_HOME
 
@@ -121,7 +121,7 @@ def run(run_id: str, paths: SealPaths, *, sandbox: bool = True, launcher=None, p
 
 # ---------------------------------------------------------------- probe
 
-def _probe_one(path: Path) -> str:
+def _cr_probe_one(path: Path) -> str:
     try:
         fd = os.open(str(path), os.O_RDONLY | os.O_NONBLOCK)
     except OSError as exc:
@@ -142,7 +142,7 @@ def _probe_one(path: Path) -> str:
 
 def probe(paths: SealPaths) -> dict:
     """Try to open each sealed path as this user. Anything but EACCES/ENOENT is an exposure."""
-    return {pid: _probe_one(getattr(paths, pid)) for pid in SEALED_IDS}
+    return {pid: _cr_probe_one(getattr(paths, pid)) for pid in SEALED_IDS}
 
 
 # ---------------------------------------------------------------- wipe
@@ -162,7 +162,7 @@ def _default_killer() -> bool:
     return True
 
 
-def _unlock_tree(top: str) -> None:
+def _cr_unlock_tree(top: str) -> None:
     for root, dirs, _files in os.walk(top, topdown=True, followlinks=False):
         for name in dirs:
             full = os.path.join(root, name)
@@ -175,7 +175,7 @@ def _unlock_tree(top: str) -> None:
 
 def wipe(paths: SealPaths, run_id: str, *, killer=None) -> None:
     """Kill leftovers, then remove scratch/<run_id>. Never follows a symlink."""
-    _check_run_id(run_id)
+    _cr_check_run_id(run_id)
     try:
         (killer or _default_killer)()
     except Exception:  # noqa: BLE001 - a failing kill must not stop the removal
@@ -189,7 +189,7 @@ def wipe(paths: SealPaths, run_id: str, *, killer=None) -> None:
         os.unlink(target)
         return
     os.chmod(target, 0o700)
-    _unlock_tree(target)
+    _cr_unlock_tree(target)
     shutil.rmtree(target)
 
 
@@ -201,13 +201,13 @@ def main(argv, *, paths: SealPaths = None, killer=None) -> int:
         paths = paths or SealPaths.real()
         argv = list(argv)
         if len(argv) == 2 and argv[0] == "run":
-            return 0 if run(_check_run_id(argv[1]), paths) == 0 else 1
+            return 0 if run(_cr_check_run_id(argv[1]), paths) == 0 else 1
         if argv == ["probe"]:
             sys.stdout.write(json.dumps(probe(paths), sort_keys=True) + "\n")
             sys.stdout.flush()
             return 0
         if len(argv) == 2 and argv[0] == "wipe":
-            wipe(paths, _check_run_id(argv[1]), killer=killer)
+            wipe(paths, _cr_check_run_id(argv[1]), killer=killer)
             return 0
         return 2
     except SealRefusal:

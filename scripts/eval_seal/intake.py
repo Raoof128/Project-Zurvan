@@ -37,7 +37,7 @@ _PINNED_GIT_ENV = {
 }
 
 
-def _bad() -> SealRefusal:
+def _intake_bad() -> SealRefusal:
     return SealRefusal("BUNDLE_INVALID")
 
 
@@ -45,11 +45,11 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
     """Copy drop_dir/<name> to stage_dir/<run_id>.bundle through one validated fd."""
     # fullmatch, not match: "$" would let a trailing newline through
     if type(name) is not str or not _NAME.fullmatch(name):
-        raise _bad()
+        raise _intake_bad()
     if type(run_id) is not str or not _RUN_ID.fullmatch(run_id):
-        raise _bad()
+        raise _intake_bad()
     if type(expected_uid) is not int or isinstance(expected_uid, bool):
-        raise _bad()
+        raise _intake_bad()
 
     staged = paths.stage_dir / (run_id + ".bundle")
     dir_fd = src_fd = dst_fd = None
@@ -59,16 +59,16 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
             dir_fd = os.open(str(paths.drop_dir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             src_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
         except OSError:
-            raise _bad() from None
+            raise _intake_bad() from None
         st = os.fstat(src_fd)
         if not stat.S_ISREG(st.st_mode) or st.st_uid != expected_uid or st.st_nlink != 1:
-            raise _bad()
+            raise _intake_bad()
         if st.st_size > MAX_BUNDLE_BYTES:
-            raise _bad()
+            raise _intake_bad()
         try:
             dst_fd = os.open(str(staged), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
         except OSError:
-            raise _bad() from None  # includes a pre-existing stage file: never overwritten
+            raise _intake_bad() from None  # includes a pre-existing stage file: never overwritten
         created = True
         total = 0
         try:
@@ -78,13 +78,13 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
                     break
                 total += len(chunk)
                 if total > MAX_BUNDLE_BYTES:  # file grew while we copied
-                    raise _bad()
+                    raise _intake_bad()
                 view = memoryview(chunk)
                 while view:
                     view = view[os.write(dst_fd, view):]
             os.fsync(dst_fd)
         except OSError:
-            raise _bad() from None
+            raise _intake_bad() from None
         try:
             os.unlink(name, dir_fd=dir_fd)
         except OSError:
@@ -103,7 +103,7 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
                 os.unlink(str(staged))
             except OSError:
                 pass
-        raise _bad() from None
+        raise _intake_bad() from None
     finally:
         for fd in (src_fd, dst_fd, dir_fd):
             if fd is not None:
@@ -113,22 +113,22 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
                     pass
 
 
-def _check_env(env: dict) -> None:
+def _intake_check_env(env: dict) -> None:
     if not isinstance(env, dict) or not env:
-        raise _bad()
+        raise _intake_bad()
     for key, val in env.items():
         if type(key) is not str or type(val) is not str:
-            raise _bad()
+            raise _intake_bad()
         if key.startswith("GIT_") and _PINNED_GIT_ENV.get(key) != val:
-            raise _bad()
+            raise _intake_bad()
         if key.startswith(("DYLD_", "LD_", "PYTHON")):
-            raise _bad()
+            raise _intake_bad()
     for key, val in _PINNED_GIT_ENV.items():
         if env.get(key) != val:
-            raise _bad()
+            raise _intake_bad()
 
 
-def _git(args: list, env: dict, scratch_repo: str = None) -> "subprocess.CompletedProcess":
+def _intake_git(args: list, env: dict, scratch_repo: str = None) -> "subprocess.CompletedProcess":
     cmd = [GIT, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
            "-c", "transfer.fsckObjects=true"]
     if scratch_repo is not None:
@@ -146,35 +146,35 @@ def verify_bundle(staged: Path, commit: str, *, env: dict) -> None:
     """
     if type(commit) is not str or not _COMMIT.fullmatch(commit):
         raise SealRefusal("BAD_ARGS")
-    _check_env(env)
+    _intake_check_env(env)
     staged = Path(staged)
     work = None
     try:
         work = tempfile.mkdtemp(prefix=".verify-", dir=str(staged.parent))
         repo = os.path.join(work, "r.git")
-        if _git(["init", "--bare", "--quiet", "--template=", repo], env).returncode != 0:
-            raise _bad()
-        if _git(["bundle", "verify", str(staged)], env, repo).returncode != 0:
-            raise _bad()
-        listed = _git(["bundle", "list-heads", str(staged)], env, repo)
+        if _intake_git(["init", "--bare", "--quiet", "--template=", repo], env).returncode != 0:
+            raise _intake_bad()
+        if _intake_git(["bundle", "verify", str(staged)], env, repo).returncode != 0:
+            raise _intake_bad()
+        listed = _intake_git(["bundle", "list-heads", str(staged)], env, repo)
         if listed.returncode != 0:
-            raise _bad()
+            raise _intake_bad()
         heads = set()
         for line in listed.stdout.decode("utf-8", "replace").splitlines():
             m = _HEAD_LINE.fullmatch(line)
             if not m:
-                raise _bad()
+                raise _intake_bad()
             heads.add(m.group(1))
         if commit not in heads:
             raise SealRefusal("CANDIDATE_NOT_FROZEN")
-        if _git(["bundle", "unbundle", str(staged)], env, repo).returncode != 0:
-            raise _bad()
-        if _git(["cat-file", "-e", commit + "^{commit}"], env, repo).returncode != 0:
-            raise _bad()
+        if _intake_git(["bundle", "unbundle", str(staged)], env, repo).returncode != 0:
+            raise _intake_bad()
+        if _intake_git(["cat-file", "-e", commit + "^{commit}"], env, repo).returncode != 0:
+            raise _intake_bad()
     except SealRefusal:
         raise
     except Exception:  # noqa: BLE001
-        raise _bad() from None
+        raise _intake_bad() from None
     finally:
         if work is not None:
             shutil.rmtree(work, ignore_errors=True)
