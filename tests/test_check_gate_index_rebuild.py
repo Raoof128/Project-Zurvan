@@ -9,8 +9,22 @@ tests cover the categorisation, the gitignore exclusion, and the fail-open path.
 
 import subprocess
 
+import pytest
+
 import scripts.rebuild_index as rebuild_index_mod
 from scripts.rebuild_index import _gitignored, rebuild_index
+
+
+@pytest.fixture(autouse=True)
+def _store(tmp_path, monkeypatch):
+    """`index.md` is knowledge, so rebuild_index writes it through safe_write
+    inside an operation (2026-10-01); each test gets a throwaway store and one."""
+    from scripts import knowledge_revision as kr
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir(exist_ok=True)
+    kr.ensure_schema(tmp_path)
+    with kr.operation(writer="test", root=tmp_path):
+        yield
 
 
 def _page(wiki, relpath, content="---\ntitle: t\n---\n"):

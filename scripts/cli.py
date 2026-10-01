@@ -1051,7 +1051,9 @@ def _main():
     elif args.command == "audit":
         _run_script("audit_wiki.py")
     elif args.command == "index" and args.action == "rebuild":
-        _run_script("rebuild_index.py")
+        # in-process, so the write lands inside this command's operation
+        from scripts.rebuild_index import rebuild_index
+        rebuild_index()
     elif args.command == "index" and args.action == "search":
         # `zurvan index search` is a PRODUCTION entry point, so it pins the
         # production embedding space rather than inheriting whatever shell it

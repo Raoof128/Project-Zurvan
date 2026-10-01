@@ -21,7 +21,12 @@ def _gitignored(rel_paths, cwd):
         return set()
 
 
-def rebuild_index(wiki_dir="wiki"):
+def rebuild_index(wiki_dir=None):
+    # The STORE's wiki, not the cwd's: run from another directory this wrote
+    # (or failed to write) a stray wiki/index.md there.
+    if wiki_dir is None:
+        from scripts.config import PROJECT_ROOT
+        wiki_dir = str(PROJECT_ROOT / "wiki")
     index_path = os.path.join(wiki_dir, "index.md")
 
     categories = {
@@ -50,16 +55,22 @@ def rebuild_index(wiki_dir="wiki"):
         if rel not in ignored:
             categories[cat].append(file)
                     
-    with open(index_path, 'w', encoding='utf-8') as f:
-        f.write("# Wiki Index\n\nWelcome to the local LLM Wiki.\n\n## Navigation\n- [Overview](overview.md)\n- [Open Questions](open-questions.md)\n- [Log](log.md)\n\n")
-        for cat, files in categories.items():
-            if files:
-                f.write(f"## {cat.capitalize()}\n")
-                for file in sorted(files):
-                    f.write(f"- [{file}]({cat}/{file})\n")
-                f.write("\n")
-                
+    parts = ["# Wiki Index\n\nWelcome to the local LLM Wiki.\n\n## Navigation\n- [Overview](overview.md)\n- [Open Questions](open-questions.md)\n- [Log](log.md)\n\n"]
+    for cat, files in categories.items():
+        if files:
+            parts.append(f"## {cat.capitalize()}\n")
+            for file in sorted(files):
+                parts.append(f"- [{file}]({cat}/{file})\n")
+            parts.append("\n")
+
+    from scripts.safe_write import write_file_safely
+    # Through the barrier (filed 2026-09-28): wiki/index.md is knowledge, and a
+    # raw open() here left drift the next managed write minted as external.
+    if not write_file_safely(index_path, "".join(parts)):
+        raise PermissionError(f"refused unsafe index write: {index_path}")
     print(f"Rebuilt {index_path} successfully.")
 
 if __name__ == "__main__":
-    rebuild_index()
+    from scripts import knowledge_revision as kr
+    with kr.operation(writer="cli"):
+        rebuild_index()

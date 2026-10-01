@@ -21,8 +21,15 @@ def test_session_lifecycle(tmp_path, monkeypatch):
     with open(tmp_path / "wiki" / "log.md", "w") as f:
         f.write("# Logs\n")
 
+    # session writes go through safe_write inside an operation (2026-10-01)
+    from scripts import knowledge_revision as kr
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir(exist_ok=True)
+    kr.ensure_schema(tmp_path)
+
     topic = "Test Topic!@#"
-    filepath = session_start(topic)
+    with kr.operation(writer="test", root=tmp_path):
+        filepath = session_start(topic)
     
     assert os.path.exists(filepath)
     with open(filepath, "r") as f:
@@ -34,7 +41,8 @@ def test_session_lifecycle(tmp_path, monkeypatch):
         log_content = f.read()
     assert "Session Started**: Test Topic!@#" in log_content
     
-    session_close(topic, "Done", "pytest")
+    with kr.operation(writer="test", root=tmp_path):
+        session_close(topic, "Done", "pytest")
     
     with open(filepath, "r") as f:
         content = f.read()
