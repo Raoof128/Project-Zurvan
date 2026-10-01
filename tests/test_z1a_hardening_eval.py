@@ -189,3 +189,27 @@ def test_search_explain_json_carries_timings(monkeypatch, capsys):
     ce.search_memory("q", as_json=True, explain=True)
     payload = json.loads(capsys.readouterr().out)
     assert payload["timings_ms"] == {"keyword_scan": 1.0, "total": 2.0}
+
+
+# --- keyword mode: store-relative paths, so the digest is portable (item #19) --
+
+def test_keyword_retrieve_returns_store_relative_paths(tmp_path, monkeypatch):
+    (tmp_path / "wiki" / "decisions").mkdir(parents=True)
+    (tmp_path / "wiki" / "decisions" / "a.md").write_text("alpha beta")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "b.md").write_text("alpha")
+    monkeypatch.setattr(es, "PROJECT_ROOT", tmp_path)
+    assert es._keyword_retrieve("alpha beta") == ["wiki/decisions/a.md", "docs/b.md"]
+
+
+def test_keyword_digest_is_the_same_from_two_checkouts(tmp_path, monkeypatch):
+    digests = []
+    for name in ("one", "two"):
+        root = tmp_path / name
+        (root / "wiki").mkdir(parents=True)
+        (root / "wiki" / "a.md").write_text("alpha")
+        monkeypatch.setattr(es, "PROJECT_ROOT", root)
+        metrics, _ = es.evaluate([{"query": "alpha", "expected_paths": ["wiki/a.md"]}],
+                                 index_path="unused", hybrid=False)
+        digests.append(metrics["result_digest"])
+    assert digests[0] == digests[1]

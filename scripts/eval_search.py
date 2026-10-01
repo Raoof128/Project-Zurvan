@@ -86,7 +86,10 @@ def _keyword_retrieve(query: str) -> List[str]:
         except Exception:
             continue
     matches.sort(key=lambda x: x[0], reverse=True)
-    return [m[1] for m in matches[:10]]
+    # store-relative, like the hybrid index's source_path: an absolute path made
+    # the result digest differ between checkouts of the same store. The order is
+    # unchanged (the sort is by score alone, and relpath preserves the prefix).
+    return [os.path.relpath(m[1], PROJECT_ROOT) for m in matches[:10]]
 
 
 def _percentile(values, pct):
