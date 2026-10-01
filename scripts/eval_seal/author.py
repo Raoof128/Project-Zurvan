@@ -383,7 +383,8 @@ def _author_json(text):
     if type(text) is not str or len(text) > _MAX_TEXT:
         return None
     s = text.strip()
-    fence = re.match(r"```[A-Za-z]*\s*\n(.*?)\n```\s*$", s, re.S)
+    tick = "`" * 3
+    fence = re.match(tick + r"[A-Za-z]*\s*\n(.*?)\n" + tick + r"\s*$", s, re.S)
     if fence:
         s = fence.group(1).strip()
     try:

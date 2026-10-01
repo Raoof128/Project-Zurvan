@@ -251,4 +251,4 @@ def test_the_tracked_dev_author_prompt_is_public_and_content_free():
     for sid in STRATA:
         assert sid in text
     assert "z1-dev-raw.jsonl" in text and "~/.zurvan/instruments" in text
-    assert "```" not in text            # no fenced corpus excerpts; the rubric is prose and schema only
+    assert "`" * 3 not in text            # no fenced corpus excerpts; the rubric is prose and schema only

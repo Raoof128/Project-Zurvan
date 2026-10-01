@@ -28,6 +28,7 @@ MODELS = {"author": "opus", "reviewer": "sonnet", "resolver": "haiku"}
 TEMPLATES = {"author": "AUTHOR TEMPLATE", "reviewer": "REVIEWER TEMPLATE", "resolver": "RESOLVER TEMPLATE"}
 RUBRIC = "PUBLIC RUBRIC TEXT"
 DIFFS = ("easy", "medium", "hard")
+FENCE = "`" * 3
 
 
 # ---------------------------------------------------------------------------------------- world builders
@@ -639,7 +640,7 @@ def test_t15_author_output_may_be_fenced_or_a_bare_list(tmp_path):
 
     def author(sid, prompt):
         body = json.dumps(world["raw"][sid])
-        return ("```json\n" + body + "\n```") if len(sid) % 2 else ("Here you go:\n" + body)
+        return (FENCE + "json\n" + body + "\n" + FENCE) if len(sid) % 2 else ("Here you go:\n" + body)
 
     _, _, bundle = _t15_suite(tmp_path, fake=_T15Fake(world, author=author))
     assert bundle["accepted"] == 320
@@ -934,7 +935,7 @@ def test_t15_production_runner_binary_is_the_pinned_broker_copy():
 @pytest.mark.parametrize("name", ["author", "reviewer", "resolver", "dev-author"])
 def test_t15_tracked_prompts_are_public_and_content_free(name):
     text = (REPO / "eval" / "z1b" / "prompts" / (name + ".md")).read_text()
-    assert len(text) > 400 and "```" not in text
+    assert len(text) > 400 and FENCE not in text
     assert not re.search(r"wiki/[a-z0-9_-]+/[a-z0-9_-]+\.md", text)       # no concrete page names
     assert not re.search(r"[0-9a-f]{32,}", text)                          # no digests or ids
 
@@ -943,7 +944,7 @@ def test_t15_tracked_rubric_names_every_stratum_and_the_leak_rules():
     text = (REPO / "eval" / "z1b" / "rubric.md").read_text()
     for sid in STRATA:
         assert sid in text
-    assert "```" not in text and "leak" in text.lower() and "ground" in text.lower()
+    assert FENCE not in text and "leak" in text.lower() and "ground" in text.lower()
 
 
 def test_t15_the_role_prompts_state_their_output_format_and_the_resolver_stays_blind():
