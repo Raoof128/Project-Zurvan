@@ -217,7 +217,7 @@ def _t9_sb_run(t9sb, code, timeout=60):
 
 _T9_PROBE_PRELUDE = '''
 import json, os, subprocess, socket, sys
-def attempt(fn):
+def _t9_attempt(fn):
     try:
         fn()
         return "OK"
@@ -233,9 +233,9 @@ def test_t9_sandbox_write_inside_scratch_is_allowed(t9sb):
     out = _t9_sb_run(t9sb, _T9_PROBE_PRELUDE + '''
 p = os.path.join(%r, "ok.txt")
 r = {}
-def w():
+def _t9_w_inside():
     open(p, "w").write("hi")
-r["write"] = attempt(w)
+r["write"] = _t9_attempt(_t9_w_inside)
 r["read_back"] = open(p).read() if os.path.exists(p) else None
 os.makedirs(os.path.join(%r, "sub", "deep"))
 r["mkdir"] = "OK"
@@ -251,12 +251,12 @@ def test_t9_sandbox_write_outside_scratch_is_denied(t9sb):
     devfile = str(t9sb["devhome"] / "planted.txt")
     out = _t9_sb_run(t9sb, _T9_PROBE_PRELUDE + '''
 r = {}
-def w(p):
+def _t9_w_outside(p):
     return lambda: open(p, "w").write("x")
-r["tmp"] = attempt(w(%r))
-r["sibling"] = attempt(w(%r))
-r["devhome"] = attempt(w(%r))
-r["rename_out"] = attempt(lambda: os.rename(os.path.join(%r, "ok.txt"), %r))
+r["tmp"] = _t9_attempt(_t9_w_outside(%r))
+r["sibling"] = _t9_attempt(_t9_w_outside(%r))
+r["devhome"] = _t9_attempt(_t9_w_outside(%r))
+r["rename_out"] = _t9_attempt(lambda: os.rename(os.path.join(%r, "ok.txt"), %r))
 print(json.dumps(r))
 ''' % (target, sibling, devfile, str(t9sb["scratch"]), target))
     assert out["tmp"] == "ERR%d" % errno.EPERM
@@ -295,13 +295,13 @@ def test_t9_sandbox_network_is_denied_for_tcp_udp_dns_and_loopback(t9sb):
     try:
         out = _t9_sb_run(t9sb, _T9_PROBE_PRELUDE + '''
 r = {}
-r["tcp"] = attempt(lambda: socket.create_connection(("1.1.1.1", 443), timeout=3))
-def udp():
+r["tcp"] = _t9_attempt(lambda: socket.create_connection(("1.1.1.1", 443), timeout=3))
+def _t9_udp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.sendto(b"x", ("1.1.1.1", 53))
-r["udp"] = attempt(udp)
-r["dns"] = attempt(lambda: socket.getaddrinfo("example.com", 443))
-r["loopback"] = attempt(lambda: socket.create_connection(("127.0.0.1", %d), timeout=3))
+r["udp"] = _t9_attempt(_t9_udp)
+r["dns"] = _t9_attempt(lambda: socket.getaddrinfo("example.com", 443))
+r["loopback"] = _t9_attempt(lambda: socket.create_connection(("127.0.0.1", %d), timeout=3))
 r["curl_rc"] = subprocess.run(["/usr/bin/curl", "-s", "-m", "5", "http://1.1.1.1/"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
 print(json.dumps(r))
@@ -319,13 +319,13 @@ print(json.dumps(r))
 def test_t9_sandbox_denies_reading_sealed_and_dev_home_but_control_reads_work(t9sb):
     out = _t9_sb_run(t9sb, _T9_PROBE_PRELUDE + '''
 r = {}
-r["sealed_read"] = attempt(lambda: open(%r, "rb").read())
-r["sealed_list"] = attempt(lambda: os.listdir(%r))
-r["devhome_param_read"] = attempt(lambda: open(%r, "rb").read())
-r["real_devhome_list"] = attempt(lambda: os.listdir("/Users/dev"))
-r["real_sealed_list"] = attempt(lambda: os.listdir("/Users/zurvaneval"))
-r["control_usr"] = attempt(lambda: open("/usr/bin/true", "rb").read(4))
-r["control_stdlib"] = attempt(lambda: __import__("json").dumps({}))
+r["sealed_read"] = _t9_attempt(lambda: open(%r, "rb").read())
+r["sealed_list"] = _t9_attempt(lambda: os.listdir(%r))
+r["devhome_param_read"] = _t9_attempt(lambda: open(%r, "rb").read())
+r["real_devhome_list"] = _t9_attempt(lambda: os.listdir("/Users/dev"))
+r["real_sealed_list"] = _t9_attempt(lambda: os.listdir("/Users/zurvaneval"))
+r["control_usr"] = _t9_attempt(lambda: open("/usr/bin/true", "rb").read(4))
+r["control_stdlib"] = _t9_attempt(lambda: __import__("json").dumps({}))
 r["child_cat_sealed_rc"] = subprocess.run(["/bin/cat", %r], stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL).returncode
 print(json.dumps(r))
