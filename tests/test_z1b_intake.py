@@ -376,6 +376,37 @@ def test_t8_verify_interior_commit_that_is_not_a_head_is_not_frozen(t8):
     assert ei.value.code == "CANDIDATE_NOT_FROZEN"
 
 
+def test_t8_verify_requires_the_frozen_commit_to_be_the_bundle_head_not_just_some_ref(t8):
+    env, repo = t8["env"], t8["repo"]
+    first = t8["commit"]
+    _t8_git(repo, "branch", "side", first, env=env)
+    (repo / "evil.txt").write_text("different code runs\n")
+    _t8_git(repo, "add", "evil.txt", env=env)
+    _t8_git(repo, "commit", "-q", "-m", "evil", env=env)
+    evil = _t8_git(repo, "rev-parse", "HEAD", env=env)
+    bundle = t8["tmp"] / "mixed.bundle"
+    _t8_git(repo, "bundle", "create", str(bundle), "HEAD", "side", env=env)
+    staged = t8["paths"].stage_dir / "mixed.bundle"
+    staged.write_bytes(bundle.read_bytes())
+    # `first` is a listed ref, but a clone checks out HEAD (= evil): refusing is the only safe answer
+    with pytest.raises(SealRefusal) as ei:
+        intake.verify_bundle(staged, first, env=env)
+    assert ei.value.code == "CANDIDATE_NOT_FROZEN"
+    intake.verify_bundle(staged, evil, env=env)
+
+
+def test_t8_verify_bundle_without_a_head_ref_is_not_frozen(t8):
+    env, repo = t8["env"], t8["repo"]
+    branch = _t8_git(repo, "symbolic-ref", "--short", "HEAD", env=env)
+    bundle = t8["tmp"] / "nohead.bundle"
+    _t8_git(repo, "bundle", "create", str(bundle), branch, env=env)
+    staged = t8["paths"].stage_dir / "nohead.bundle"
+    staged.write_bytes(bundle.read_bytes())
+    with pytest.raises(SealRefusal) as ei:
+        intake.verify_bundle(staged, t8["commit"], env=env)
+    assert ei.value.code == "CANDIDATE_NOT_FROZEN"
+
+
 def test_t8_verify_garbage_is_bundle_invalid(t8):
     staged = t8["paths"].stage_dir / "g.bundle"
     staged.write_bytes(b"not a bundle at all\n" * 10)

@@ -25,7 +25,7 @@ GIT = "/usr/bin/git"
 _NAME = re.compile(BUNDLE_NAME_RE)
 _RUN_ID = re.compile(r"[0-9a-f]{16}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
-_HEAD_LINE = re.compile(r"([0-9a-f]{40}) [^\x00-\x1f]+")
+_HEAD_LINE = re.compile(r"([0-9a-f]{40}) ([^\x00-\x1f]+)")
 _CHUNK = 1024 * 1024
 _GIT_TIMEOUT = 600
 # the only GIT_* variables a caller env may carry, with the values sysenv.clean_env pins
@@ -139,7 +139,7 @@ def _intake_git(args: list, env: dict, scratch_repo: str = None) -> "subprocess.
 
 
 def verify_bundle(staged: Path, commit: str, *, env: dict) -> None:
-    """The staged bundle is well formed, lists `commit` as a head, and its pack unpacks cleanly.
+    """The staged bundle is well formed, its HEAD is exactly `commit`, and its pack unpacks cleanly.
 
     `git bundle verify` alone does not read the pack of a full-history bundle (a flipped
     byte passes it), so the objects are also unbundled into a throwaway empty repository.
@@ -159,13 +159,16 @@ def verify_bundle(staged: Path, commit: str, *, env: dict) -> None:
         listed = _intake_git(["bundle", "list-heads", str(staged)], env, repo)
         if listed.returncode != 0:
             raise _intake_bad()
-        heads = set()
+        heads = {}
         for line in listed.stdout.decode("utf-8", "replace").splitlines():
             m = _HEAD_LINE.fullmatch(line)
             if not m:
                 raise _intake_bad()
-            heads.add(m.group(1))
-        if commit not in heads:
+            heads.setdefault(m.group(2), set()).add(m.group(1))
+        # candidate_run clones the bundle and runs whatever HEAD checks out, so the frozen
+        # commit must BE the bundle's HEAD; a commit that is merely some other listed ref
+        # would be recorded in the ledger while different code ran.
+        if heads.get("HEAD") != {commit}:
             raise SealRefusal("CANDIDATE_NOT_FROZEN")
         if _intake_git(["bundle", "unbundle", str(staged)], env, repo).returncode != 0:
             raise _intake_bad()
