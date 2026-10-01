@@ -475,6 +475,25 @@ def _main():
     
     eval_validate_parser = eval_sub.add_parser("validate-gold", help="Validate gold dataset")
     eval_validate_parser.add_argument("--gold", default=None)  # resolved by scripts.instruments
+
+    # zurvan eval z1b  (sealed evaluation, Z1b; every refusal prints a CODE and exits 2)
+    eval_z1b_parser = eval_sub.add_parser("z1b", help="Sealed evaluation client (Z1b)")
+    z1b_sub = eval_z1b_parser.add_subparsers(dest="z1b_action", required=True)
+    z1b_sub.add_parser("status", help="Broker status (warns BROKER_STALE)")
+    z1b_sub.add_parser("seal-check", help="Dev-identity and broker seal checks")
+    z1b_run_p = z1b_sub.add_parser("run", help="Run one frozen commit on the sealed suite")
+    z1b_run_p.add_argument("--commit", required=True)
+    z1b_run_p.add_argument("--suite", choices=["holdout", "reserve"], required=True)
+    z1b_run_p.add_argument("--declare", default=None, help="eval/z1b/declarations/<name>.json committed at --commit")
+    z1b_run_p.add_argument("--final-acceptance", action="store_true", dest="final_acceptance")
+    z1b_dev_p = z1b_sub.add_parser("dev", help="Run the DEV set locally against a corpus export")
+    z1b_dev_p.add_argument("--dev", required=True, help="DEV jsonl (never a sealed set)")
+    z1b_dev_p.add_argument("--corpus", required=True, help="local corpus export directory")
+    z1b_promote_p = z1b_sub.add_parser("promote", help="HOLDOUT run with a predeclaration; records a PASS")
+    z1b_promote_p.add_argument("--commit", required=True)
+    z1b_promote_p.add_argument("--declaration", required=True)
+    z1b_final_p = z1b_sub.add_parser("final-acceptance", help="RESERVE run after a recorded HOLDOUT PASS")
+    z1b_final_p.add_argument("--commit", required=True)
     
     # zurvan graph
     graph_parser = subparsers.add_parser("graph", help="Knowledge graph commands")
@@ -1108,6 +1127,9 @@ def _main():
             sys.exit(2)
         print(json.dumps(out, indent=2))
         sys.exit(0 if out["equal"] and out["coherence"].get("status") == VERIFIED else 1)
+    elif args.command == "eval" and args.action == "z1b":
+        from scripts.z1b_client import client_cli_main
+        sys.exit(client_cli_main(args))
     elif args.command == "eval" and args.action == "validate-gold":
         _run_script("eval_search.py", ["--gold", _resolved_gold(args.gold), "--validate"])
     elif args.command == "eval" and args.action == "provenance":
