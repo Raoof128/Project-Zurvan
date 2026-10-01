@@ -120,6 +120,7 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
   - An earlier run (1456 passed, 1 error) tripped the live-index guard. Acme session `2d85a7de` ran `zurvan index search && graph rebuild` mid-suite. That was a concurrent writer, not a test, and that run is not counted.
   - Two tests take 21 of the 27 minutes: a full live 50-query eval (997 s) and a live-index instrument scan (262 s). At 08:44 the whole suite took 9 minutes on the same index, so the slowdown is probably a cold disk cache, not code.
   - public_repo_guard passed. `git diff --check` is clean.
+- **Pushed** at Raouf's explicit request (`ZURVAN_ALLOW_PUSH=1`, this push only): `e778e29..464891a`, 9 commits, fast-forward, `public_repo_guard` passed first. Earlier the same day: `5983d5f..bb8d890` (Z1a, 23 commits) and `bb8d890..e778e29` (Z1a hardening, 4 commits).
 
 ### 2026-10-01 (Australia/Sydney) — Z1a hardening: the deferred review minors
 **Raouf:**
