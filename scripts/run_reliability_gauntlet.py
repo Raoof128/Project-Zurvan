@@ -22,6 +22,8 @@ def _throwaway_store(sources):
     for d in ("wiki/sources", "wiki/claims", "wiki/summaries", "data"):
         (store / d).mkdir(parents=True, exist_ok=True)
     for src in sources:
+        if not os.path.isfile(src):
+            continue  # ingest reports it as a failure, and the gauntlet moves on
         target = store / os.path.relpath(os.path.abspath(src), os.getcwd())
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, target)

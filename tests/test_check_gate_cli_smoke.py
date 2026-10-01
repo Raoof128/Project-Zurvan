@@ -573,7 +573,10 @@ def test_shelled_commands_stay_silent_on_success(monkeypatch):
 
     monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: _Ok())
 
-    run_cli(monkeypatch, "index", "rebuild")
+    # `index rebuild` is no longer shelled (it runs in-process inside the CLI
+    # operation since 2026-10-01), so mocking subprocess would let it write the
+    # LIVE wiki/index.md — which it did, once. `audit` is still shelled.
+    run_cli(monkeypatch, "audit")
 
 
 def test_eval_search_forwards_threshold_and_hybrid_flag(monkeypatch):

@@ -27,6 +27,15 @@ def get_recent_logs(lines: int = 20) -> str:
         return "No recent logs."
     return "".join(content[-lines:]).strip()
 
+#: prime is injected into every session; one long log entry must not blow its budget
+PRIME_LINE_CAP = 200
+
+
+def _capped(text: str) -> str:
+    return "\n".join(line if len(line) <= PRIME_LINE_CAP else line[:PRIME_LINE_CAP - 1] + "…"
+                     for line in text.splitlines())
+
+
 def get_open_questions() -> str:
     if not OPEN_QUESTIONS_FILE.exists():
         return "No open questions."
@@ -280,7 +289,7 @@ def agent_prime(project: str | None = None, fix_stale: bool = False) -> str:
     lines.append(f"Open questions: {question_count} "
                  "(wiki/open-questions.md + open-questions.private.md).")
 
-    lines += ["", "## Recent activity", get_recent_logs(8)]
+    lines += ["", "## Recent activity", _capped(get_recent_logs(8))]
     lines += ["", "Orient with `zurvan search <topic> --hybrid --json`, then "
               "`zurvan_read_page`/`zurvan context` for depth."]
     lines += ["Before finishing: write back what you learned — "

@@ -243,3 +243,13 @@ def test_postedit_is_a_managed_write_not_unrecorded_drift(tmp_path):
     assert after.revision == before + 1
     assert after.atomicity == kr.MANAGED
     assert authoritative_manifest(tmp_path) == after.manifest_digest   # no drift
+
+
+def test_agent_prime_caps_each_recent_activity_line(monkeypatch):
+    """Prime is injected into every session, so one long postedit summary in
+    wiki/log.md must not blow its budget (2026-10-01: 5558 chars > 4000)."""
+    import scripts.agent_workflow as aw
+    monkeypatch.setattr(aw, "get_recent_logs", lambda n=8: "\n".join(["- " + "x" * 2000] * n))
+    out = aw.agent_prime()
+    recent = out.split("## Recent activity", 1)[1].split("\n\nOrient", 1)[0]
+    assert max(len(line) for line in recent.splitlines()) <= aw.PRIME_LINE_CAP
