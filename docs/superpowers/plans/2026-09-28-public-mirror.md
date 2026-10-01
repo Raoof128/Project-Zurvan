@@ -146,14 +146,17 @@ def test_a_planted_credential_refuses_the_build(tmp_path):
 
 ## Task 4 — Publish (outward-facing; Raouf approves the exact command)
 
+Repository name chosen by Raouf 2026-10-01: `Raoof128/zurvan`. Naming it is not
+the approval to publish; Step 2 still stops for an explicit yes.
+
 - [ ] **Step 1:** `python scripts/publish_mirror.py --build ~/.zurvan/mirror` — prints the scan table and the stranger-suite result; exits non-zero on any finding.
 - [ ] **Step 2: Stop and show Raouf** the table, the file count, the one commit, and the exact publish command, and wait for a yes:
 
 ```bash
-gh repo create Raoof128/<public-name> --public --source ~/.zurvan/mirror --push --description "Local-first knowledge engine"
+gh repo create Raoof128/zurvan --public --source ~/.zurvan/mirror --push --description "Local-first knowledge engine"
 ```
 
-- [ ] **Step 3: Verify what published** — `gh api repos/Raoof128/<public-name>` (visibility public, 1 commit), `gh api repos/Raoof128/<public-name>/secret-scanning/alerts` (0), and a fresh `git clone` + stranger suite green.
+- [ ] **Step 3: Verify what published** — `gh api repos/Raoof128/zurvan` (visibility public, 1 commit), `gh api repos/Raoof128/zurvan/secret-scanning/alerts` (0), and a fresh `git clone` + stranger suite green.
 - [ ] **Step 4: Record** — AGENTS/CHANGELOG entry; CLAUDE.md: the private repo's remote stays private, the mirror is updated only through `publish_mirror.py`; a Zurvan decision; the instrument's prior public exposure (2026-05-30 .. 2026-09-16) filed as an open question for Z1's sealed holdout.
 
 ```text
