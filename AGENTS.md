@@ -119,7 +119,7 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
 - **Verification:**
   - No ranking or indexing change: metric computation is untouched, and the RETIRED live instrument still lists its failing items.
   - The affected suites in the worktree: 188 passed. The 4 failures are environmental, because the worktree lacks the untracked wiki pages and graph DB.
-  - On merged `main`, see the commit that follows.
+  - On merged `main` (`1cb538f`): full suite **1445 passed, 4 skipped, 0 failed** (8m55s).
 
 ### 2026-10-01 (Australia/Sydney) — Z1a built: retrieval observability without leaks; ranking unchanged vs BASE
 **Raouf:**
