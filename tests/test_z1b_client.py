@@ -6,7 +6,6 @@ exercised against a real child process. Git is real; sealed paths are simulated 
 """
 import json
 import os
-import pwd
 import re
 import secrets
 import stat
