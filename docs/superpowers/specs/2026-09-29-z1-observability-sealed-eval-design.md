@@ -1,10 +1,9 @@
 # Z1 — Retrieval observability and a sealed evaluation programme
 
 **Date:** 2026-09-29
-**Status:** Z1a BUILT 2026-10-01 (branch `z1a-observability`, plan
+**Status:** Z1a CLOSED 2026-10-01 (gate 8: 1417 passed / 0 failed on merged `main`). Built (branch `z1a-observability`, plan
 `docs/superpowers/plans/2026-09-29-z1a-observability.md`). Gates 1-7 are
-demonstrated, live gates on revision 302. Gate 8 closes on a 0-failed full
-suite on merged `main`. Gate 6 closes on the guard function only: the promotion
+demonstrated, live gates on revision 302. Gate 6 closes on the guard function only: the promotion
 workflow that must call it is Z1b. Z1b APPROVED after revision 2, which applies
 Raouf's review of 2026-09-29. Z1b is not built.
 **Implements:** canonical spec §26 Z1, §9 (evaluation), §14 (observability).

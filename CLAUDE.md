@@ -129,7 +129,7 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
   digest (that would be a confirmation oracle). Reference items by INDEX. The
   red-team found four leaks of it in this repo, including in the report that
   states the rule.
-- **Z1a observability (2026-10-01).** `--trace` is `summary` by default: no raw
+- **Z1a is CLOSED (2026-10-01)**; `tests/test_z1a_closure.py` maps each gate to its tests. `--trace` is `summary` by default: no raw
   query, no snippets, no Markdown twin; raw text only with `--trace-mode full`,
   and `protected_eval` is never selectable from the CLI. Trace files are 0600
   in 0700 dirs; every trace write prunes untracked traces (30 days / newest

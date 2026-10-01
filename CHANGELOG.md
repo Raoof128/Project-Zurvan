@@ -18,6 +18,7 @@
   - `trace prune --dry-run`: 0 removed, 33 tracked kept.
   - RQ1 pilot `eval_provenance` is byte-identical BASE vs HEAD: source recall 0.861, raw-leak 0, hash integrity 1.0.
   - Worktree suite: 15 failed / 1401 passed. All 15 are environmental, identical before and after every task, and caused by the worktree lacking the untracked `.private-projects`, wiki pages and graph DB. Gate 8 closes only on a 0-failed suite on merged `main`.
+  - **Gate 8, merged `main` (`62feaed`, fast-forward):** full suite **1417 passed, 4 skipped, 0 failed** (8m44s; 7 warnings, pre-existing DeprecationWarnings). **Z1a CLOSED 2026-10-01.**
 - **Follow-ups:**
   - The ranking proof took 12.5 min (the dry run measured 3m18s), so the corpus is ~61% larger. The plan's 15-minute background limit killed the first run and leaked a snapshot, which gc reclaimed.
   - Rulings and deferred review minors are recorded in the plan's "Execution record (2026-10-01)" section. The most relevant to Z1b is that `eval search --json` prints `failing_items` indices for any dataset, sealed or not.
