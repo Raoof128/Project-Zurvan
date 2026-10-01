@@ -341,6 +341,12 @@ def _main():
     # zurvan decision add
     decision_parser = subparsers.add_parser("decision", help="Manage decisions")
     decision_sub = decision_parser.add_subparsers(dest="action")
+    dec_set = decision_sub.add_parser(
+        "set-project",
+        help="Set the `project:` subject of existing decision pages, inside the ledger "
+             "(never hand-edit wiki/decisions)")
+    dec_set.add_argument("pages", nargs="+")
+    dec_set.add_argument("--project", required=True, dest="subject_project")
     dec_add = decision_sub.add_parser("add")
     dec_add.add_argument("--title", required=True)
     dec_add.add_argument("--reason", required=True)
@@ -986,6 +992,15 @@ def _main():
     elif args.command == "remember":
         if add_note(args.title, args.body, args.tags) is False:
             sys.exit(1)
+    elif args.command == "decision" and args.action == "set-project":
+        from scripts.memory import InvalidProjectError, set_decision_project
+        try:
+            changed = set_decision_project(args.pages, args.subject_project)
+        except (InvalidProjectError, ValueError) as exc:
+            print(f"Error: {exc} Nothing was written.", file=sys.stderr)
+            sys.exit(2)
+        for path, old in changed:
+            print(f"{path}: project {old} -> {args.subject_project}")
     elif args.command == "decision" and args.action == "add":
         from scripts.memory import InvalidProjectError
         try:

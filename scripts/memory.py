@@ -2,6 +2,7 @@ import os
 import uuid
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 from scripts.safe_write import write_file_safely, append_file_safely, escape_yaml_string
 from scripts.config import PROJECT_ROOT
@@ -163,10 +164,65 @@ tags:
     if write_file_safely(filepath, content):
         append_to_log("Decision Added", title)
         print(f"Created {filepath}")
+        if subject == "unknown":
+            # Fail-closed resolution is correct; silence about it is not. On
+            # 2026-10-01 an agent met this stamp and fixed it with `sed -i` in
+            # wiki/decisions, outside the ledger. Name the managed fix.
+            import sys as _sys
+            print("Warning: project stamped \"unknown\" (no registered project contains "
+                  "this directory, and none was named). Fix it inside the ledger with "
+                  f"`zurvan decision set-project {filepath} --project <slug>`, or pass "
+                  "`--project <slug>` next time. Never edit wiki/decisions by hand.",
+                  file=_sys.stderr)
         return True
     else:
         print(f"Failed to securely write to {filepath}")
         return False
+
+
+_PROJECT_LINE = re.compile(r"^project:.*$", re.M)
+
+
+def set_decision_project(paths: List[str], project: str) -> List[tuple]:
+    """Set the `project:` subject of existing decision pages, inside the
+    caller's operation (one logical mutation for all pages).
+
+    The managed replacement for hand-editing the field: the slug is validated
+    exactly as `decision add --project` validates it, only the frontmatter
+    line changes, and the ledger records the new subject. Every page is
+    checked before any byte is written. Returns [(path, old_value)].
+    """
+    require_active_operation("memory.set_decision_project()")
+    subject = resolve_project(project)        # raises InvalidProjectError on a bad slug
+    decisions = (PROJECT_ROOT / "wiki" / "decisions").resolve()
+    planned = []
+    for raw in paths:
+        page = Path(raw).resolve()
+        if page.parent != decisions or page.suffix != ".md" or not page.is_file():
+            raise ValueError(f"not a decision page under wiki/decisions: {raw}")
+        text = page.read_text(encoding="utf-8")
+        if not text.startswith("---\n") or "\n---" not in text[4:]:
+            raise ValueError(f"no frontmatter: {raw}")
+        end = text.index("\n---", 4)
+        front, rest = text[:end], text[end:]
+        match = _PROJECT_LINE.search(front)
+        if match is None:
+            raise ValueError(f"no project: field in frontmatter: {raw}")
+        new_front = front[:match.start()] + f"project: {escape_yaml_string(subject)}" + front[match.end():]
+        planned.append((page, match.group(0)[len("project:"):].strip(), new_front + rest))
+
+    from scripts.knowledge_revision import declare_store_project
+    declare_store_project(subject)
+    changed = []
+    for page, old, content in planned:
+        if not write_file_safely(str(page), content):
+            raise OSError(f"failed to securely write {page}")
+        changed.append((str(page), old))
+    append_to_log("Decision Project Set",
+                  f"{len(changed)} page(s) -> {subject}: "
+                  + ", ".join(Path(p).name for p, _ in changed))
+    return changed
+
 
 def add_note(title: str, body: str, tags: List[str]):
     require_active_operation("memory.add_note()")
