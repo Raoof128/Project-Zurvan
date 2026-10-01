@@ -2109,29 +2109,29 @@ Executed on branch `z1a-observability` from `a79b26b`. Each task had an implemen
 
 ### Deferred review minors
 
-- Task 1: minor (deferred): test_committed_v1_traces_have_no_schema_issue filters only schema_version/trace_mode issues and does not assert files are v1 (plan-mandated test text)
-- Task 1: minor (deferred): trace_validate accepts a v1 file carrying trace_mode != "full" while record_from_dict raises — validator/loader disagree on that edge
-- Task 1: minor (deferred): trace_validate.py:6 import line ~150 chars
-- Task 2: minor (deferred): stale 'full' Markdown twin survives if the same trace id is rewritten in summary/protected_eval mode (privacy-relevant; ids are normally unique)
-- Task 2: minor (deferred): _write_private truncates an existing 0644 file before chmod (brief readable window; dir is 0700)
-- Task 2: minor (deferred): `trace prune` accepts negative --days/--keep (tracked still safe)
-- Task 2: minor (deferred): write() spawns git ls-files every call, 30s timeout, no cache; refused reason discarded
-- Task 2: minor (deferred): no tests for ls-files failure inside a repo, trace prune CLI
-- Task 2: minor (deferred): dry_run prune may list a vanished file in `removed` (cosmetic)
-- Task 3: minor (deferred): no end-to-end test that search_memory/export_context(trace=True) with no trace_mode writes summary (default only covered at writer + CLI)
-- Task 3: minor (deferred): CLI test stubs search_memory; `context --trace-mode` dispatch untested
-- Task 3: minor (deferred): summary graph nodes keep `path` (page filename may echo a title) — spec-allowed result id
-- Task 4: minor (deferred): timing capture runs even when timings=None (~11 perf_counter_ns; plan-mandated, negligible)
-- Task 4: minor (deferred): --explain with missing index prints empty stage header
-- Task 4: minor (deferred): no test for --explain --json timings_ms or hybrid-mode trace timings
-- Task 5: minor (deferred): require_itemised_allowed is a deny-list (HOLDOUT/RESERVE); a hand-built DatasetInfo with bogus state passes (plan-mandated; dataset_for_file validates states)
-- Task 5: minor (deferred): duplicate-digest registry entries resolved by order, not refused; no sha256 format check; DatasetInfo not validated on construction
-- Task 6: minor (deferred): keyword-mode (hybrid=False) rows hold absolute glob paths, so result_digest differs across checkouts (hybrid uses index-relative source_path)
-- Task 6: minor (deferred): keep_rows leaves `_rows` in the returned metrics dict; stripped from JSON output but a future caller serialising metrics would emit retrieved ids
-- Task 7: minor (deferred): eval_search.py --save-run on sealed dataset refuses only after full evaluation, as a traceback (no row written); should pre-check and exit 2
-- Task 7: minor (deferred): run_search_evaluation JSON prints failing_items indices for any dataset incl. sealed (Task 6 code) — Z1b broker scope, cross-check vs gate 5 in final review
-- Task 7: minor (deferred): failed --min-top3 exits before save; runs dir mkdir then chmod (empty-dir window), ~/.zurvan parent default perms
-- Task 7: minor (deferred): `eval movers` CLI catches only DatasetNotEligible; an invalid registry state surfaces as a traceback (still fails closed); untested
-- Task 8: minor (deferred): reproduce/CLI report equal=true on an empty gold set or runs=1 (vacuous pass) — Task 9 live gate must confirm n_items=50
-- Task 8: minor (deferred): snapshot_index in output names an already-released path; no test for CLI SnapshotNotReady->exit 2 or KeyboardInterrupt release
-- Task 9a: minor (deferred): test_the_live_instrument_is_not_tracked_by_git runs git ls-files from cwd, vacuous if run elsewhere (pre-existing)
+- Task 1: minor (deferred): test_committed_v1_traces_have_no_schema_issue filters only schema_version/trace_mode issues and does not assert files are v1 (plan-mandated test text) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 1: minor (deferred): trace_validate accepts a v1 file carrying trace_mode != "full" while record_from_dict raises — validator/loader disagree on that edge — **fixed (Z1a hardening, 2026-10-01)**
+- Task 1: minor (deferred): trace_validate.py:6 import line ~150 chars — **fixed (Z1a hardening, 2026-10-01)**
+- Task 2: minor (deferred): stale 'full' Markdown twin survives if the same trace id is rewritten in summary/protected_eval mode (privacy-relevant; ids are normally unique) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 2: minor (deferred): _write_private truncates an existing 0644 file before chmod (brief readable window; dir is 0700) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 2: minor (deferred): `trace prune` accepts negative --days/--keep (tracked still safe) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 2: minor (deferred): write() spawns git ls-files every call, 30s timeout, no cache; refused reason discarded — **not fixed: ~7 ms per write, measured**
+- Task 2: minor (deferred): no tests for ls-files failure inside a repo, trace prune CLI — **fixed (Z1a hardening, 2026-10-01)**
+- Task 2: minor (deferred): dry_run prune may list a vanished file in `removed` (cosmetic) — **not fixed: cosmetic**
+- Task 3: minor (deferred): no end-to-end test that search_memory/export_context(trace=True) with no trace_mode writes summary (default only covered at writer + CLI) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 3: minor (deferred): CLI test stubs search_memory; `context --trace-mode` dispatch untested — **fixed (Z1a hardening, 2026-10-01)**
+- Task 3: minor (deferred): summary graph nodes keep `path` (page filename may echo a title) — spec-allowed result id — **not fixed: spec-allowed result id**
+- Task 4: minor (deferred): timing capture runs even when timings=None (~11 perf_counter_ns; plan-mandated, negligible) — **not fixed: negligible, plan-mandated**
+- Task 4: minor (deferred): --explain with missing index prints empty stage header — **not fixed: cosmetic**
+- Task 4: minor (deferred): no test for --explain --json timings_ms or hybrid-mode trace timings — **fixed (Z1a hardening, 2026-10-01)**
+- Task 5: minor (deferred): require_itemised_allowed is a deny-list (HOLDOUT/RESERVE); a hand-built DatasetInfo with bogus state passes (plan-mandated; dataset_for_file validates states) — **fixed (Z1a hardening, 2026-10-01)**
+- Task 5: minor (deferred): duplicate-digest registry entries resolved by order, not refused; no sha256 format check; DatasetInfo not validated on construction — **fixed (Z1a hardening, 2026-10-01)**
+- Task 6: minor (deferred): keyword-mode (hybrid=False) rows hold absolute glob paths, so result_digest differs across checkouts (hybrid uses index-relative source_path) — **not fixed: would change keyword-mode ranking; needs its own before/after eval**
+- Task 6: minor (deferred): keep_rows leaves `_rows` in the returned metrics dict; stripped from JSON output but a future caller serialising metrics would emit retrieved ids — **fixed (Z1a hardening, 2026-10-01)**
+- Task 7: minor (deferred): eval_search.py --save-run on sealed dataset refuses only after full evaluation, as a traceback (no row written); should pre-check and exit 2 — **fixed (Z1a hardening, 2026-10-01)**
+- Task 7: minor (deferred): run_search_evaluation JSON prints failing_items indices for any dataset incl. sealed (Task 6 code) — Z1b broker scope, cross-check vs gate 5 in final review — **fixed (Z1a hardening, 2026-10-01)**
+- Task 7: minor (deferred): failed --min-top3 exits before save; runs dir mkdir then chmod (empty-dir window), ~/.zurvan parent default perms — **partly: runs dir now created 0700 (fixed); save-on-failed-gate not changed (gate exit behaviour)**
+- Task 7: minor (deferred): `eval movers` CLI catches only DatasetNotEligible; an invalid registry state surfaces as a traceback (still fails closed); untested — **fixed (Z1a hardening, 2026-10-01)**
+- Task 8: minor (deferred): reproduce/CLI report equal=true on an empty gold set or runs=1 (vacuous pass) — Task 9 live gate must confirm n_items=50 — **fixed (Z1a hardening, 2026-10-01)**
+- Task 8: minor (deferred): snapshot_index in output names an already-released path; no test for CLI SnapshotNotReady->exit 2 or KeyboardInterrupt release — **fixed (Z1a hardening, 2026-10-01)**
+- Task 9a: minor (deferred): test_the_live_instrument_is_not_tracked_by_git runs git ls-files from cwd, vacuous if run elsewhere (pre-existing) — **fixed (Z1a hardening, 2026-10-01)**

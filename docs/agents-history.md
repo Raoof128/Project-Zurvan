@@ -1014,3 +1014,11 @@ constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 - **How it is recorded.** The next managed write mints that edit as its own EXTERNAL_OBSERVED revision (§5.2) — the honest label for a change made outside the barrier. The page now names the client; the ledger row for revision 259 still says `zurvan`. History is not rewritten; this entry is the reconciliation of the two.
 - **The rule that would have avoided both:** `zurvan --project <slug> decision add …` or `decision add --project <slug>` (CLAUDE.md). Filed as a question: whether `decision add` should refuse, or warn, when run for a subject whose slug differs from the active workspace.
 - **Also:** the third 2026-09-28 session push (`9bd4637..5983d5f`) is recorded in 28h.
+
+### 2026-09-30 (Australia/Sydney) — Simurgh communication artwork handover
+**Raouf:**
+- **Scope:** records only; local project handover and navigation, no application changes.
+- **Summary:** Recorded user acceptance of the Simurgh LinkedIn agent-liability graphic and completed layout audit. The private artifact handover preserves final files, originals, source notes, previews, SHA-256 checksums and the explicit limit that the artwork does not certify model/deployment safety.
+- **Attribution:** The knowledge record explicitly names `project: simurgh`; the globally selected workspace is not used for ownership. Wiki navigation and the write-back log use the mutation barrier.
+- **Verification:** Final-artwork audit reports 35 text elements, zero overlaps/clipping/divider collisions and minimum text contrast 5.20:1. Logging gates: 1350 tests passed, 4 skipped, 0 failed; public_repo_guard and git diff --check passed.
+- **Follow-ups:** Project source-log synchronization remains pending because its registered checkout is missing. LinkedIn publication and live upload/crop/compression remain unverified. No remote push was performed.

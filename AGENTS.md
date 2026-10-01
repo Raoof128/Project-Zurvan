@@ -88,6 +88,39 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-10-01 (Australia/Sydney) — Z1a hardening: the deferred review minors
+**Raouf:**
+- **Scope:** `scripts/trace_writer.py`, `trace_validate.py`, `cli.py`, `eval_datasets.py`, `eval_runs.py`, `eval_search.py`; new `tests/test_z1a_hardening_{traces,eval}.py`; `tests/test_trace_modes.py`, `tests/test_instruments.py`. Done inline, test first (red, then green).
+- **Summary.** This works through the 26 review notes deferred during Z1a. The plan's "Execution record (2026-10-01)" marks each note fixed or not fixed.
+  - **Traces:**
+    - Rewriting a trace id in summary or protected mode removes its earlier full Markdown twin.
+    - An existing trace file is made 0600 (`fchmod`) before new bytes land.
+    - Negative `--days`/`--keep` are refused.
+    - The validator now refuses a v1 trace that claims a mode, as the loader already did.
+    - The frozen-trace test requires every committed trace to be v1 with zero issues.
+    - New end-to-end tests check default summary traces for `search_memory`, `export_context` and `context --trace-mode`. Further tests cover a `git ls-files` timeout inside a repo and the prune CLI.
+  - **Eval:**
+    - Item rows are an allow-list (DEV and RETIRED only).
+    - `DatasetInfo` validates its state and digest when it is built, and a digest registered twice is refused.
+    - Rows are returned beside the metrics, never inside them.
+    - A sealed dataset reports failure counts but no `failing_items`.
+    - `--save-run` refuses a sealed set before evaluating, with exit 2.
+    - The runs dir is created 0700.
+    - `eval movers` exits 2 on an invalid registry state.
+    - `reproduce` refuses fewer than 2 runs or an empty gold set. It reports `items` and `snapshot_id` instead of a path that has already been released.
+    - The instrument-tracking test is pinned to the repo, so it no longer passes vacuously from another cwd.
+- **Not fixed, with reasons:**
+  - **#8:** `git ls-files` runs on every write; about 7 ms, measured.
+  - **#10 and #15:** cosmetic.
+  - **#13:** the spec allows result ids in summary.
+  - **#14:** negligible, and the plan mandated it.
+  - **#19:** keyword-mode absolute paths. Normalising them would change keyword-mode rankings, which needs its own before/after eval.
+  - **#23a:** a run that fails `--min-top3` exits before it is saved. Changing that changes gate exit behaviour.
+- **Verification:**
+  - No ranking or indexing change: metric computation is untouched, and the RETIRED live instrument still lists its failing items.
+  - The affected suites in the worktree: 188 passed. The 4 failures are environmental, because the worktree lacks the untracked wiki pages and graph DB.
+  - On merged `main`, see the commit that follows.
+
 ### 2026-10-01 (Australia/Sydney) — Z1a built: retrieval observability without leaks; ranking unchanged vs BASE
 **Raouf:**
 - **Scope:** branch `z1a-observability` (from `a79b26b`): `scripts/trace_schema.py`, `trace_validate.py`, `trace_writer.py`, `context_export.py`, `hybrid_search.py`, `eval_search.py`, `cli.py`; new `scripts/eval_datasets.py`, `scripts/eval_runs.py`, `eval/datasets.json`; 10 test files (8 new); spec §3.2 and status; CLAUDE.md bullet. Plan `docs/superpowers/plans/2026-09-29-z1a-observability.md`, executed task by task with an implementer and a reviewer per task (subagents on Sonnet; Task 9 inline).
@@ -113,11 +146,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
   - The 07:34 batch writer is still unidentified.
   - Gate 6 closes on the guard function: the Z1b promotion workflow must call `require_promotion_eligible`.
   - The "35 tracked traces" figure was a miscount; it is 33.
-
-### 2026-09-30 (Australia/Sydney) — Simurgh communication artwork handover
-**Raouf:**
-- **Scope:** records only; local project handover and navigation, no application changes.
-- **Summary:** Recorded user acceptance of the Simurgh LinkedIn agent-liability graphic and completed layout audit. The private artifact handover preserves final files, originals, source notes, previews, SHA-256 checksums and the explicit limit that the artwork does not certify model/deployment safety.
-- **Attribution:** The knowledge record explicitly names `project: simurgh`; the globally selected workspace is not used for ownership. Wiki navigation and the write-back log use the mutation barrier.
-- **Verification:** Final-artwork audit reports 35 text elements, zero overlaps/clipping/divider collisions and minimum text contrast 5.20:1. Logging gates: 1350 tests passed, 4 skipped, 0 failed; public_repo_guard and git diff --check passed.
-- **Follow-ups:** Project source-log synchronization remains pending because its registered checkout is missing. LinkedIn publication and live upload/crop/compression remain unverified. No remote push was performed.
