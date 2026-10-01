@@ -1,0 +1,75 @@
+"""Post-run sweep: did the candidate leave anything behind outside its scratch? (contract s3.8)
+
+Runs on the broker side after every candidate run. A non-empty result means the
+candidate escaped its sandbox or left a process alive, so queries may have leaked.
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+
+from .codes import SealRefusal
+from .paths import SealPaths
+
+DEFAULT_ROOTS = ("/tmp", "/private/tmp", "/private/var/tmp", "/Users/Shared")
+_PS = "/bin/ps"
+
+
+def _sweep_check_uid(uid) -> int:
+    if type(uid) is not int or uid < 1 or uid > 2 ** 31 - 1:
+        raise SealRefusal("BAD_ARGS")
+    return uid
+
+
+def find_candidate_leftovers(paths: SealPaths, candidate_uid: int, roots=DEFAULT_ROOTS) -> list:
+    """Every entry under `roots` owned by candidate_uid. Never follows symlinks (lstat only)."""
+    uid = _sweep_check_uid(candidate_uid)
+    scratch = os.path.realpath(str(paths.scratch_dir))
+    found = set()
+
+    def inside_scratch(path: str) -> bool:
+        real = os.path.realpath(path)
+        return real == scratch or real.startswith(scratch + os.sep)
+
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for top, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            # prune scratch itself: it is expected to hold candidate files until wipe()
+            dirnames[:] = [d for d in dirnames if not inside_scratch(os.path.join(top, d))]
+            for name in list(dirnames) + list(filenames):
+                full = os.path.join(top, name)
+                try:
+                    st = os.lstat(full)
+                except OSError:
+                    continue
+                if st.st_uid == uid:
+                    found.add(full)
+    return sorted(found)
+
+
+def _sweep_default_runner(cmd):
+    env = {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"}
+    res = subprocess.run(cmd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, timeout=30)
+    return res.returncode, res.stdout.decode("ascii", "replace")
+
+
+def candidate_processes(candidate_uid: int, runner=None) -> int:
+    """How many processes the candidate uid still owns (via /bin/ps -U). Unknown state -> INTERNAL."""
+    uid = _sweep_check_uid(candidate_uid)
+    runner = runner or _sweep_default_runner
+    try:
+        rc, out = runner([_PS, "-U", str(uid), "-o", "pid="])
+    except Exception:  # noqa: BLE001
+        raise SealRefusal("INTERNAL") from None
+    if type(out) is not str:
+        raise SealRefusal("INTERNAL")
+    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    # ps exits 1 with no output when nothing matches; any other rc, or rc 1 WITH output, is not understood
+    if rc not in (0, 1) or (rc == 1 and lines):
+        raise SealRefusal("INTERNAL")
+    for ln in lines:
+        if not (ln.isascii() and ln.isdigit()):
+            raise SealRefusal("INTERNAL")
+    return len(lines)
