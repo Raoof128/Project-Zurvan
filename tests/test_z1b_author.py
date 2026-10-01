@@ -962,3 +962,30 @@ def test_t15_templates_load_from_the_prompts_dir_and_refuse_missing_files(tmp_pa
     with pytest.raises(SealRefusal) as ei:
         A.author_load_templates(tmp_path)
     assert ei.value.code == "BAD_ARGS"
+
+
+# ------------------------------------------------------------------------------------- real age binary
+
+@pytest.mark.skipif(not (os.path.exists("/opt/homebrew/bin/age") and os.path.exists("/opt/homebrew/bin/age-keygen")),
+                    reason="age is not installed on this machine")
+def test_t15_production_encrypt_round_trips_with_the_real_age_binary(tmp_path):
+    paths = SealPaths.for_root(tmp_path / "root")
+    paths.broker_bin.mkdir(parents=True)
+    paths.keys_dir.mkdir(parents=True)
+    (paths.broker_bin / "age").symlink_to("/opt/homebrew/bin/age")
+    subprocess.run(["/opt/homebrew/bin/age-keygen", "-o", str(paths.keys_dir / "age.key")], check=True,
+                   capture_output=True)
+    paths.eval_home.mkdir(parents=True, exist_ok=True)
+    out = tmp_path / "set.age"
+    A.author_age_encrypt(paths)(b"sealed query text\n", out)
+    assert out.is_file() and b"sealed query text" not in out.read_bytes()
+    plain = subprocess.run(["/opt/homebrew/bin/age", "-d", "-i", str(paths.keys_dir / "age.key"), str(out)],
+                           check=True, capture_output=True).stdout
+    assert plain == b"sealed query text\n"
+
+
+def test_t15_production_encrypt_failure_is_a_bare_internal_refusal(tmp_path):
+    paths = SealPaths.for_root(tmp_path / "root")           # no age binary, no key: nothing to run
+    with pytest.raises(SealRefusal) as ei:
+        A.author_age_encrypt(paths)(b"x", tmp_path / "o.age")
+    assert ei.value.code == "INTERNAL"
