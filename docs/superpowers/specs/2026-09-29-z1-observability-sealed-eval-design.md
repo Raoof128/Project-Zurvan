@@ -1,9 +1,12 @@
 # Z1 — Retrieval observability and a sealed evaluation programme
 
 **Date:** 2026-09-29
-**Status:** Z1a APPROVED for planning (Raouf, 2026-09-29). Z1b APPROVED
-after revision 2 (this revision), which applies Raouf's review of 2026-09-29.
-Nothing here is built.
+**Status:** Z1a BUILT 2026-10-01 (branch `z1a-observability`, plan
+`docs/superpowers/plans/2026-09-29-z1a-observability.md`). Gates 1-7 are
+demonstrated, live gates on revision 302. Gate 8 closes on a 0-failed full
+suite on merged `main`. Gate 6 closes on the guard function only: the promotion
+workflow that must call it is Z1b. Z1b APPROVED after revision 2, which applies
+Raouf's review of 2026-09-29. Z1b is not built.
 **Implements:** canonical spec §26 Z1, §9 (evaluation), §14 (observability).
 **Builds on:** Z0 (CLOSED 2026-09-28) — coherent snapshots, leases, `stamp_verdict`.
 **Amends:** splits Z1 into **Z1a** and **Z1b**, and replaces "sealed" as a
@@ -120,8 +123,11 @@ which is root-equivalent. A container would look sealed and not be.
 
 - Trace dirs `0700`, files `0600` (today `0755`/`0644`).
 - Retention: untracked traces older than 30 days or beyond the newest 500 are
-  removed by `zurvan trace prune`, run from check.sh's maintenance step.
-- **The 35 git-tracked traces in `data/traces/` are frozen research artifacts
+  removed by `zurvan trace prune` and after every trace write
+  (`TraceStore.write`); check.sh has no maintenance step, and a quality gate
+  should not delete files. A prune failure never fails the write it follows.
+- **The git-tracked traces in `data/traces/` (33 `.json`, counted from git at
+  run time; "35" here earlier was a miscount) are frozen research artifacts
   and are never pruned** — prune skips any path `git ls-files` reports, and a
   test proves it.
 

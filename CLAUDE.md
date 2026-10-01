@@ -129,6 +129,15 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
   digest (that would be a confirmation oracle). Reference items by INDEX. The
   red-team found four leaks of it in this repo, including in the report that
   states the rule.
+- **Z1a observability (2026-10-01).** `--trace` is `summary` by default: no raw
+  query, no snippets, no Markdown twin; raw text only with `--trace-mode full`,
+  and `protected_eval` is never selectable from the CLI. Trace files are 0600
+  in 0700 dirs; every trace write prunes untracked traces (30 days / newest
+  500) and never a git-tracked one. `eval search` output names items by index
+  only. The 50-item instrument is `RETIRED` in `eval/datasets.json`: it can
+  measure, never gate a promotion (the guard exists; the promotion workflow is
+  Z1b). `zurvan eval reproduce` checks the timing-free result digest on one
+  coherent snapshot.
 - **A failed gate is reported as failed.** Never redefine one retroactively so
   the work passes. If a criterion turns out to measure the wrong thing, mark it
   **invalid as a metric, not passed**, and replace it *prospectively*.

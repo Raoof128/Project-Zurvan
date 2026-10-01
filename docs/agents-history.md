@@ -1006,3 +1006,11 @@ constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 - **A process lesson, saved to memory:** a scripted anchor edit duplicated ~590 lines of `cli.py` while every test stayed green; only `git diff --stat` caught it. Compare the diff size with the plan before committing any scripted edit.
 - **Verification.** pytest **1345 passed / 4 skipped / 0 failed**; `public_repo_guard` passed; `git diff --check` clean.
 - **Next.** Z1 (retire the burned retrieval instrument; content-addressed edge ids); route `session` and `rebuild_index` through the barrier; re-configure Boundary; the deferred minors in 28f and 28g; the public mirror (repository name still to be chosen).
+
+### 2026-09-29 (Australia/Sydney) — overnight: another session's decision was mis-attributed, then hand-fixed outside the barrier
+**Raouf:**
+- **Scope:** records only, no code.
+- **What the ledger shows.** At 07:54:03 another session's `decision add` committed revision 259 with `store_project=zurvan`; the page (a client-project decision) was stamped with the active workspace because the command ran without `--project <client-slug>`. At 07:54:07 the page's `project:` field was corrected to the client's slug by a direct edit, outside the mutation barrier, so `knowledge status` reported unrecorded drift.
+- **How it is recorded.** The next managed write mints that edit as its own EXTERNAL_OBSERVED revision (§5.2) — the honest label for a change made outside the barrier. The page now names the client; the ledger row for revision 259 still says `zurvan`. History is not rewritten; this entry is the reconciliation of the two.
+- **The rule that would have avoided both:** `zurvan --project <slug> decision add …` or `decision add --project <slug>` (CLAUDE.md). Filed as a question: whether `decision add` should refuse, or warn, when run for a subject whose slug differs from the active workspace.
+- **Also:** the third 2026-09-28 session push (`9bd4637..5983d5f`) is recorded in 28h.

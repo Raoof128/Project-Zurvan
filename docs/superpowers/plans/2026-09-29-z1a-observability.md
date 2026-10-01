@@ -2079,3 +2079,59 @@ git commit -m "zurvan: Z1a closed - observability gates demonstrated; ranking un
 ```
 
 Then write back to Zurvan (after all measurement): `decision add` (summary-default traces; index-only eval output), `agent postedit`, and `knowledge status` must be CLEAN with no drift.
+
+---
+
+## Execution record (2026-10-01)
+
+Executed on branch `z1a-observability` from `a79b26b`. Each task had an implementer and a task review (subagents on Sonnet); Task 9 ran inline. Commits are in git. This section keeps what the gitignored SDD ledger held and git does not: every ruling made on Raouf's behalf, the live measurements, and the review minors deferred to a later pass.
+
+### Rulings
+
+- Ruling: the "35 tracked traces" figure in plan Global Constraints and spec §9 gate 3 is a prose miscount; the invariant is "every git-tracked file under data/traces", counted from git at run time (33 json today) — why: tests already derive the set from git ls-files, and the gate's intent is "no tracked trace pruned" — cost if wrong: none to code; Task 9 docs should state 33 (or "all tracked") instead of 35.
+- Ruling: fix it — write() must not fail because best-effort retention failed; tolerate vanished files in prune (stat/unlink missing_ok) and never let a prune OSError escape write(); tracked-file safety unchanged — spec §3.2 frames retention as housekeeping, and gate 3 (never prune tracked) is untouched — cost if wrong: a swallowed prune error hides retention not running (visible via `trace prune --dry-run`).
+- Ruling: `explain=False` on search_memory is Task 4 scope (plan Task 4 step 3, l.978 adds it), not a Task 3 omission — the brief's Interfaces line anticipates — cost if wrong: none, Task 4 adds it.
+- Ruling: summary traces keeping source_path/chunk_id is correct — spec §3.1 table: summary keeps "result ids + ranks + scores", drops raw query (sha256+length) and snippets — cost if wrong: result ids reveal which pages matched, which the spec accepts for summary.
+- Ruling: Z1a gate 6 ("RETIRED and refused by the promotion workflow") closes in Z1a on the guard `require_promotion_eligible` + test_only_holdout_can_gate_a_promotion (plan closure matrix l.1984); no Z1a task calls it because the promotion workflow is Z1b scope (spec §0 table l.20). Task 9 docs must state "guard in place; the Z1b promotion workflow must call it", not claim a workflow refuses today — cost if wrong: a gate reported as passed on a caller that doesn't exist (CLAUDE.md: never redefine a gate to pass).
+- Ruling: I1 fix — movers re-resolves each run's state from the CURRENT registry by the run's whole-file sha256 and refuses if either the stored state or the registry state is sealed (HOLDOUT/RESERVE); stored-state check kept for forged files — spec gate 5 "Movers refuse holdout/reserve" is absolute and sealed data is never itemised — cost if wrong: one registry read per movers call.
+- Ruling: I2 fix — movers refuses (new code ITEMS_MISMATCH) when the two runs' row index sets differ; save_run still saves truncated runs (a --max-queries liveness run is legitimate) — spec gate 5/§3.4 movers must not report fabricated rank changes — cost if wrong: comparing a truncated to a full run needs two same-size runs.
+- Ruling: split Task 9 — Step 1 (closure-matrix test, worktree only) dispatched now; Steps 2-3 (live measurement) and Step 4-5 (docs carrying the measured numbers) HELD until Raouf decides how to reconcile the live store (record drift, rebuild search+graph, gc the 2 dead snapshots, and whether another session is writing) — spec/CLAUDE.md: measure only on reconciled inputs, never overlap a rebuild with other writers — cost if wrong: a delay only.
+- Ruling: fix the matrix (fix round 1): each gate maps to a LIST of tests that genuinely demonstrate it (5 -> movers tests; 6 -> test_registry_retires_the_burned_instrument + test_only_holdout_can_gate_a_promotion; 8 -> test_instruments.py leak tests + test_committed_v1_traces_have_no_schema_issue), and a LIVE_PROOF dict names gates 1,4,7,8 whose closure additionally needs the Task 9 live run (live trace check; BASE-vs-HEAD ranking proof; real `eval reproduce`; full suite 0 failed on merged main where the 15 worktree env failures cannot occur) — CLAUDE.md "never redefine a gate so work passes"; a closure matrix that reads as full closure while live proofs are pending is that — cost if wrong: a few lines of test.
+
+### Live measurements (revision 302)
+
+- GATE 4 RESULT: BASE vs HEAD top-10 lists for all 50 items byte-identical on one VERIFIED-captured rev-302 snapshot: cmp equal, sha256 6cce77720b64 both; 50 items, all non-empty, all <=10. (Metrics half pending: hang diagnosis.)
+- LIVE: `trace prune --dry-run` (HEAD code, live root): "Would remove 0 trace file(s); kept 33 tracked."
+- LIVE: eval_provenance on provenance_real_gold.jsonl: BASE and HEAD JSON byte-identical; cases 12, expected_source_recall 0.8611 (86%), raw_leak_rate 0.0, hash_integrity_rate 1.0, provenance_completeness 1.0, graph_context_presence 1.0.
+- GATE 4 METRICS (one VERIFIED rev-302 snapshot, 12m28s, released): base {queries 50, top1 0.72, top3 0.74, mrr 0.74, failures 13} == head {same}; head carries result_digest, base none. With the byte-identical top-10 lists => ranking unchanged vs BASE. GATE 4 PASSED.
+- GATE 7 LIVE: `zurvan eval reproduce` (HEAD code, live root) exit 0, 9m45s: equal true, digests 0982995bc307…72ab x2, coherence VERIFIED rev 302 purpose measurement atomicity EXTERNAL_OBSERVED; snapshot released (data/snapshots empty). Gold = the 50-item instrument (same path as metrics run, queries 50). GATE 7 PASSED.
+- GATE 1 LIVE: `search "<synthetic probe>" --hybrid --trace` (HEAD, live root) exit 0 -> trace v2, trace_mode summary, file 0600, data/traces dir now 0700 (tightened by the write; git does not track dir modes), probe string occurrences in file bytes 0, no wiki/traces twin, untracked; deleted afterwards (33 tracked remain, git status clean). GATE 1 PASSED.
+
+### Deferred review minors
+
+- Task 1: minor (deferred): test_committed_v1_traces_have_no_schema_issue filters only schema_version/trace_mode issues and does not assert files are v1 (plan-mandated test text)
+- Task 1: minor (deferred): trace_validate accepts a v1 file carrying trace_mode != "full" while record_from_dict raises — validator/loader disagree on that edge
+- Task 1: minor (deferred): trace_validate.py:6 import line ~150 chars
+- Task 2: minor (deferred): stale 'full' Markdown twin survives if the same trace id is rewritten in summary/protected_eval mode (privacy-relevant; ids are normally unique)
+- Task 2: minor (deferred): _write_private truncates an existing 0644 file before chmod (brief readable window; dir is 0700)
+- Task 2: minor (deferred): `trace prune` accepts negative --days/--keep (tracked still safe)
+- Task 2: minor (deferred): write() spawns git ls-files every call, 30s timeout, no cache; refused reason discarded
+- Task 2: minor (deferred): no tests for ls-files failure inside a repo, trace prune CLI
+- Task 2: minor (deferred): dry_run prune may list a vanished file in `removed` (cosmetic)
+- Task 3: minor (deferred): no end-to-end test that search_memory/export_context(trace=True) with no trace_mode writes summary (default only covered at writer + CLI)
+- Task 3: minor (deferred): CLI test stubs search_memory; `context --trace-mode` dispatch untested
+- Task 3: minor (deferred): summary graph nodes keep `path` (page filename may echo a title) — spec-allowed result id
+- Task 4: minor (deferred): timing capture runs even when timings=None (~11 perf_counter_ns; plan-mandated, negligible)
+- Task 4: minor (deferred): --explain with missing index prints empty stage header
+- Task 4: minor (deferred): no test for --explain --json timings_ms or hybrid-mode trace timings
+- Task 5: minor (deferred): require_itemised_allowed is a deny-list (HOLDOUT/RESERVE); a hand-built DatasetInfo with bogus state passes (plan-mandated; dataset_for_file validates states)
+- Task 5: minor (deferred): duplicate-digest registry entries resolved by order, not refused; no sha256 format check; DatasetInfo not validated on construction
+- Task 6: minor (deferred): keyword-mode (hybrid=False) rows hold absolute glob paths, so result_digest differs across checkouts (hybrid uses index-relative source_path)
+- Task 6: minor (deferred): keep_rows leaves `_rows` in the returned metrics dict; stripped from JSON output but a future caller serialising metrics would emit retrieved ids
+- Task 7: minor (deferred): eval_search.py --save-run on sealed dataset refuses only after full evaluation, as a traceback (no row written); should pre-check and exit 2
+- Task 7: minor (deferred): run_search_evaluation JSON prints failing_items indices for any dataset incl. sealed (Task 6 code) — Z1b broker scope, cross-check vs gate 5 in final review
+- Task 7: minor (deferred): failed --min-top3 exits before save; runs dir mkdir then chmod (empty-dir window), ~/.zurvan parent default perms
+- Task 7: minor (deferred): `eval movers` CLI catches only DatasetNotEligible; an invalid registry state surfaces as a traceback (still fails closed); untested
+- Task 8: minor (deferred): reproduce/CLI report equal=true on an empty gold set or runs=1 (vacuous pass) — Task 9 live gate must confirm n_items=50
+- Task 8: minor (deferred): snapshot_index in output names an already-released path; no test for CLI SnapshotNotReady->exit 2 or KeyboardInterrupt release
+- Task 9a: minor (deferred): test_the_live_instrument_is_not_tracked_by_git runs git ls-files from cwd, vacuous if run elsewhere (pre-existing)
