@@ -1,0 +1,3 @@
+# zurvan-eval: the candidate identity gets no outbound network at all (spec T3, defence in depth).
+# pf matches `user` for TCP and UDP only; confidentiality never rests on this rule.
+block drop out quick user ${CANDIDATE_USER}
