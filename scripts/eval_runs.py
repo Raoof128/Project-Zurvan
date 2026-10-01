@@ -19,8 +19,8 @@ RUNS_DIR = Path.home() / ".zurvan" / "eval-runs"
 def save_run(metrics: dict, rows: list, dataset: DatasetInfo, runs_dir: Path = RUNS_DIR) -> Path:
     require_itemised_allowed(dataset)
     runs_dir = Path(runs_dir)
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    os.chmod(runs_dir, 0o700)
+    runs_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(runs_dir, 0o700)  # mkdir's mode is masked by umask; an existing dir keeps its own
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     path = runs_dir / f"run-{stamp}-{metrics.get('result_digest', 'nodigest')[:12]}.json"
     body = {"schema": "zurvan.eval.run.v1",
@@ -70,15 +70,20 @@ def reproduce(gold_path, *, runs: int = 2, capture_fn=None, evaluate_fn=None) ->
     if capture_fn is None:
         from scripts.measurement_snapshot import capture as capture_fn
     evaluate_fn = evaluate_fn or evaluate
+    if runs < 2:
+        raise ValueError("reproducibility needs at least 2 runs; one run is trivially equal")
     dataset = load_gold_dataset(str(gold_path))
+    if not dataset:
+        raise ValueError("gold set has no items; equal digests over nothing prove nothing")
     # `required=` alone: capture() refuses it together with `components=`.
     snap = capture_fn(label="z1a-reproduce", purpose="measurement",
                       required=REPRODUCE_REQUIRED)
     try:
         digests = [evaluate_fn(dataset, index_path=str(snap.index_path), hybrid=True)[0]["result_digest"]
                    for _ in range(runs)]
-        return {"equal": len(set(digests)) == 1, "digests": digests,
+        # the snapshot id, not its path: the path is gone once released below
+        return {"equal": len(set(digests)) == 1, "digests": digests, "items": len(dataset),
                 "coherence": _coherence_of(str(snap.index_path)),
-                "snapshot_index": str(snap.index_path)}
+                "snapshot_id": Path(snap.index_path).parent.name}
     finally:
         snap.release()

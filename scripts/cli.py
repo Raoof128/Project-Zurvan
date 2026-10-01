@@ -1074,7 +1074,7 @@ def _main():
         from scripts.eval_runs import load_run, movers
         try:
             moved = movers(load_run(args.run_a), load_run(args.run_b))
-        except DatasetNotEligible as exc:
+        except (DatasetNotEligible, ValueError) as exc:  # incl. an invalid registry state
             print(str(exc), file=sys.stderr)
             sys.exit(2)
         for m in moved:

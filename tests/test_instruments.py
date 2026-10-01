@@ -64,8 +64,13 @@ def test_verify_detects_a_changed_instrument(tmp_path, monkeypatch):
 def test_the_live_instrument_is_not_tracked_by_git():
     """The whole point of Plan 3. Runs against the real repository."""
     import subprocess
-    tracked = subprocess.run(["git", "ls-files", "eval/search_gold.jsonl"],
-                             capture_output=True, text=True).stdout.strip()
+    from scripts.config import PROJECT_ROOT
+    # pinned to the repo, not the cwd: from another directory this was vacuous
+    tracked = subprocess.run(["git", "-C", str(PROJECT_ROOT), "ls-files", "--error-unmatch",
+                              "eval/search_gold.jsonl"],
+                             capture_output=True, text=True)
+    assert "did not match" in tracked.stderr, tracked.stderr  # git ran, in a repo
+    tracked = tracked.stdout.strip()
     assert not tracked, "the instrument cleartext is still tracked in git"
 
 

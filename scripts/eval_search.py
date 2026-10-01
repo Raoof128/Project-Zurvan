@@ -185,6 +185,11 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
     total_queries, failures = core["queries"], core["failures"]
     top1_accuracy, top3_accuracy, mrr = core["top1_accuracy"], core["top3_accuracy"], core["mrr"]
     metrics = dict(core)
+    from scripts.eval_datasets import dataset_for_file, itemised_allowed
+    if not itemised_allowed(dataset_for_file(_resolve(gold_file))):
+        # a sealed set reports counts only: no item index leaves the seal
+        metrics.pop("failing_items", None)
+        rows = []
     metrics.update({
         "min_top3": min_top3,
         "passed": top3_accuracy >= min_top3,
@@ -192,11 +197,8 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
         "index_identity": _identity_of(index_path),
         "snapshot_coherence": _coherence_of(index_path),
     })
-    if keep_rows:
-        metrics["_rows"] = rows
-
     if as_json:
-        print(json.dumps({k: v for k, v in metrics.items() if not k.startswith("_")}, indent=2))
+        print(json.dumps(metrics, indent=2))
     else:
         print("\nSearch Evaluation Results")
         if total_queries < full_size:
@@ -234,12 +236,14 @@ def run_search_evaluation(gold_file: str = None, hybrid: bool = False, min_top3:
                     f"measurement. Rebuild with a real provider to enforce it."
                 )
             metrics["skipped_reason"] = "mock embeddings"
-            return metrics
+            return (metrics, rows) if keep_rows else metrics
         if not as_json:
             print(f"Error: Top-3 accuracy ({top3_accuracy}) is below required minimum ({min_top3})")
         sys.exit(1)
 
-    return metrics
+    # rows travel beside the metrics, never inside them: a caller that
+    # serialises the metrics cannot emit retrieved ids by accident
+    return (metrics, rows) if keep_rows else metrics
 
 
 def _identity_of(index_path: str) -> dict:
@@ -285,7 +289,7 @@ def _index_uses_mock_embeddings(index_path: str | None = None) -> bool:
     except sqlite3.Error:
         return False
 
-if __name__ == "__main__":
+def main(argv=None):
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--gold", default=None)
@@ -302,17 +306,31 @@ if __name__ == "__main__":
                         help="Emit a single machine-parseable JSON object instead of the text report")
     parser.add_argument("--save-run", action="store_true",
                         help="Save per-item rows (by index) to ~/.zurvan/eval-runs for `zurvan eval movers`")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.validate:
         validate_gold_dataset(args.gold or _default_gold())
-    else:
-        gold = args.gold or _default_gold()
-        metrics = run_search_evaluation(gold, args.hybrid, args.min_top3, as_json=args.as_json,
-                                        max_queries=args.max_queries, index_path=args.index_path,
-                                        keep_rows=args.save_run)
-        if args.save_run:
-            from scripts.eval_datasets import dataset_for_file
-            from scripts.eval_runs import save_run
-            path = save_run(metrics, metrics.pop("_rows"), dataset_for_file(_resolve(gold)))
-            print(f"Run saved: {path}", file=sys.stderr if args.as_json else sys.stdout)
+        return
+    gold = args.gold or _default_gold()
+    dataset = None
+    if args.save_run:
+        from scripts.eval_datasets import DatasetNotEligible, dataset_for_file, require_itemised_allowed
+        try:
+            # refuse a sealed set before spending minutes evaluating it
+            dataset = dataset_for_file(_resolve(gold))
+            require_itemised_allowed(dataset)
+        except DatasetNotEligible as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(2)
+    result = run_search_evaluation(gold, args.hybrid, args.min_top3, as_json=args.as_json,
+                                   max_queries=args.max_queries, index_path=args.index_path,
+                                   keep_rows=args.save_run)
+    if args.save_run:
+        from scripts.eval_runs import save_run
+        metrics, rows = result
+        path = save_run(metrics, rows, dataset)
+        print(f"Run saved: {path}", file=sys.stderr if args.as_json else sys.stdout)
+
+
+if __name__ == "__main__":
+    main()
