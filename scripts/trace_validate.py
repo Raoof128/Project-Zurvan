@@ -3,7 +3,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
-from scripts.trace_schema import SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS, TRACE_MODES, ALLOWED_EVENT_TYPES, TRACE_ID_RE, EVENT_ID_RE, hash_payload
+from scripts.trace_schema import (ALLOWED_EVENT_TYPES, EVENT_ID_RE, SCHEMA_VERSION,
+                                  SUPPORTED_SCHEMA_VERSIONS, TRACE_ID_RE, TRACE_MODES,
+                                  hash_payload)
 
 
 REQUIRED_TRACE_FIELDS = ("schema_version", "trace_id", "created_at", "title", "summary", "events")
@@ -40,6 +42,9 @@ def _validate_trace_dict(data: Dict[str, Any], issues: List[str]) -> None:
         issues.append(f"schema_version must be one of {SUPPORTED_SCHEMA_VERSIONS}")
     elif version == SCHEMA_VERSION and data.get("trace_mode") not in TRACE_MODES:
         issues.append(f"trace_mode must be one of {TRACE_MODES}")
+    elif version != SCHEMA_VERSION and data.get("trace_mode", "full") != "full":
+        # same rule as TraceRecord: a v1 trace predates modes and is always full
+        issues.append("trace_mode: a v1 trace predates modes and is always 'full'")
 
     trace_id = data.get("trace_id")
     if trace_id is not None and not TRACE_ID_RE.fullmatch(str(trace_id)):

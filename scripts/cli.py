@@ -71,6 +71,13 @@ def _split_global_project(args_list):
     return None, args_list
 
 
+def _non_negative_int(value: str) -> int:
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return number
+
+
 def _main():
     project_name, args_list = _split_global_project(sys.argv[1:])
     project_root_override = None
@@ -320,8 +327,8 @@ def _main():
     trace_replay = trace_sub.add_parser("replay", help="Render a deterministic trace replay")
     trace_replay.add_argument("trace_id")
     trace_prune = trace_sub.add_parser("prune", help="Apply trace retention (never touches git-tracked traces)")
-    trace_prune.add_argument("--days", type=int, default=30)
-    trace_prune.add_argument("--keep", type=int, default=500)
+    trace_prune.add_argument("--days", type=_non_negative_int, default=30)
+    trace_prune.add_argument("--keep", type=_non_negative_int, default=500)
     trace_prune.add_argument("--dry-run", action="store_true")
     
     # zurvan remember

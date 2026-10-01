@@ -64,5 +64,7 @@ def test_committed_v1_traces_have_no_schema_issue():
                          capture_output=True, text=True, check=True).stdout.split()
     assert out, "expected committed traces"
     for rel in out:
-        issues = validate_trace_file(PROJECT_ROOT / rel).issues
-        assert not [i for i in issues if "schema_version" in i or "trace_mode" in i], rel
+        # every committed trace is v1 and stays fully valid (0 issues of any kind
+        # at a79b26b), so any validity change at all shows up here
+        assert json.loads((PROJECT_ROOT / rel).read_text())["schema_version"] == V1, rel
+        assert validate_trace_file(PROJECT_ROOT / rel).issues == [], rel

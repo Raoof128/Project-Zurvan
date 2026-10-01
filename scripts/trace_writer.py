@@ -48,9 +48,11 @@ def _private_dir(path: Path) -> None:
 
 def _write_private(path: Path, text: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, FILE_MODE)
+    # O_CREAT's mode does not apply to an existing file: tighten it before any
+    # new byte lands, not after.
+    os.fchmod(fd, FILE_MODE)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
-    os.chmod(path, FILE_MODE)  # O_CREAT's mode does not apply to an existing file
 
 
 @dataclass
@@ -98,6 +100,10 @@ class TraceStore:
         if record.trace_mode == "full":
             _private_dir(paths.markdown_path.parent)
             _write_private(paths.markdown_path, render_trace_markdown(record))
+        else:
+            # A trace id rewritten in a mode without a twin must not leave the
+            # earlier full twin (raw query and snippets) behind.
+            paths.markdown_path.unlink(missing_ok=True)
         try:
             self.prune()
         except OSError:
@@ -128,6 +134,8 @@ class TraceStore:
         """Retention (design §3.2): remove untracked traces older than `days`
         or beyond the newest `keep`. A git-tracked trace is a frozen research
         artifact and is never removed."""
+        if days < 0 or keep < 0:
+            raise ValueError("retention days and keep must be non-negative")
         tracked = self._tracked_names()
         if tracked is None:
             return PruneResult(refused="cannot list git-tracked traces; pruning nothing")
