@@ -1,0 +1,138 @@
+"""Z1b Rev 3 #1 unit tests: the VM runner lifecycle with a FAKE launcher (no real VM here; the real boot is
+the VM-ISO live gate in tests/test_z1b_vm_live.py). These pin the config knobs that the boot experiment
+proved necessary, the short-path discipline, and that teardown always runs and never raises."""
+import subprocess
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from scripts.eval_seal import vm_runner as V  # noqa: E402
+from scripts.eval_seal.codes import SealRefusal  # noqa: E402
+from scripts.eval_seal.paths import SealPaths  # noqa: E402
+
+RID = "0123456789abcdef"
+
+
+def _vm_paths(tmp_path):
+    p = SealPaths.for_root(tmp_path / "root")
+    for d in (p.broker_bin, p.scratch_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _vm_recorder(returncode=0, stdout=b""):
+    calls = []
+
+    def runner(argv, **kw):
+        calls.append((list(argv), kw))
+        return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=b"")
+    runner.calls = calls
+    return runner
+
+
+def test_t1vm_config_has_no_mounts_containerd_off_and_a_pinned_digest():
+    cfg = V.vm_config_text()
+    assert "mounts: []" in cfg
+    assert "containerd:\n  system: false\n  user: false" in cfg
+    assert "sha512:" in cfg and "nocloud_alpine" in cfg and 'arch: "aarch64"' in cfg
+
+
+def test_t1vm_instance_name_is_short_and_derived_from_the_run_id():
+    assert V.vm_instance_name(RID) == "z" + RID
+    for bad in ("", "nothex", "0123", RID + "0", RID.upper(), None):
+        with pytest.raises(SealRefusal):
+            V.vm_instance_name(bad)
+
+
+def test_t1vm_lima_home_stays_well_under_the_ssh_sock_limit(tmp_path):
+    # the VZ ssh.sock path is <LIMA_HOME>/<name>/ssh.sock and must be < 104 chars (UNIX_PATH_MAX). Under a
+    # real sealed scratch (/Users/zurvancandidate/scratch) the name is short; assert the suffix budget here.
+    p = SealPaths.real()
+    home = V._vm_lima_home(p, RID)
+    sock = str(home / V.vm_instance_name(RID) / "ssh.sock")
+    assert len(sock) < 104, (len(sock), sock)
+
+
+def test_t1vm_start_builds_the_pinned_launcher_argv_and_writes_the_config(tmp_path):
+    p = _vm_paths(tmp_path)
+    r = _vm_recorder()
+    V.vm_start(RID, p, runner=r)
+    argv, kw = r.calls[0]
+    assert argv[0] == str(p.broker_bin / "limactl") and argv[1] == "start"
+    assert "--name=z" + RID in argv
+    cfg = Path(argv[-1])
+    assert cfg.read_text() == V.vm_config_text() and (cfg.stat().st_mode & 0o777) in (0o600, 0o644)
+    # nothing inherited; LIMA_HOME is short and under the scratch
+    assert "LIMA_HOME" in kw["env"] and kw["env"]["LIMA_HOME"].startswith(str(p.scratch_dir))
+    assert "PYTHONPATH" not in kw["env"]
+
+
+def test_t1vm_start_refuses_a_leftover_lima_home_as_a_sandbox_violation(tmp_path):
+    p = _vm_paths(tmp_path)
+    V._vm_lima_home(p, RID).mkdir(parents=True)
+    with pytest.raises(SealRefusal) as ei:
+        V.vm_start(RID, p, runner=_vm_recorder())
+    assert ei.value.code == "SANDBOX_VIOLATION"
+
+
+def test_t1vm_start_turns_a_failed_boot_into_candidate_failed(tmp_path):
+    p = _vm_paths(tmp_path)
+    with pytest.raises(SealRefusal) as ei:
+        V.vm_start(RID, p, runner=_vm_recorder(returncode=1))
+    assert ei.value.code == "CANDIDATE_FAILED"
+
+
+def test_t1vm_shell_argv_runs_the_guest_candidate_inside_the_named_instance(tmp_path):
+    p = _vm_paths(tmp_path)
+    argv = V.vm_shell_argv(RID, p, ["/opt/z1b/candidate"])
+    assert argv == [str(p.broker_bin / "limactl"), "shell", "z" + RID, "--", "/opt/z1b/candidate"]
+
+
+def test_t1vm_launch_boots_then_returns_a_shell_popen_on_the_protocol_channel(tmp_path):
+    p = _vm_paths(tmp_path)
+    r = _vm_recorder()
+    seen = {}
+
+    def fake_popen(argv, **kw):
+        seen["argv"] = list(argv)
+        seen["kw"] = kw
+        return types.SimpleNamespace(stdin=object(), stdout=object(), pid=4321)
+    proc = V.vm_launch(RID, p, ["/opt/z1b/candidate"], runner=r, popen=fake_popen)
+    assert r.calls[0][0][1] == "start"            # booted first
+    assert seen["argv"][1] == "shell"             # then a shell on the instance
+    assert seen["kw"]["stdin"] is subprocess.PIPE and seen["kw"]["stdout"] is subprocess.PIPE
+    assert seen["kw"]["close_fds"] is True and proc.pid == 4321
+
+
+def test_t1vm_teardown_deletes_the_instance_and_removes_the_lima_home(tmp_path):
+    p = _vm_paths(tmp_path)
+    home = V._vm_lima_home(p, RID)
+    home.mkdir(parents=True)
+    (home / "junk").write_text("x")
+    r = _vm_recorder()
+    V.vm_teardown(RID, p, runner=r)
+    assert r.calls[0][0][1:3] == ["delete", "-f"] and ("z" + RID) in r.calls[0][0]
+    assert not home.exists()
+
+
+def test_t1vm_teardown_never_raises_even_when_delete_fails(tmp_path):
+    p = _vm_paths(tmp_path)
+    home = V._vm_lima_home(p, RID)
+    home.mkdir(parents=True)
+
+    def boom(argv, **kw):
+        raise OSError("limactl exploded")
+    V.vm_teardown(RID, p, runner=boom)   # must not raise
+    assert not home.exists()             # and still removes the state
+
+
+def test_t1vm_leftover_instances_reports_an_instance_a_teardown_left_behind(tmp_path):
+    p = _vm_paths(tmp_path)
+    V._vm_lima_home(p, RID).mkdir(parents=True)
+    assert V.vm_leftover_instances(p, runner=_vm_recorder(stdout=b"")) == []
+    assert V.vm_leftover_instances(p, runner=_vm_recorder(stdout=b"z" + RID.encode() + b"\n")) == ["z" + RID]
