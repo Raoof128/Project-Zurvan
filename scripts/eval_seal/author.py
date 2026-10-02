@@ -601,21 +601,21 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
     dev_sha = bundle.get("dev_sha256")
     if type(dev_sha) is not str or not _HEX64.fullmatch(dev_sha):
         raise SealRefusal("BAD_ARGS")
-    targets = [sealed_store.holdout_age(paths), sealed_store.reserve_age(paths),
-               sealed_store.canaries_age(paths), sealed_store.manifest(paths), sealed_store.manifest_sig(paths)]
-    if any(os.path.lexists(str(t)) for t in targets):
+    # the sealed set (the four generation files) is built in a fresh generation dir and promoted atomically;
+    # canaries.age is non-generational. Refuse if a store is already sealed (active) or a canaries file sits.
+    if sealed_store.active_dir(paths).exists() or os.path.lexists(str(sealed_store.canaries_age(paths))):
         raise SealRefusal("BAD_ARGS")
     canaries = make_canaries(AUTHOR_CANARIES)
     if (type(canaries) is not list or len(canaries) != AUTHOR_CANARIES or len(set(canaries)) != len(canaries)
             or any(type(c) is not str or not c or "\n" in c for c in canaries)):
         raise SealRefusal("BAD_ARGS")
     Path(paths.sets_dir).mkdir(parents=True, exist_ok=True)
-    Path(sealed_store.manifest(paths)).parent.mkdir(parents=True, exist_ok=True)
+    gen = sealed_store.new_generation(paths, sequence)
     written = []
     try:
         digests = {}
-        for name, out, data in (("holdout", sealed_store.holdout_age(paths), _author_jsonl(bundle["holdout"])),
-                                ("reserve", sealed_store.reserve_age(paths), _author_jsonl(bundle["reserve"])),
+        for name, out, data in (("holdout", gen / sealed_store.HOLDOUT, _author_jsonl(bundle["holdout"])),
+                                ("reserve", gen / sealed_store.RESERVE, _author_jsonl(bundle["reserve"])),
                                 ("canaries", sealed_store.canaries_age(paths), author_canary_records(canaries))):
             out = Path(out)
             encrypt(data, out)
@@ -631,7 +631,7 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
             dev_sha256=dev_sha, strata_counts=bundle["strata_counts"], accepted=bundle["accepted"],
             rejected=bundle["rejected"], short=bundle["short"],
             evaluator_version=author_grade.EVALUATOR_VERSION, burn_ledger=[])
-        mf = Path(sealed_store.manifest(paths))
+        mf = gen / sealed_store.MANIFEST
         author_manifest.write_manifest(mf, manifest)
         written.append(mf)
         os.chmod(str(mf), 0o600)
@@ -640,12 +640,20 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
         if not sig.is_file():
             raise SealRefusal("INTERNAL")
         os.chmod(str(sig), 0o600)
+        for f in (gen / sealed_store.HOLDOUT, gen / sealed_store.RESERVE, mf, sig):
+            sealed_store.fsync_file(f)
+        sealed_store.promote(paths, sequence)   # ONE atomic swap makes the generation live
     except BaseException:
         for f in written:
             try:
                 os.unlink(str(f))
             except OSError:
                 pass
+        try:
+            import shutil as _sh
+            _sh.rmtree(str(gen))
+        except OSError:
+            pass
         raise
     author_manifest.assert_no_per_item_digests(manifest)
     return manifest

@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from scripts.eval_seal import author as A
+from scripts.eval_seal import sealed_store
 from scripts.eval_seal import manifest as M
 from scripts.eval_seal import spec as S
 from scripts.eval_seal import sysenv
@@ -707,20 +708,20 @@ def test_t15_seal_suite_writes_ciphertext_a_signed_manifest_and_counts_only(tmp_
     corpus, fake, bundle = _t15_suite(tmp_path)
     seams, signers = _t15_seams(tmp_path)
     pub = A.seal_suite(bundle, paths, now=lambda: "2026-10-02T10:00:00Z", **seams)
-    for name in ("holdout.age", "reserve.age", "canaries.age"):
-        f = paths.sets_dir / name
+    for f in (sealed_store.holdout_age(paths), sealed_store.reserve_age(paths),
+              sealed_store.canaries_age(paths)):
         assert f.is_file() and _t15_modes(f) == 0o600
-    assert _t15_modes(paths.manifest_file) == 0o600
-    cipher = (paths.sets_dir / "holdout.age").read_bytes()
+    assert _t15_modes(sealed_store.manifest(paths)) == 0o600
+    cipher = sealed_store.holdout_age(paths).read_bytes()
     for item in bundle["holdout"][:10]:
         assert item["query"].encode() not in cipher
-    dec = [json.loads(ln) for ln in _t15_fake_decrypt(paths.sets_dir / "holdout.age").decode().splitlines()]
+    dec = [json.loads(ln) for ln in _t15_fake_decrypt(sealed_store.holdout_age(paths)).decode().splitlines()]
     assert sorted(i["id"] for i in dec) == sorted(i["id"] for i in bundle["holdout"])
-    sealed = M.verify(paths.manifest_file, Path(str(paths.manifest_file) + ".sig"), signers)
+    sealed = M.verify(sealed_store.manifest(paths), sealed_store.manifest_sig(paths), signers)
     assert sealed == pub
     M.assert_no_per_item_digests(pub)
     assert pub["holdout_age_sha256"] == hashlib.sha256(cipher).hexdigest()
-    assert pub["reserve_age_sha256"] == hashlib.sha256((paths.sets_dir / "reserve.age").read_bytes()).hexdigest()
+    assert pub["reserve_age_sha256"] == hashlib.sha256(sealed_store.reserve_age(paths).read_bytes()).hexdigest()
     assert pub["dev_sha256"] == "d" * 64
     assert pub["corpus_sha256"] == bundle["corpus_sha256"]
     assert pub["strata_counts"]["holdout"] == {s: 10 for s in STRATA}
@@ -757,7 +758,7 @@ def test_t15_seal_suite_calls_make_canaries_with_a_count_and_encrypts_them(tmp_p
 
     A.seal_suite(bundle, paths, **dict(seams, make_canaries=make))
     assert asked == [A.AUTHOR_CANARIES]
-    plain = _t15_fake_decrypt(paths.sets_dir / "canaries.age").decode().split()
+    plain = _t15_fake_decrypt(sealed_store.canaries_age(paths)).decode().split()
     assert len(plain) == A.AUTHOR_CANARIES and len(set(plain)) == len(plain)
 
 
@@ -766,13 +767,16 @@ def test_t15_seal_suite_refuses_to_overwrite_an_existing_sealed_suite(tmp_path):
     _, _, bundle = _t15_suite(tmp_path)
     seams, _ = _t15_seams(tmp_path)
     A.seal_suite(bundle, paths, **seams)
-    before = {f.name: f.read_bytes() for f in paths.sets_dir.iterdir()}
-    mf = paths.manifest_file.read_bytes()
+    def _snap():
+        return (sealed_store.active_seq(paths),
+                sealed_store.holdout_age(paths).read_bytes(), sealed_store.reserve_age(paths).read_bytes(),
+                sealed_store.manifest(paths).read_bytes(), sealed_store.manifest_sig(paths).read_bytes(),
+                sealed_store.canaries_age(paths).read_bytes())
+    before = _snap()
     with pytest.raises(SealRefusal) as ei:
         A.seal_suite(bundle, paths, **seams)
     assert ei.value.code == "BAD_ARGS"
-    assert {f.name: f.read_bytes() for f in paths.sets_dir.iterdir()} == before
-    assert paths.manifest_file.read_bytes() == mf
+    assert _snap() == before
 
 
 def test_t15_seal_suite_requires_a_dev_digest_and_valid_canaries_and_working_encrypt(tmp_path):
@@ -785,7 +789,7 @@ def test_t15_seal_suite_requires_a_dev_digest_and_valid_canaries_and_working_enc
         A.seal_suite(bundle, paths, **dict(seams, make_canaries=lambda n: ["same"] * n))
     with pytest.raises(SealRefusal):
         A.seal_suite(bundle, paths, **dict(seams, encrypt=lambda plain, out: None))     # wrote nothing
-    assert not paths.manifest_file.exists()
+    assert not sealed_store.manifest(paths).exists()
 
 
 # ------------------------------------------------------------------------------------------- author_main
@@ -835,7 +839,7 @@ def test_t15_author_main_prints_only_the_public_manifest_and_nothing_sealed(tmp_
     cap = capsys.readouterr()
     assert rc == 0 and cap.err == ""
     out = json.loads(cap.out)
-    assert out == M.verify(paths.manifest_file, Path(str(paths.manifest_file) + ".sig"), signers)
+    assert out == M.verify(sealed_store.manifest(paths), sealed_store.manifest_sig(paths), signers)
     assert out["strata_counts"]["holdout"] == {s: 10 for s in STRATA}
     haystack = cap.out + cap.err
     for q in world["truth"]:
@@ -856,7 +860,8 @@ def test_t15_author_main_keeps_prompts_and_raw_outputs_only_under_the_eval_home_
     assert len(dirs) == 1 and _t15_modes(dirs[0]) == 0o700 and _t15_modes(runs) == 0o700
     files = list(dirs[0].iterdir())
     assert len(files) == 2 * len(fk.calls) and all(_t15_modes(f) == 0o600 for f in files)
-    for f in paths.sets_dir.glob("*.age"):
+    for f in (sealed_store.holdout_age(paths), sealed_store.reserve_age(paths),
+              sealed_store.canaries_age(paths)):
         assert _t15_modes(f) == 0o600
 
 
@@ -914,7 +919,7 @@ def test_t15_author_main_internal_errors_go_to_the_sealed_log_not_the_streams(tm
     assert "SENTINEL" not in cap.out
     log = paths.runs_dir / "errors.log"
     assert log.is_file() and _t15_modes(log) == 0o600 and b"SENTINEL-EXC-TEXT" in log.read_bytes()
-    assert not (paths.sets_dir / "holdout.age").exists() and not paths.manifest_file.exists()
+    assert not sealed_store.holdout_age(paths).exists() and not sealed_store.manifest(paths).exists()
 
 
 def test_t15_author_main_public_out_copy_verifies_byte_for_byte(tmp_path, capsys):
@@ -922,7 +927,7 @@ def test_t15_author_main_public_out_copy_verifies_byte_for_byte(tmp_path, capsys
     pub = tmp_path / "public"
     paths, signers, rc = _t15_run_main(tmp_path, fk, extra=("--public-out", str(pub)))
     assert rc == 0
-    assert (pub / "manifest.json").read_bytes() == paths.manifest_file.read_bytes()
+    assert (pub / "manifest.json").read_bytes() == sealed_store.manifest(paths).read_bytes()
     M.verify(pub / "manifest.json", pub / "manifest.json.sig", signers)
     assert _t15_modes(pub / "manifest.json") == 0o644
 

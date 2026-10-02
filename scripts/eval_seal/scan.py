@@ -405,9 +405,14 @@ def reseal_after_burn(paths, ctx, ledger) -> dict:
         if not any(i["id"] in burned for i in holdout + reserve):
             return {"resealed": False}
         new_h, new_r, _retired = replace_burned(holdout, reserve, burned)
+        # build the next generation in its own immutable directory, then promote it with ONE atomic swap
+        new_seq = m["sequence"] + 1
+        gen = sealed_store.new_generation(paths, new_seq)
+        digests = {}
         for pool, items in (("holdout", new_h), ("reserve", new_r)):
-            ctx.encrypt(broker_dump_items(items), Path(str(sealed_store.age_path(paths, pool)) + ".new"))
-        digests = {p: broker_file_sha256(Path(str(sealed_store.age_path(paths, p)) + ".new")) for p in ("holdout", "reserve")}
+            dest = gen / (sealed_store.HOLDOUT if pool == "holdout" else sealed_store.RESERVE)
+            ctx.encrypt(broker_dump_items(items), dest)
+            digests[pool] = broker_file_sha256(dest)
         counts = {"holdout": {}, "reserve": {}}
         for pool, items in (("holdout", new_h), ("reserve", new_r)):
             for item in items:
@@ -418,21 +423,20 @@ def reseal_after_burn(paths, ctx, ledger) -> dict:
                 seen.add(entry["id"])
                 ledger_burns.append({"id": entry["id"], "reason": entry["reason"], "date": entry["date"]})
         new_m = manifest_mod.build_manifest(
-            suite_id=m["suite_id"], sequence=m["sequence"] + 1, created=broker_iso_now(ctx),
+            suite_id=m["suite_id"], sequence=new_seq, created=broker_iso_now(ctx),
             models=m["models"], prompt_sha256=m["prompt_sha256"], corpus_sha256=m["corpus_sha256"],
             holdout_age_sha256=digests["holdout"], reserve_age_sha256=digests["reserve"],
             dev_sha256=m["dev_sha256"], strata_counts=counts, accepted=m["accepted"],
             rejected=m["rejected"],
             short=coverage({"holdout": new_h, "reserve": new_r}, spec)["short"],
             evaluator_version=m["evaluator_version"], burn_ledger=sorted(ledger_burns, key=lambda e: e["id"]))
-        staged = Path(str(sealed_store.manifest(paths)) + ".new")
-        manifest_mod.write_manifest(staged, new_m)
-        sig = manifest_mod.sign(staged, paths.keys_dir / "signing_ed25519")
-        for pool in ("holdout", "reserve"):
-            tgt = sealed_store.age_path(paths, pool)
-            os.replace(str(tgt) + ".new", str(tgt))
-        os.replace(str(sig), str(sealed_store.manifest_sig(paths)))
-        os.replace(str(staged), str(sealed_store.manifest(paths)))
+        mf = gen / sealed_store.MANIFEST
+        manifest_mod.write_manifest(mf, new_m)
+        manifest_mod.sign(mf, paths.keys_dir / "signing_ed25519")   # writes gen/manifest.json.sig
+        for f in (gen / sealed_store.HOLDOUT, gen / sealed_store.RESERVE, mf, gen / sealed_store.SIG):
+            sealed_store.fsync_file(f)
+        sealed_store.promote(paths, new_seq)                        # the single crash-atomic swap
+        sealed_store.gc(paths)                                      # reclaim the now-unreferenced old generation
         ledger.append({"kind": "manifest_seen", "sequence": new_m["sequence"],
                        "manifest_sha256": manifest_mod.suite_manifest_sha256(sealed_store.manifest(paths))})
         return {"resealed": True, "sequence": new_m["sequence"]}

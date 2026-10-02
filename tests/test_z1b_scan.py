@@ -16,6 +16,7 @@ import pytest
 from scripts.eval_seal import broker as B
 from scripts.eval_seal import manifest as manifest_mod
 from scripts.eval_seal import scan as S
+from scripts.eval_seal import sealed_store
 from scripts.eval_seal.codes import SealRefusal
 from scripts.eval_seal.ledger import Ledger
 from scripts.eval_seal.paths import SealPaths
@@ -73,12 +74,12 @@ def _t11_run(E, commit=None, **kw):
 
 
 def _t11_holdout_ids(E):
-    return {i["id"] for i in B.broker_parse_items((E.paths.sets_dir / "holdout.age").read_bytes(),
+    return {i["id"] for i in B.broker_parse_items((sealed_store.holdout_age(E.paths)).read_bytes(),
                                                   load_spec(SPEC))}
 
 
 def _t11_reserve_ids(E):
-    return {i["id"] for i in B.broker_parse_items((E.paths.sets_dir / "reserve.age").read_bytes(),
+    return {i["id"] for i in B.broker_parse_items((sealed_store.reserve_age(E.paths)).read_bytes(),
                                                   load_spec(SPEC))}
 
 
@@ -471,14 +472,14 @@ def test_t11_reseal_increments_sequence_keeps_suite_changes_the_manifest_digest_
     E = _t11_build(tmp_path)
     led = _t10_ledger(E)
     burned = E.holdout[2]                                   # a 'semantic' item; reserve has one 'semantic'
-    old_digest = manifest_mod.suite_manifest_sha256(E.paths.manifest_file)
+    old_digest = manifest_mod.suite_manifest_sha256(sealed_store.manifest(E.paths))
     led.burn_items([burned["id"]], "operator", "2026-10-02")
     out = S.reseal_after_burn(E.paths, _t11_ctx(E), led)
     assert out == {"resealed": True, "sequence": 2}
-    m = manifest_mod.verify(E.paths.manifest_file, Path(str(E.paths.manifest_file) + ".sig"),
+    m = manifest_mod.verify(sealed_store.manifest(E.paths), sealed_store.manifest_sig(E.paths),
                             E.paths.keys_dir / "allowed_signers")
     assert m["sequence"] == 2 and m["suite_id"] == E.manifest["suite_id"]
-    assert manifest_mod.suite_manifest_sha256(E.paths.manifest_file) != old_digest
+    assert manifest_mod.suite_manifest_sha256(sealed_store.manifest(E.paths)) != old_digest
     assert m["burn_ledger"] == [{"id": burned["id"], "reason": "operator", "date": "2026-10-02"}]
     holdout, reserve = _t11_holdout_ids(E), _t11_reserve_ids(E)
     assert burned["id"] not in holdout | reserve
@@ -489,7 +490,7 @@ def test_t11_reseal_increments_sequence_keeps_suite_changes_the_manifest_digest_
     assert len(reserve) == len(E.reserve) - 1
     assert m["strata_counts"]["holdout"][burned["stratum"]] == 2
     assert m["strata_counts"]["reserve"].get(burned["stratum"], 0) == 0
-    assert m["holdout_age_sha256"] == hashlib.sha256((E.paths.sets_dir / "holdout.age").read_bytes()).hexdigest()
+    assert m["holdout_age_sha256"] == hashlib.sha256((sealed_store.holdout_age(E.paths)).read_bytes()).hexdigest()
     assert led.last_manifest_sequence() == 2
     # idempotent: nothing left to replace
     assert S.reseal_after_burn(E.paths, _t11_ctx(E), led) == {"resealed": False}
@@ -503,7 +504,7 @@ def test_t11_a_short_stratum_after_a_burn_is_reported_short_never_padded(tmp_pat
     _t10_seal(E)
     led.burn_items([victim["id"]], "operator", "2026-10-02")
     S.reseal_after_burn(E.paths, _t11_ctx(E), led)
-    m = manifest_mod.verify(E.paths.manifest_file, Path(str(E.paths.manifest_file)) .with_name("manifest.json.sig"),
+    m = manifest_mod.verify(sealed_store.manifest(E.paths), sealed_store.manifest_sig(E.paths),
                             E.paths.keys_dir / "allowed_signers")
     assert len(_t11_holdout_ids(E)) == len(E.holdout) - 1
     assert m["strata_counts"]["holdout"]["path"] == 1
@@ -514,12 +515,12 @@ def test_t11_reseal_refuses_when_the_current_sealed_state_does_not_verify(tmp_pa
     E = _t11_build(tmp_path)
     led = _t10_ledger(E)
     led.burn_items([E.holdout[0]["id"]], "operator", "2026-10-02")
-    before = (E.paths.sets_dir / "holdout.age").read_bytes()
-    E.paths.manifest_file.write_bytes(E.paths.manifest_file.read_bytes() + b" ")
+    before = (sealed_store.holdout_age(E.paths)).read_bytes()
+    sealed_store.manifest(E.paths).write_bytes(sealed_store.manifest(E.paths).read_bytes() + b" ")
     with pytest.raises(SealRefusal) as ei:
         S.reseal_after_burn(E.paths, _t11_ctx(E), led)
     assert ei.value.code == "MANIFEST_INVALID"
-    assert (E.paths.sets_dir / "holdout.age").read_bytes() == before
+    assert (sealed_store.holdout_age(E.paths)).read_bytes() == before
     assert not list(E.paths.sets_dir.glob("*.new"))
 
 
@@ -533,7 +534,7 @@ def test_t11_after_a_burn_the_burned_ids_are_absent_from_holdout_and_reserve_and
     ids = {v["id"] for v in victims}
     assert _t10_ledger(E).burned_ids() == ids
     assert not ids & (_t11_holdout_ids(E) | _t11_reserve_ids(E))
-    m = manifest_mod.verify(E.paths.manifest_file, Path(str(E.paths.manifest_file) + ".sig"),
+    m = manifest_mod.verify(sealed_store.manifest(E.paths), sealed_store.manifest_sig(E.paths),
                             E.paths.keys_dir / "allowed_signers")
     assert {e["id"] for e in m["burn_ledger"]} == ids and {e["reason"] for e in m["burn_ledger"]} == {"item_leak"}
     # operator clears the artifacts and the incident: the next run uses the resealed suite
@@ -585,7 +586,7 @@ def test_t11_a_sandbox_violation_reseals_through_the_real_reseal(tmp_path):
 def test_t11_a_failed_reseal_after_a_hit_still_ends_in_integrity_incident(tmp_path):
     E = _t11_build(tmp_path)
     E.trace.write_text(E.canaries[0])
-    E.paths.manifest_file.write_bytes(E.paths.manifest_file.read_bytes() + b" ")   # reseal will refuse
+    sealed_store.manifest(E.paths).write_bytes(sealed_store.manifest(E.paths).read_bytes() + b" ")   # reseal will refuse
     _t10_refused(_t11_run(E), "INTEGRITY_INCIDENT")
     assert _t10_ledger(E).burned_ids() == {E.holdout[0]["id"]}
     assert (E.paths.runs_dir / "errors.log").is_file()   # the failed reseal is logged, sealed-side only
@@ -596,7 +597,7 @@ def test_t11_reseal_also_refuses_when_a_set_file_no_longer_matches_the_signed_di
     led = _t10_ledger(E)
     led.burn_items([E.holdout[0]["id"]], "operator", "2026-10-02")
     for name in ("holdout", "reserve"):
-        f = E.paths.sets_dir / (name + ".age")
+        f = sealed_store.age_path(E.paths, name)
         saved = f.read_bytes()
         f.write_bytes(saved + b"\n")
         with pytest.raises(SealRefusal) as ei:
@@ -712,7 +713,7 @@ def test_t13_confirmed_answer_key_in_a_scanned_location_burns_via_target_leak(tm
     _t10_refused(_t11_run(E), "INTEGRITY_INCIDENT")
     assert victim["id"] in _t10_ledger(E).burned_ids()
     assert victim["id"] not in (_t11_holdout_ids(E) | _t11_reserve_ids(E))
-    m = manifest_mod.verify(E.paths.manifest_file, Path(str(E.paths.manifest_file) + ".sig"),
+    m = manifest_mod.verify(sealed_store.manifest(E.paths), sealed_store.manifest_sig(E.paths),
                             E.paths.keys_dir / "allowed_signers")
     assert victim["id"] in {e["id"] for e in m["burn_ledger"]}
     assert "target_leak" in {e["reason"] for e in m["burn_ledger"]}

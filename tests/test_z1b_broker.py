@@ -23,7 +23,7 @@ import pytest
 
 from scripts.eval_seal import broker as B
 from scripts.eval_seal import manifest as manifest_mod
-from scripts.eval_seal import output, sweep, sysenv
+from scripts.eval_seal import output, sealed_store, sweep, sysenv
 from scripts.eval_seal.codes import SealRefusal
 from scripts.eval_seal.corpus import corpus_sha256
 from scripts.eval_seal.ledger import Ledger
@@ -135,20 +135,23 @@ def _t10_seal(E, *, sequence=1, holdout=None, reserve=None, suite_id="0123456789
     reserve = E.reserve if reserve is None else reserve
     P = E.paths
     P.sets_dir.mkdir(parents=True, exist_ok=True)
-    (P.sets_dir / "holdout.age").write_bytes(B.broker_dump_items(holdout))
-    (P.sets_dir / "reserve.age").write_bytes(B.broker_dump_items(reserve))
+    gen = sealed_store.new_generation(P, sequence)
+    (gen / sealed_store.HOLDOUT).write_bytes(B.broker_dump_items(holdout))
+    (gen / sealed_store.RESERVE).write_bytes(B.broker_dump_items(reserve))
     m = manifest_mod.build_manifest(
         suite_id=suite_id, sequence=sequence, created="2026-10-02T10:00:00Z",
         models={"author": "claude-opus-4-5", "reviewer": "claude-sonnet-5-5"},
         prompt_sha256="11" * 32, corpus_sha256=corpus_sha256(P.corpus_dir),
-        holdout_age_sha256=hashlib.sha256((P.sets_dir / "holdout.age").read_bytes()).hexdigest(),
-        reserve_age_sha256=hashlib.sha256((P.sets_dir / "reserve.age").read_bytes()).hexdigest(),
+        holdout_age_sha256=hashlib.sha256((gen / sealed_store.HOLDOUT).read_bytes()).hexdigest(),
+        reserve_age_sha256=hashlib.sha256((gen / sealed_store.RESERVE).read_bytes()).hexdigest(),
         dev_sha256="22" * 32,
         strata_counts={"holdout": _t10_counts(holdout), "reserve": _t10_counts(reserve)},
         accepted=len(holdout) + len(reserve), rejected={}, short=[], evaluator_version="1.0.0",
         burn_ledger=[])
-    manifest_mod.write_manifest(P.manifest_file, m)
-    manifest_mod.sign(P.manifest_file, E.key)
+    mf = gen / sealed_store.MANIFEST
+    manifest_mod.write_manifest(mf, m)
+    manifest_mod.sign(mf, E.key)
+    sealed_store.promote(P, sequence)
     return m
 
 
@@ -601,16 +604,16 @@ def test_t10_scan_refusal_codes_propagate_unchanged(tmp_path):
 
 def test_t10_tampered_sealed_manifest_is_manifest_invalid(tmp_path):
     E = _t10_build(tmp_path)
-    data = bytearray(E.paths.manifest_file.read_bytes())
+    data = bytearray(sealed_store.manifest(E.paths).read_bytes())
     data[data.index(b'"accepted":') + 11] ^= 0x01
-    E.paths.manifest_file.write_bytes(bytes(data))
+    sealed_store.manifest(E.paths).write_bytes(bytes(data))
     _t10_refused(_t10_run(E), "MANIFEST_INVALID")
     assert "reserved" not in _t10_kinds(E)
 
 
 def test_t10_missing_signature_or_signers_is_manifest_invalid(tmp_path):
     E = _t10_build(tmp_path)
-    sig = Path(str(E.paths.manifest_file) + ".sig")
+    sig = sealed_store.manifest_sig(E.paths)
     saved = sig.read_bytes()
     sig.unlink()
     _t10_refused(_t10_run(E), "MANIFEST_INVALID")
@@ -644,7 +647,7 @@ def test_t10_corpus_byte_changed_is_corpus_mismatch(tmp_path):
 
 def test_t10_holdout_set_digest_mismatch_is_manifest_invalid(tmp_path):
     E = _t10_build(tmp_path)
-    f = E.paths.sets_dir / "holdout.age"
+    f = sealed_store.holdout_age(E.paths)
     f.write_bytes(f.read_bytes() + b"\n")
     _t10_refused(_t10_run(E), "MANIFEST_INVALID")
     assert "reserved" not in _t10_kinds(E)
@@ -705,7 +708,7 @@ def test_t10_a_perfect_candidate_run_returns_a_valid_overall_only_result(tmp_pat
     assert doc["metrics"]["ci"] is None
     sealed = [e for e in _t10_ledger(E).entries() if e["kind"] == "completed"][-1]["result"]
     assert sealed["peak_rss_mb"] == 12 and sealed["metrics"]["ci"] is not None
-    assert doc["suite_manifest_sha256"] == manifest_mod.suite_manifest_sha256(E.paths.manifest_file)
+    assert doc["suite_manifest_sha256"] == manifest_mod.suite_manifest_sha256(sealed_store.manifest(E.paths))
     assert doc["corpus_sha256"] == E.manifest["corpus_sha256"]
     assert E.launched and all(flag for _rid, flag in E.launched)   # the bundle was staged under the run id
     assert not list(E.paths.stage_dir.iterdir())                   # and cleaned up
@@ -1151,7 +1154,7 @@ def test_t10_status_of_an_unconfigured_root_is_a_closed_document_not_a_crash(tmp
 
 def test_t10_status_with_a_tampered_manifest_reports_invalid_not_a_refusal(tmp_path):
     E = _t10_build(tmp_path)
-    E.paths.manifest_file.write_bytes(E.paths.manifest_file.read_bytes() + b" ")
+    sealed_store.manifest(E.paths).write_bytes(sealed_store.manifest(E.paths).read_bytes() + b" ")
     doc = _t10_call(E, ["status"])[2]
     assert doc["configured"] is True and doc["manifest_valid"] is False and doc["budget_remaining"] == 0
 
@@ -1307,7 +1310,7 @@ def test_t10_seal_check_flags_each_file_level_violation(tmp_path, which):
         elif which == "ledger_valid":
             (P.runs_dir / "ledger.jsonl").write_text("garbage\n")
         elif which == "manifest_valid":
-            P.manifest_file.write_bytes(P.manifest_file.read_bytes() + b" ")
+            sealed_store.manifest(P).write_bytes(sealed_store.manifest(P).read_bytes() + b" ")
         rc, _t, doc = _t10_call(E, ["seal-check"])
         check_id = "interpreter_root_owned" if which == "interpreter_dir_writable" else which
         assert rc == 2 and doc["ok"] is False and doc["checks"][check_id] is False
