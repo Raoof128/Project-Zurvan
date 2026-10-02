@@ -167,14 +167,33 @@ def test_t9_decode_bad_max_results_argument(bad):
         protocol.decode_response(_t9_resp(1), 1, bad)
 
 
+def _t9_is_stdlib(module_name):
+    """True when `module_name` ships with the RUNNING interpreter's standard library (works on 3.9, which has no
+    sys.stdlib_module_names): built in, frozen, or located under sysconfig's stdlib dir and not in site-packages."""
+    import importlib.util
+    import os
+    import sys
+    import sysconfig
+    if module_name in sys.builtin_module_names:
+        return True
+    spec = importlib.util.find_spec(module_name)
+    if spec is None or spec.origin is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    origin = os.path.realpath(spec.origin)
+    stdlib = os.path.realpath(sysconfig.get_paths()["stdlib"])
+    return origin.startswith(stdlib + os.sep) and "site-packages" not in origin
+
+
 def test_t9_protocol_is_stdlib_only():
     import ast
     tree = ast.parse(Path(protocol.__file__).read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and not node.level:
-            assert (node.module or "").split(".")[0] in set(sys.stdlib_module_names)
+            assert _t9_is_stdlib((node.module or "").split(".")[0]), node.module
         if isinstance(node, ast.Import):
-            assert all(a.name.split(".")[0] in set(sys.stdlib_module_names) for a in node.names)
+            assert all(_t9_is_stdlib(a.name.split(".")[0]) for a in node.names)
 
 
 # ================================================================ sandbox profile (REAL sandbox-exec)

@@ -309,9 +309,27 @@ def test_t1_sudo_uid_nonexistent_uid_is_refused(monkeypatch):
     assert ei.value.code == "BAD_ARGS"
 
 
+def _t1_is_stdlib(module_name):
+    """True when `module_name` ships with the RUNNING interpreter's standard library (works on 3.9, which has no
+    sys.stdlib_module_names): built in, frozen, or located under sysconfig's stdlib dir and not in site-packages."""
+    import importlib.util
+    import os
+    import sys
+    import sysconfig
+    if module_name in sys.builtin_module_names:
+        return True
+    spec = importlib.util.find_spec(module_name)
+    if spec is None or spec.origin is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    origin = os.path.realpath(spec.origin)
+    stdlib = os.path.realpath(sysconfig.get_paths()["stdlib"])
+    return origin.startswith(stdlib + os.sep) and "site-packages" not in origin
+
+
 def test_t1_foundation_modules_are_stdlib_only():
     import ast
-    stdlib = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else None
     for mod in (codes, paths, sysenv):
         tree = ast.parse(Path(mod.__file__).read_text())
         for node in ast.walk(tree):
@@ -325,5 +343,4 @@ def test_t1_foundation_modules_are_stdlib_only():
                 continue
             for n in names:
                 assert n != "scripts", (mod.__name__, n)
-                if stdlib is not None:
-                    assert n in stdlib, (mod.__name__, n)
+                assert _t1_is_stdlib(n), (mod.__name__, n)  # never skipped: G19

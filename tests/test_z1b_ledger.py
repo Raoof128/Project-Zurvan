@@ -628,17 +628,35 @@ def test_t7_refused_append_writes_nothing_and_fsyncs_nothing(tmp_path, monkeypat
     assert calls == []
 
 
+def _t7_is_stdlib(module_name):
+    """True when `module_name` ships with the RUNNING interpreter's standard library (works on 3.9, which has no
+    sys.stdlib_module_names): built in, frozen, or located under sysconfig's stdlib dir and not in site-packages."""
+    import importlib.util
+    import os
+    import sys
+    import sysconfig
+    if module_name in sys.builtin_module_names:
+        return True
+    spec = importlib.util.find_spec(module_name)
+    if spec is None or spec.origin is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    origin = os.path.realpath(spec.origin)
+    stdlib = os.path.realpath(sysconfig.get_paths()["stdlib"])
+    return origin.startswith(stdlib + os.sep) and "site-packages" not in origin
+
+
 def test_t7_ledger_file_is_private_and_modules_are_stdlib_only(tmp_path):
     led = Ledger(tmp_path / "runs")
     led.reserve_run(_t7_key(1), SUITE, 8)
     mode = (tmp_path / "runs" / "ledger.jsonl").stat().st_mode & 0o777
     assert mode == 0o600
     import ast
-    stdlib = set(__import__("sys").stdlib_module_names)
     tree = ast.parse(Path(L.__file__).read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
-                assert a.name.split(".")[0] in stdlib
+                assert _t7_is_stdlib(a.name.split(".")[0]), a.name
         elif isinstance(node, ast.ImportFrom) and not node.level:
-            assert node.module.split(".")[0] in stdlib
+            assert _t7_is_stdlib(node.module.split(".")[0]), node.module
