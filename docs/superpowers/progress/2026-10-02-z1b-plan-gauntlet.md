@@ -1,69 +1,50 @@
-# Z1b plan + dry-run gauntlet — progress record (2026-10-02, in flight)
+# Z1b plan + dry-run gauntlet — progress record (2026-10-02)
 
-**Status:** the Z1b plan is being written and gauntleted. It is **not finished and not accepted**. No production Z1b code is on `main`. The dry-run code lives only on local throwaway branches (`z1b-gauntlet` and the per-writer `z1b-g-*` branches, under `.worktrees/`). None of it has been pushed.
+**Status:** the plan is **written and gauntleted, awaiting Raouf's acceptance**. It is at
+`docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`: 19 tasks and 23.8k lines.
+- No production Z1b code is on `main`.
+- The dry-run code lives only on local throwaway branches (`z1b-gauntlet`, `z1b-g-*`, under `.worktrees/`).
+- Nothing was pushed from those branches.
+- No `sudo`, no identity creation, no broker install, no DEV or sealed authoring, and no model spend.
 
-**Scope (Raouf, 2026-10-02):** plan and gauntlet only. Not done, and not to be done until the plan is accepted:
-- no `sudo`;
-- no identity creation;
-- no broker install;
-- no sealed or DEV authoring;
-- no model spend.
+## What the gauntlet established
 
-The Z1a leftovers (#8, #23a), Boundary literal narrowing, Boundary audit optimisation and the public mirror are out of scope.
+- **Writers:** seven Sonnet writers, each in its own worktree. Each wrote the real code test-first (red, then green), mutation-checked every security guard, checked Python 3.9 compatibility for the sealed package, and emitted task text byte-identical to the code it ran.
+- **Integration:** an inline pass (Task 18) fixed the cross-task defects. All 9 of its new guards are mutation-checked red; one of them survived at first and a test was added to kill it.
+- **Replay:** a mechanical replay applied every code block of the assembled plan, in task order, to a fresh worktree from `main`: 151 blocks by engine, 9 prose-anchored edits by hand.
+  - It gives 1671 passed and 1 skipped on the Z1b set. The skip is the live seal reporting NOT CONFIGURED.
+  - Its code is unit-for-unit identical to the gauntlet branch; only comments, blank lines and function order differ.
+- **Full suite**, replay tree vs a clean `main` worktree:
+  - The same 10 failures in both, all present on `main`.
+  - The same class of 6 teardown errors in both: the worktree live-store guard.
+  - The 3 tests that differed pass serially in both trees, so they are load flakes.
+  - The replay introduces no regression.
+- **Checks:** `tests/test_plan_integrity.py` passes on the plan, and the Boundary scan of the plan is clean.
 
-## Method
+## Found on `main` while doing this (not caused by Z1b, not fixed: out of scope)
 
-- Ground truth came from three read-only surveys: Z0 snapshot APIs plus the canonical spec; Z1a eval/CLI/guards; Boundary plus the platform.
-- An orchestrator-owned interface contract came next, followed by 7 writer agents (Sonnet), each in its own throwaway worktree. Each writer wrote the real code and tests red-then-green, ran mutation checks on its security guards, checked Python 3.9 compatibility for the sealed package, and emitted plan task text byte-identical to the code it ran.
-- Writer branches are merged into `z1b-gauntlet`.
+`tests/test_check_gate_index_rebuild.py` fails 7 of its 10 tests on the current `main` checkout, with
+`TypeError: _stub_gitignore.<locals>._run() got an unexpected keyword argument 'timeout'`.
 
-| Plan task | State |
-|---|---|
-| 1 foundation (codes, SealPaths, clean_env) | done, 100 tests |
-| 2 strata spec + coverage | done, 107 tests |
-| 3 closed serializer (+4,500-case fuzz, gate 2) | done, 195 tests |
-| 4 deterministic grader | done, 79 tests |
-| 5 corpus content digest + export | done, 24 tests |
-| 6 signed manifest (ssh-keygen -Y) | done, 50 tests |
-| 7 hash-chained ledger, budget, cache, incidents | done, 61 tests |
-| 8 bundle intake (O_NOFOLLOW, uid/nlink, unbundle+fsck) | done, 87 tests |
-| 9 candidate protocol, runner, real sandbox-exec, sweep | done, 156 tests |
-| 10 broker | **in progress** |
-| 11 leak scan, canaries, burn, reseal | **in progress** |
-| 12 operator scripts (render-only) | done, 130 tests |
-| 13 dev client + `zurvan eval z1b` CLI | done, 91 tests |
-| 14 DEV set tooling | done, 17 tests |
-| 15 sealed authoring (fake model runner) | done, 83 tests |
-| 16 promotion workflow (first production caller of `require_promotion_eligible`) | done, 99 tests |
-| 17 guards: repo-guard allowlist, deny rules, check.sh gate 24, live tests, closure matrix, py3.9 | done |
-| 18 red-team + docs | execution time only |
+Its test stub does not accept the `timeout` argument that `scripts/rebuild_index.py` now passes to
+`subprocess.run` (last touched by `fe4fd1e`).
 
-Merged gauntlet branch: **1396 passed, 1 skipped**. The skip is the live-seal module, which reports `Z1b: NOT CONFIGURED`. Tasks 10 and 11 are not yet merged.
+## Decisions waiting for Raouf
 
-## Spec ↔ implementation discrepancies found (recorded, not bridged silently)
+These are listed in the plan's "Decisions for Raouf" section; the plan takes the fail-closed default for each:
+1. the added refusal codes;
+2. untrusted git pack parsing as `zurvaneval` (recommended: move it to `zurvancandidate`);
+3. the candidate runtime base;
+4. the explicit baseline run;
+5. `page|section` locators;
+6. per-category reject counts;
+7. incident acknowledgement by incident id.
 
-- **D1.** No content-based corpus digest exists. `manifest_digest`/`corpus_manifest_sha` hash mtime and inode. Z1b defines `corpus_sha256` over relpath and file content.
-- **D2.** The index has no line numbers; chunks carry only `source_path` + `heading`. Locator kinds are therefore `page|section`, and `line_range` is refused.
-- **D3.** `eval_search.evaluate` has no Recall@10, no per-stratum metrics and no bootstrap. Z1b has its own grader.
-- **D4.** `capture_coherent` returns `BuildSnapshot`, and the snapshot's `search.sqlite` is a hardlink of the live inode. The sealed corpus must be a real copy.
-- **D5.** The retriever needs the MiniLM model from the dev user's HF cache, which the candidate identity cannot read. A runtime copy works offline under the sandbox (measured: 14.9 s cold, of which 13.5 s is the torch import).
-- **D6.** macOS sudo keeps `HOME`, so a sealed-side `git` would read the dev user's `~/.gitconfig` (`core.fsmonitor` gives code execution). The sealed side never reads `$HOME`, and every subprocess gets a clean environment.
-- **D7.** `protected_eval_context()` is a ContextVar and does not cross processes. The candidate adapter sets it itself.
-- **D8.** No Claude Code deny rules existed for sealed paths.
-- **D9.** `public_repo_guard.py` had no allowlist mechanism.
-- **D10.** `age` and `claude` live in dev-writable locations. The sealed side would execute them as `zurvaneval`, which is a T2-class breach. `install.sh` copies pinned, root-owned binaries.
-- **D11.** Canonical §9.3 names 16 strata in prose with no ids. Z1b defines the ids.
-- **D12.** A predeclaration cannot name the commit that contains it. The binding is the commit itself (spec §5.4, "committed at `<sha>`").
-- **D13.** `git bundle verify` passes a corrupted full-history bundle, and a bundle can list the frozen commit on a side ref while running another HEAD. Intake unbundles with fsck and requires HEAD == commit.
-- **D14.** For queries in flight, the candidate's confidentiality does rest on the sandbox, because the candidate reads the queries. That is contrary to spec §2 T3's wording. A per-user pf block, cron/at deny, and a post-run sweep for candidate-owned files and processes (sweep → burn) are added.
-- **D15.** Authoring audit files and `claude` session state hold plaintext items. They move to a Time Machine-excluded `private/` dir (T7).
-- **D16.** The scheduled leak scan reads `~/Desktop` (TCC-protected) as another user. Unverified without the identity; an unreadable target refuses the run (`SCAN_INCOMPLETE`).
+## Discrepancies and rulings
 
-## Fail-closed refusal codes added beyond spec §8 (need Raouf's ack)
+The plan's Gauntlet section lists defects G1–G18 with severity and fix.
 
-`BAD_ARGS`, `BUNDLE_INVALID`, `LEDGER_INVALID`, `RESERVE_NOT_ELIGIBLE`, `DECLARATION_INVALID`, `SCAN_INCOMPLETE`, `CANDIDATE_FAILED`, `SANDBOX_VIOLATION`, `SEAL_COMPROMISED`, `INTERNAL`. A `RUN_IN_FLIGHT` code is proposed.
-
-## Orchestrator rulings so far
+Discrepancies D1–D16 are in this file's history (commit `fcd81d6`). The orchestrator rulings, in full:
 
 - R1 (T1): accept clean_env extra add-only + reserved prefixes; sudo_uid canonical decimal, uid 0 refused.
 - R2 (T7): same-key in-flight -> LEDGER_INVALID accepted for now; propose RUN_IN_FLIGHT code for Raouf ack. Broker MUST fail_run(INTERNAL) every unresolved_runs() id at startup under lock (charges budget; fail closed).
@@ -88,22 +69,7 @@ Merged gauntlet branch: **1396 passed, 1 skipped**. The skip is the live-seal mo
 - R21 (T3 MED): fix output.validate_broker_json at source: refusal = document with a `code` key; a seal-check document with ok:false is a valid seal-check, not a refusal. Remove client _client_validate workaround in integration.
 - R22 (T16 MED): promotions.jsonl is informational, NOT the trust anchor. The sealed ledger (completed holdout run with verdict PASS) is authoritative; broker step 9 consults only the ledger. Documented; no signing added.
 - R23: CLAUDE.md/AGENTS.md "24 gates" -> 25 updated in Task 18 docs.
-
-## Remaining before the plan can be accepted
-
-1. Tasks 10 and 11 finish and merge.
-2. Integration pass: R6, R7, R13–R15, R17, R18, R20, R21.
-3. Assemble the single plan file, with matrices (requirement → task, §9 gate → test).
-4. Run `tests/test_plan_integrity.py`.
-5. Fresh-worktree replay of the assembled plan, task by task.
-6. Full suite.
-7. Adversarial review (fail-open, TOCTOU, privilege confusion, leaks, scope).
-8. Revise until no unresolved blocker remains.
-
-Premises a worktree cannot show without root are listed in the plan and verified by the operator steps:
-- identity creation;
-- the `tmutil` exclusion;
-- pf user-rule effectiveness;
-- TCC/ACL traversal;
-- sudo digest refusal;
-- `claude` login as the eval identity.
+- R24 (T10 vs T16): R20 wins over writer E's parent-commit reading (spec-literal, simpler): the declaration is read from <commit> itself, has no candidate_commit field; broker step 8 and Task 16 align on R20. Each declaration filename unique per run is NOT required (a new commit is).
+- R25 (T10 MED, decision for Raouf): no all-zero baseline. The first promotion needs an explicit baseline: a completed HOLDOUT run of the currently active commit, declared with `"role": "baseline"` (charged 1 budget). Until one exists, declared candidate runs report verdict FAIL with rule non_inferiority_* false. Alternative offered to Raouf: allow a one-time bootstrap promotion.
+- R26 (T10 HIGH): render.EXPORT_PATHS exports eval/z1b/spec.json; installed broker loads spec from broker_lib/eval/z1b/spec.json; Task 12 fixtures gain the file. Task 15 seal_suite must emit canaries.age in the format scan.py reads. refresh_acl.sh added to Task 12 (render-tested).
+- R27 (T10): accept scan_run(paths, ctx, ledger); reserve budget 1 per commit; ack-incident requires a tty; result ci = candidate mean CI (schema has no signed difference); verdict rules = paired-bootstrap lower-bound tests vs baseline.

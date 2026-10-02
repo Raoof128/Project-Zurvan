@@ -88,6 +88,38 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-10-02 (Australia/Sydney) — Z1b plan written and gauntleted (awaiting acceptance; no production code)
+**Raouf:**
+- **Scope:**
+  - The plan is at `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`: 19 tasks, 23.8k lines.
+  - Its "Gauntlet" section holds the replay evidence. It also has a requirement → task matrix, a §9 gate → test/oracle matrix, the "Decisions for Raouf" section, and the exact operator commands (not run).
+  - The progress record `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md` is updated.
+  - Not done: `sudo`, identity creation, broker install, authoring, model spend, push.
+- **Summary:**
+  - Tasks 1–17 were dry-run by seven Sonnet writers in throwaway worktrees. Task 18 (integration fixes) and the assembly, replay and review were done inline.
+  - 18 gauntlet defects (G1–G18) were fixed in the plan, nine of them HIGH:
+    - G1: sudo keeps `HOME`, so the dev user's git config would run.
+    - G2: the sealed side would execute dev-writable `age`/`claude` binaries.
+    - G3/G4: `git bundle verify` passes corrupted packs, and a bundle could run another HEAD.
+    - G5: a predeclaration cannot name its own commit.
+    - G6: the installed wrappers imported the wrong entry, so the seal would not start.
+    - G7: plaintext authoring state sat in a path Time Machine backs up.
+    - G8: the installed broker had no spec.
+    - G9: no candidate runtime existed.
+  - Every §9 gate maps to an existing test; `tests/test_z1b_closure.py` enforces it. Gates 1, 1b, 4, 5, 8 and 9 additionally need the live oracles in Task 19, which run only after the operator steps.
+- **Files:** `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md` (new), `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
+- **Verification:**
+  - A mechanical replay of the plan into a fresh worktree from `main` gives **1671 passed, 1 skipped** on the Z1b set. The skip is the live seal reporting NOT CONFIGURED.
+  - Its code is unit-for-unit identical to the gauntlet branch.
+  - Full suite, replay vs clean `main` worktree: the same 10 failures and the same 6 live-store-guard teardown errors in both. The 3 tests that differed pass serially in both trees.
+  - `test_plan_integrity` passed, the Boundary scan of the plan is clean, `public_repo_guard` passed, and `git diff --check` is clean.
+- **Found on `main` (not fixed, out of scope):** `tests/test_check_gate_index_rebuild.py` fails 7 of 10 tests on the current checkout. Its `_stub_gitignore` stub rejects the `timeout=` keyword that `rebuild_index.py` passes.
+- **Follow-ups:**
+  1. Raouf accepts or revises the plan and answers its 7 decisions (recommended: move untrusted git pack parsing to `zurvancandidate`).
+  2. Execute Tasks 1–19 Step 3 on a branch.
+  3. Raouf runs the operator steps.
+  4. Run Task 19 Steps 4–7 to close Z1b, or report which gate failed.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b plan + dry-run gauntlet started (in flight, not accepted)
 **Raouf:**
 - **Scope:** plan and gauntlet only. There is no production Z1b code on `main`. Not done:
@@ -120,37 +152,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
   6. Run the full suite.
   7. Adversarial review.
   8. Raouf accepts or revises the plan, then runs the operator steps.
-
-### 2026-10-01 (Australia/Sydney) — waiting items: the 07:34 drift explained, barrier bypasses closed, gauntlet isolated, Boundary rebuilt
-**Raouf:**
-- **Scope:** `scripts/memory.py`, `cli.py`, `session.py`, `rebuild_index.py`, `run_reliability_gauntlet.py`, `eval_search.py`. New tests: `test_decision_set_project.py`, `test_session_index_barrier.py`, `test_gauntlet_isolation.py`. Adapted: `test_session.py`, `test_check_gate_index_rebuild.py`. Docs: the mirror plan (name) and the Z1a execution record (#19). Done inline, test first.
-- **The 07:34 drift (rev 301/302), root cause found.** Acme session `ed112e1a` met `project: "unknown"` on decisions it had just added. It had run `decision add` from `Job_Projects/Acme`, which isn't registered, so resolution failed closed, as designed. It then fixed the pages with `sed -i` in `wiki/decisions`, outside the ledger. In the same run it changed every `"acme"` to `"Acme"`, which isn't a valid slug. `sed -i` rewrote all 77 `acme-*` pages, 52 of them byte-identical, so they all share one mtime.
-  - The gap was that Zurvan had no managed way to correct a subject.
-  - **Now:** `zurvan decision set-project PAGE... --project <slug>` validates the slug the same way `decision add` does. It rewrites only the frontmatter line, checks every page before writing any, and declares the subject to the ledger: one revision, MANAGED.
-  - `decision add` now prints a warning naming that command whenever it stamps `unknown`.
-  - The 77 pages were relabelled to `acme` (Raouf's choice) through the new command.
-- **Barrier bypasses (filed 2026-09-28), closed:**
-  - `session start|close` and `index rebuild` now write through `safe_write`. `index rebuild` runs in-process inside the CLI operation and targets the store, not the cwd.
-  - The reliability gauntlet (check.sh gate 3) copies its `raw/` sources into a throwaway store and runs ingest, extract and audit there. It used to ingest 5 sources into the live corpus on every gate.
-- **Z1a #19:** keyword-mode eval rows are store-relative, so the result digest is the same from any checkout. Before/after on the live wiki: top-10 lists for all 50 items byte-identical (`ee674618aef5`), metrics identical (top-1 0.0, top-3 0.0, MRR 0.0022, 50 failures), so ranking is unchanged.
-- **Boundary configured (Raouf's choice of protected set, revised once):**
-  - **First build (wrong), now removed:** every gitignored `wiki/sources` page plus `sources/` (10,585 files, 225 MB; 12,676,118 fingerprints; red-team 27/27). The batch audit blocked 67 of 453 tracked files, including LICENSE and README. `wiki/sources` holds ingested public papers and Zurvan's own docs, so their text matched the repo: the same ingestion round-trip AGENTS.md records for the invalid 11/200 measurement. My protected-set estimate (11 MB) came from the spec's 2026-09-15 sample and was wrong.
-  - **Current store:** INSTRUMENT is the 50-item gold set. PRIVATE is the repo's `sources/`. That gives 2 origins, 782 fingerprints, 100 literals, health `healthy`. Red-team 27/27. `boundary_guard` (check.sh gate 0) is clean.
-  - **Audit: 22 of 453 tracked files blocked, all D2 INSTRUMENT literals.**
-    - Gold item 0's query, in 5 files: the frozen eval and trace artifacts the mirror plan already allows for.
-    - The `notes` annotation field of items 7, 20, 29, 37, 39 and 46, in 17 files. These notes are 10-30 characters of generic phrasing, so registering them as literals is too broad (`_instrument_literals` registers every string field of at least 8 characters).
-    - Filed, not changed: limiting the registration to `query` changes what Boundary protects and needs a Boundary re-measurement. Until then, a manual `boundary scan-diff` that stages one of those files will block.
-  - **`boundary audit` is unusably slow at scale:** it calls `scan_blob` per file, and each call re-reads the protected state. It ran more than 1h30 against the large store before I stopped it. `batch_scan` (one frozen view) did the same 453 files in 2 minutes.
-- **Public mirror:** named `Raoof128/zurvan`. Not built or published. Plan Tasks 1-3 remain, and Task 4 needs an explicit yes.
-- **MCP:** `zurvan_decision_add` gained `project=`. Its result names the stamped project and, for `unknown`, the managed fix. The new tool `zurvan_decision_set_project` does that fix (the e2e smoke now requires it). The same Acme session sed-edited a decision again at 14:14 (rev 317) because the MCP tool could not name a subject. An MCP server started earlier must be restarted to get the parameter.
-- **Suite regressions found and fixed:**
-  - `test_shelled_commands_stay_silent_on_success` mocked `subprocess` and ran `index rebuild`, which is now in-process. It regenerated the LIVE `wiki/index.md` once (rev 312, managed, no drift, identical to `zurvan index rebuild`). It now uses `audit`.
-  - The gauntlet skips missing sources.
-  - `agent prime` caps each recent-activity line at 200 chars (it reached 5,558 chars against a 4,000 budget).
-- **Acme pages:** the 77 `acme-*` decisions were relabelled `"Acme"` -> `"acme"` with `decision set-project` (rev 311, MANAGED, no drift).
-- **Verification:**
-  - Full suite on `main` (`1cc9d5f`): **1460 passed, 4 skipped, 0 failed, 0 errors** (27m28s).
-  - An earlier run (1456 passed, 1 error) tripped the live-index guard. Acme session `2d85a7de` ran `zurvan index search && graph rebuild` mid-suite. That was a concurrent writer, not a test, and that run is not counted.
-  - Two tests take 21 of the 27 minutes: a full live 50-query eval (997 s) and a live-index instrument scan (262 s). At 08:44 the whole suite took 9 minutes on the same index, so the slowdown is probably a cold disk cache, not code.
-  - public_repo_guard passed. `git diff --check` is clean.
-- **Pushed** at Raouf's explicit request (`ZURVAN_ALLOW_PUSH=1`, this push only): `e778e29..464891a`, 9 commits, fast-forward, `public_repo_guard` passed first. Earlier the same day: `5983d5f..bb8d890` (Z1a, 23 commits) and `bb8d890..e778e29` (Z1a hardening, 4 commits).
