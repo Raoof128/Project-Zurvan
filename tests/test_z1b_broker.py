@@ -896,6 +896,7 @@ def _t10_decl_body(E, *, margins=None, budgets=None, **over):
         "non_inferiority_margins": margins or {"critical": 0.05, "overall": 0.02},
         "improvement_target": {"metric": "mrr", "min_delta": 0.01},
         "resource_budgets": budgets or {"latency_p95_ms": 100000, "peak_rss_mb": 4096},
+        "resource_improvement": None,
     }
     body.update(over)
     return body
@@ -914,6 +915,7 @@ def _t10_declared(E, *, parent=None, decl=None, extra_files=None, margins=None, 
         "non_inferiority_margins": margins or {"critical": 0.05, "overall": 0.02},
         "improvement_target": {"metric": "mrr", "min_delta": 0.01},
         "resource_budgets": budgets or {"latency_p95_ms": 100000, "peak_rss_mb": 4096},
+        "resource_improvement": None,
     }
     if decl:
         body.update(decl)
@@ -946,7 +948,7 @@ def test_t10_a_declared_run_returns_per_stratum_and_a_promotion_verdict(tmp_path
     assert sealed["per_stratum"]["path"]["n"] == 2 and sealed["per_stratum"]["path"]["mrr"] == 1.0
     assert doc["promotion"] == {"declared": True, "verdict": "PASS", "rules": {
         "non_inferiority_critical": True, "non_inferiority_overall": True, "improvement": True,
-        "resource_budget": True}}
+        "resource_budget": True, "resource_improved": False}}
 
 def test_t10_a_blown_resource_budget_fails_the_declared_run(tmp_path):
     E = _t10_build(tmp_path)
@@ -1438,7 +1440,7 @@ def test_t10_a_declared_candidate_with_no_baseline_fails_and_is_never_compared_t
     doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]
     assert doc["promotion"]["verdict"] == "FAIL"
     assert doc["promotion"]["rules"] == {"non_inferiority_critical": False, "non_inferiority_overall": False,
-                                         "improvement": False, "resource_budget": True}
+                                         "improvement": False, "resource_budget": True, "resource_improved": False}
 
 
 def test_t10_a_baseline_run_is_measured_but_never_judged_and_cannot_unlock_reserve(tmp_path):

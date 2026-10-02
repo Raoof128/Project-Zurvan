@@ -97,7 +97,7 @@ def test_t3_schema_constants_are_closed_dicts():
 def test_t3_per_stratum_and_abstain_and_promotion_shapes_accepted():
     ps = {s: _t3_metric_block(n=10) for s in STRATA if s != "not_found"}
     promo = {"declared": True, "rules": {"non_inferiority_critical": True, "non_inferiority_overall": True,
-                                          "improvement": True, "resource_budget": True}, "verdict": "PASS"}
+                                          "improvement": True, "resource_budget": True, "resource_improved": False}, "verdict": "PASS"}
     res = _t3_result(per_stratum=ps, abstain={"passed": 7, "n": 10}, promotion=promo, cached=True,
                      suite="reserve", target_missing=2)
     parsed = out.validate_result_json(out.serialize_result(res))
@@ -108,7 +108,7 @@ def test_t3_per_stratum_and_abstain_and_promotion_shapes_accepted():
 
 def test_t3_failed_promotion_with_one_false_rule_is_a_fail():
     rules = {"non_inferiority_critical": True, "non_inferiority_overall": True,
-             "improvement": False, "resource_budget": True}
+             "improvement": False, "resource_budget": True, "resource_improved": False}
     promo = {"declared": True, "rules": rules, "verdict": "FAIL"}
     out.serialize_result(_t3_result(promotion=promo))
     _t3_refused(out.serialize_result, _t3_result(promotion=dict(promo, verdict="PASS")))
@@ -269,7 +269,7 @@ def test_t3_abstain_must_be_ordered_ints():
 
 def test_t3_promotion_must_be_declared_closed_and_coherent():
     rules = {"non_inferiority_critical": True, "non_inferiority_overall": True,
-             "improvement": True, "resource_budget": True}
+             "improvement": True, "resource_budget": True, "resource_improved": False}
     good = {"declared": True, "rules": rules, "verdict": "PASS"}
     out.serialize_result(_t3_result(promotion=good))
     for bad in (dict(good, declared=False), dict(good, declared=1), dict(good, verdict="pass"),
@@ -619,14 +619,14 @@ def _t3_attacks():
     def promotion_verdict(rng, s):
         res = _t3_result()
         rules = {"non_inferiority_critical": True, "non_inferiority_overall": True,
-                 "improvement": True, "resource_budget": True}
+                 "improvement": True, "resource_budget": True, "resource_improved": False}
         res["promotion"] = {"declared": True, "rules": rules, "verdict": s}
         return res
 
     def promotion_rule_key(rng, s):
         res = _t3_result()
         rules = {"non_inferiority_critical": True, "non_inferiority_overall": True,
-                 "improvement": True, "resource_budget": True, s: True}
+                 "improvement": True, "resource_budget": True, "resource_improved": False, s: True}
         res["promotion"] = {"declared": True, "rules": rules, "verdict": "PASS"}
         return res
 
@@ -829,7 +829,7 @@ def test_t3_fuzz_accepted_documents_contain_only_schema_vocabulary():
     # key, an enum member, or matches a hex/semver pattern. Query text has no way in.
     rng = random.Random(_T3_SEED + 2)
     vocab = set(out.RESULT_SCHEMA) | set(_T3_METRICS) | {"ci", "n", "p50", "p95", "passed", "declared", "rules",
-        "verdict", "non_inferiority_critical", "non_inferiority_overall", "improvement", "resource_budget",
+        "verdict", "non_inferiority_critical", "non_inferiority_overall", "improvement", "resource_budget", "resource_improved",
         "PASS", "FAIL", "holdout", "reserve", "zurvan.z1b.result.v1"} | set(STRATA)
     import re
     hexish = re.compile(r"^(?:[0-9a-f]{16}|[0-9a-f]{40}|[0-9a-f]{64}|[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4})$")

@@ -43,6 +43,7 @@ def _t18_decl(**over):
         "non_inferiority_margins": {"critical": 0.02, "overall": 0.01},
         "improvement_target": {"metric": "mrr", "min_delta": 0.02},
         "resource_budgets": {"latency_p95_ms": 500, "peak_rss_mb": 4000},
+        "resource_improvement": None,
     }
     decl.update(over)
     return decl

@@ -519,6 +519,15 @@ def broker_check_declaration(decl, spec, *, suite_id: str) -> None:
     for key, floor in (("latency_p95_ms", 10), ("peak_rss_mb", 1)):
         if type(budgets[key]) is not int or budgets[key] < floor:
             raise bad
+    # #12 (canonical s9.5): the resource-only promotion route. null disables it (quality-improvement route
+    # only); otherwise a predeclared resource metric must improve by at least `min_delta` (a fraction of the
+    # baseline) while quality stays non-inferior.
+    ri = decl["resource_improvement"]
+    if ri is not None:
+        if (type(ri) is not dict or set(ri) != {"metric", "min_delta"}
+                or ri["metric"] not in ("latency_p95_ms", "peak_rss_mb") or type(ri["metric"]) is not str
+                or not (_broker_number(ri["min_delta"], 0, 1) and ri["min_delta"] > 0)):
+            raise bad
 
 
 def _broker_git(args, env, git_dir):
@@ -761,18 +770,35 @@ def broker_baseline(ledger: Ledger, paths: SealPaths, suite_id: str):
     return last["result"], rows
 
 
-def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: int) -> dict:
+def _broker_resource_value(res: dict, metric: str):
+    return res["latency_ms"]["p95"] if metric == "latency_p95_ms" else res["peak_rss_mb"]
+
+
+def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: int, *, base_result=None) -> dict:
     """Spec s9.5 evaluated from the predeclaration. Every interval is a paired bootstrap over the items
     both runs scored (a lower bound, not a point estimate: small strata report uncertainty honestly).
     With no baseline (R25) nothing can be shown non-inferior or improved: both quality rules are False and
     the verdict is FAIL. There is no all-zero baseline.
+
+    PASS needs the critical + overall non-inferiority rules AND the resource budget AND at least one
+    promotion route (s9.5 rule 3): the QUALITY route (a predeclared target metric improves beyond noise)
+    OR, when `resource_improvement` was predeclared, the RESOURCE route (quality stays non-inferior and the
+    named resource metric improves by at least the declared fraction of the baseline). `resource_improved`
+    is reported for transparency; it only grants PASS through the resource route.
     """
     budgets = decl["resource_budgets"]
     resource_ok = (result["latency_ms"]["p95"] <= budgets["latency_p95_ms"]
                    and result["peak_rss_mb"] <= budgets["peak_rss_mb"])
+    ri = decl["resource_improvement"]
+    resource_improved = False
+    if ri is not None and base_result is not None:
+        base_v = _broker_resource_value(base_result, ri["metric"])
+        cand_v = _broker_resource_value(result, ri["metric"])
+        # a material DECREASE: the candidate uses at most (1 - min_delta) of the baseline's resource
+        resource_improved = base_v > 0 and cand_v <= base_v * (1.0 - ri["min_delta"])
     if base_rows is None:
         rules = {"non_inferiority_critical": False, "non_inferiority_overall": False, "improvement": False,
-                 "resource_budget": resource_ok}
+                 "resource_budget": resource_ok, "resource_improved": resource_improved}
         return {"declared": True, "rules": rules, "verdict": "FAIL"}
     resamples = spec["run_policy"]["bootstrap_resamples"]
     cand_vals = broker_row_values(rows, spec)
@@ -800,8 +826,12 @@ def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: 
         "non_inferiority_overall": diff_lo(primary) >= -margins["overall"],
         "improvement": (lambda lo: lo > 0 and lo >= target["min_delta"])(diff_lo(target["metric"])),
         "resource_budget": resource_ok,
+        "resource_improved": resource_improved,
     }
-    return {"declared": True, "rules": rules, "verdict": "PASS" if all(rules.values()) else "FAIL"}
+    quality_non_inferior = rules["non_inferiority_critical"] and rules["non_inferiority_overall"]
+    route = rules["improvement"] or rules["resource_improved"]   # s9.5 rule 3: quality OR resource route
+    verdict = "PASS" if (quality_non_inferior and rules["resource_budget"] and route) else "FAIL"
+    return {"declared": True, "rules": rules, "verdict": verdict}
 
 
 def broker_holdout_passed(ledger: Ledger, commit: str, suite_id: str) -> bool:
@@ -941,7 +971,8 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
             os.rename(str(staged), str(final_stage))
             staged = final_stage
             return _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, corpus_sha,
-                                       sha, key, run_id, budget_id, budget_n, decl, baseline_rows)
+                                       sha, key, run_id, budget_id, budget_n, decl, baseline_rows,
+                                       baseline_result)
     finally:
         if staged is not None:
             try:
@@ -951,7 +982,7 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
 
 
 def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, corpus_sha, sha, key, run_id,
-                        budget_id, budget_n, decl, baseline_rows) -> dict:
+                        budget_id, budget_n, decl, baseline_rows, baseline_result) -> dict:
     """Everything after the budget is charged. The run ends completed or failed, never unresolved."""
     policy = spec["run_policy"]
     declared = decl is not None
@@ -1001,7 +1032,8 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
             "promotion": None,
         }
         if declared and decl["role"] == "candidate":  # R25: a baseline run is measured, never judged
-            result["promotion"] = broker_verdict(decl, rows, baseline_rows, result, spec, seed)
+            result["promotion"] = broker_verdict(decl, rows, baseline_rows, result, spec, seed,
+                                                 base_result=baseline_result)
         serialize_result(result)  # validate BEFORE anything is committed to the ledger
         rows_path = broker_write_rows(paths, run_id, rows)
         led.complete_run(run_id, result, rows_path)

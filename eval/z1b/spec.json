@@ -217,7 +217,8 @@
       "critical_strata",
       "non_inferiority_margins",
       "improvement_target",
-      "resource_budgets"
+      "resource_budgets",
+      "resource_improvement"
     ],
     "properties": {
       "role": {
@@ -323,6 +324,31 @@
             "minimum": 1
           }
         }
+      },
+      "resource_improvement": {
+        "type": [
+          "null",
+          "object"
+        ],
+        "description": "null disables the resource-only promotion route (#12); otherwise {metric, min_delta}",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "latency_p95_ms",
+              "peak_rss_mb"
+            ]
+          },
+          "min_delta": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "metric",
+          "min_delta"
+        ]
       }
     }
   },

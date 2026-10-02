@@ -24,7 +24,8 @@ SEALCHECK_SCHEMA_ID = "zurvan.z1b.sealcheck.v1"
 METRICS = ("recall_at_1", "recall_at_3", "recall_at_10", "mrr")
 SUITES = ("holdout", "reserve")
 VERDICTS = ("PASS", "FAIL")
-PROMOTION_RULES = ("non_inferiority_critical", "non_inferiority_overall", "improvement", "resource_budget")
+PROMOTION_RULES = ("non_inferiority_critical", "non_inferiority_overall", "improvement", "resource_budget",
+                   "resource_improved")
 
 # Every check id the seal-check may report. A check outside this list cannot be printed.
 # (Ruling R7: the sets and runs hold ciphertext / opaque rows, so only keys/ needs a Time Machine
@@ -201,8 +202,14 @@ def _post_result(doc):
     if doc["abstain"] is not None and doc["abstain"]["passed"] > doc["abstain"]["n"]:
         raise _Bad()
     promo = doc["promotion"]
-    if promo is not None and (promo["verdict"] == "PASS") != all(promo["rules"].values()):
-        raise _Bad()
+    if promo is not None:
+        r = promo["rules"]
+        # s9.5 (#12): PASS iff non-inferior (critical+overall) AND within resource budget AND a route holds
+        # (quality improvement OR a material resource improvement). It is no longer "all rules true".
+        expect = (r["non_inferiority_critical"] and r["non_inferiority_overall"] and r["resource_budget"]
+                  and (r["improvement"] or r["resource_improved"]))
+        if (promo["verdict"] == "PASS") != expect:
+            raise _Bad()
 
 
 def _post_status(doc):

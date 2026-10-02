@@ -77,6 +77,16 @@ def _promotion_check(value, schema, depth: int = 0) -> None:
     if depth > 6 or type(schema) is not dict:
         raise _promotion_refuse()
     kind = schema.get("type")
+    if isinstance(kind, list):      # a nullable node, e.g. resource_improvement: null OR an object (#12)
+        if value is None:
+            if "null" in kind:
+                return
+            raise _promotion_refuse()
+        others = [k for k in kind if k != "null"]
+        if len(others) != 1:
+            raise _promotion_refuse()
+        _promotion_check(value, dict(schema, type=others[0]), depth)
+        return
     if kind == "string":
         if type(value) is not str:
             raise _promotion_refuse()
@@ -89,6 +99,8 @@ def _promotion_check(value, schema, depth: int = 0) -> None:
         if not ok or isinstance(value, bool):
             raise _promotion_refuse()
         if "minimum" in schema and value < schema["minimum"]:
+            raise _promotion_refuse()
+        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
             raise _promotion_refuse()
         if "maximum" in schema and value > schema["maximum"]:
             raise _promotion_refuse()
