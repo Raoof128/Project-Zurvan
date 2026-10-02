@@ -895,12 +895,12 @@ def test_t9_candidate_processes_no_match_is_zero_and_garbage_fails_closed():
     for rc, out in ((0, "abc\n"), (0, "12 34\n"), (2, ""), (1, "101\n"), (127, ""), (0, "-5\n"), (0, "1e3\n")):
         with pytest.raises(SealRefusal) as ei:
             sweep.candidate_processes(501, runner=lambda c, rc=rc, out=out: (rc, out))
-        assert ei.value.code == "INTERNAL"
+        assert ei.value.code == "SANDBOX_VIOLATION"  # ruling R13: assume the worst, never INTERNAL
     def boom(cmd):
         raise OSError("no ps")
     with pytest.raises(SealRefusal) as ei:
         sweep.candidate_processes(501, runner=boom)
-    assert ei.value.code == "INTERNAL"
+    assert ei.value.code == "SANDBOX_VIOLATION"
 
 
 @pytest.mark.parametrize("bad", [True, -1, 0, "501", None, 1.0])
@@ -930,7 +930,7 @@ def _t9_chunk(path="wiki/decisions/a.md", heading="Why", score=0.5):
 def _t9_serve(requests, search_fn, limit=10):
     stdin = io.BytesIO(b"".join(requests))
     stdout = io.BytesIO()
-    rc = z1b_candidate.serve(stdin, stdout, search_fn, wiki_root="wiki", limit=limit)
+    rc = z1b_candidate.serve(stdin, stdout, search_fn, limit=limit)  # default wiki_root: ruling R6
     return rc, stdout.getvalue()
 
 
@@ -948,8 +948,8 @@ def test_t9_adapter_maps_chunks_to_relative_pages_and_roundtrips_the_protocol():
     assert len(lines) == 2
     first = protocol.decode_response(lines[0], 1, 10)
     assert first["results"] == [
-        {"page": "decisions/a.md", "heading": "H1", "score": 0.9},
-        {"page": "x.md", "heading": None, "score": 1.0},
+        {"page": "wiki/decisions/a.md", "heading": "H1", "score": 0.9},
+        {"page": "wiki/x.md", "heading": None, "score": 1.0},
         {"page": "docs/readme.md", "heading": "D", "score": 0.1},
     ]
     assert isinstance(first["results"][1]["score"], float)
@@ -971,7 +971,7 @@ def test_t9_adapter_drops_chunks_whose_path_could_escape():
         _t9_chunk("../../etc/passwd"), _t9_chunk("/etc/passwd"), _t9_chunk("wiki/../../x.md"),
         _t9_chunk("wiki/ok.md"), _t9_chunk("a\x00b.md"), _t9_chunk(None), _t9_chunk("")])
     assert rc == 0
-    assert [r["page"] for r in protocol.decode_response(out, 1, 10)["results"]] == ["ok.md"]
+    assert [r["page"] for r in protocol.decode_response(out, 1, 10)["results"]] == ["wiki/ok.md"]
 
 
 def test_t9_adapter_strips_absolute_corpus_prefix():

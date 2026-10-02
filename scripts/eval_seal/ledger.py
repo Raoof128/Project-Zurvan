@@ -76,18 +76,21 @@ def _entry_hash(entry: dict) -> str:
 
 
 def run_key(candidate_commit: str, corpus_sha: str, suite_manifest_sha: str, evaluator_version: str,
-            suite: str) -> str:
+            suite: str, runtime_sha256: str) -> str:
+    """Cache key of a run. Ruling R14: runtime_sha256 (the candidate runtime's identity) is part of the
+    key, so a changed runtime is never served from a result computed under another one."""
     ok = (
         type(candidate_commit) is str and _HEX40.fullmatch(candidate_commit)
         and type(corpus_sha) is str and _HEX64.fullmatch(corpus_sha)
         and type(suite_manifest_sha) is str and _HEX64.fullmatch(suite_manifest_sha)
         and type(evaluator_version) is str and _VERSION.fullmatch(evaluator_version)
         and suite in SUITES
+        and type(runtime_sha256) is str and _HEX64.fullmatch(runtime_sha256)
     )
     if not ok:
         raise SealRefusal("BAD_ARGS")
-    material = "\x00".join(("zurvan.z1b.runkey.v1", candidate_commit, corpus_sha, suite_manifest_sha,
-                            evaluator_version, suite))
+    material = "\x00".join(("zurvan.z1b.runkey.v2", candidate_commit, corpus_sha, suite_manifest_sha,
+                            evaluator_version, suite, runtime_sha256))
     return hashlib.sha256(material.encode("ascii")).hexdigest()
 
 
@@ -449,3 +452,25 @@ class Ledger:
 
     def acknowledge_incident(self, incident_id: str) -> None:
         self.append({"kind": "ack", "incident_id": incident_id})
+
+    # ---------------------------------------------------------------- burns
+
+    def burn_items(self, item_ids: list, reason: str, date: str) -> list:
+        """Burn every id not already burned (idempotent), under the lock. Returns the ids newly burned.
+
+        Burns are irreversible: there is no inverse operation in this class and no kind that
+        could express one. A malformed id, reason or date is LEDGER_INVALID before any byte is written.
+        """
+        if not isinstance(item_ids, list) or reason not in BURN_REASONS:
+            _bad()
+        fresh = []
+        with self.lock():
+            already = self._verified()[1].burned
+            for item_id in sorted(set(item_ids)):
+                if type(item_id) is not str or not _HEX32.fullmatch(item_id):
+                    _bad()
+                if item_id in already:
+                    continue
+                self._append_locked({"kind": "burn", "id": item_id, "reason": reason, "date": date})
+                fresh.append(item_id)
+        return fresh

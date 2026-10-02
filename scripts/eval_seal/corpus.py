@@ -95,11 +95,16 @@ def corpus_sha256(corpus_dir: Path) -> str:
 
 
 def corpus_pages(corpus_dir: Path) -> set:
-    """Store-relative wiki page paths: every *.md under <corpus_dir>/wiki, relative to wiki/."""
+    """Store-relative page paths: every *.md under the corpus, relative to the corpus root.
+
+    Ruling R6: the path space is EXACTLY chunks.source_path as the index stores it ("wiki/x.md",
+    and also "docs/..." for the indexed roots outside wiki/), so the grader compares literally.
+    An export without wiki/ is not a corpus. Symlinks and special files anywhere are refused.
+    """
     root = _check_root(corpus_dir)
-    wiki = _check_root(root / "wiki")
+    _check_root(root / "wiki")
     pages = set()
-    for rel, _abs in _walk(wiki):
+    for rel, _abs in _walk(root):
         if rel.endswith(".md"):
             pages.add(rel)
     return pages

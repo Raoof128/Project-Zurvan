@@ -50,6 +50,22 @@ class SealPaths:
         return self.broker_dir / "INSTALLED_SHA"
 
     @property
+    def installed_tree_file(self) -> Path:  # git tree id of scripts/eval_seal at install time
+        return self.broker_dir / "INSTALLED_TREE"
+
+    @property
+    def scan_targets_file(self) -> Path:  # {"dev_home", "repo"}, written by install.sh
+        return self.broker_dir / "SCAN_TARGETS.json"
+
+    @property
+    def pinned_file(self) -> Path:  # "<sha256>  <path>" per pinned binary
+        return self.broker_dir / "PINNED.sha256"
+
+    @property
+    def empty_mcp_file(self) -> Path:  # the empty MCP config the authoring runner passes to claude
+        return self.broker_dir / "empty-mcp.json"
+
+    @property
     def runtime_dir(self) -> Path:  # root-owned candidate runtime (hf models)
         return self._r("Library", "ZurvanEval", "runtime")
 
