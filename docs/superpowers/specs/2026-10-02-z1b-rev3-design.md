@@ -260,6 +260,8 @@ digest + the corpus-disk digest are recorded in the run identity (the image dige
 the closure gate must prove: the candidate can READ the corpus, the candidate CANNOT write the corpus (the
 mount is read-only), and a second run starts from a clean guest (fresh instance; no state carries over).
 
+**(a.1) BASE-IMAGE FINDING (2026-10-03).** The guest pinned for the isolation proof is Alpine aarch64 (musl); it only needed `sh`. The retrieval runtime (torch + sentence-transformers + sqlite-vec + MiniLM) has NO musl wheels, so the golden image CANNOT be built on the Alpine base. The golden image must use a glibc aarch64 base (Debian/Ubuntu cloud image): re-pin `vm_runner.GUEST_IMAGE_URL/DIGEST`, re-run the VM-ISO isolation gate against the new base, then provision the runtime under `/opt/z1b/runtime` + the candidate entry at `/opt/z1b/candidate/z1b_candidate.py`, freeze and digest-pin the image, and wire `install.sh` to place it at `broker_dir/images/guest.qcow2` (0444) with a digest check. This is the remaining operator-install BUILD; it is the gate on `#1 CLOSED`.
+
 **(b) Full #1 closure gate, through the installed broker (`tests/test_z1b_seal_live.py`, operator step).**
 Not a direct vm_runner call: `zurvan eval z1b run --commit <sha> --suite holdout --declare ...` driving the
 INSTALLED broker, pinned Lima asset tree, golden image, real corpus provisioning. Assert success, failure,
