@@ -16,6 +16,15 @@ Order from here:
 2. Execute Tasks 1–18 inline on a branch, then merge locally.
 3. Run the operator steps from the repo root at the reviewed SHA.
 
+## Round 2 — findings fixed (18:35)
+
+All gauntlet findings are now fixed in the dry-run code, test-first with mutation checks; the full z1b suite is **1692 passed, 1 skipped** (up from 1671, +21 tests). On the gauntlet branch: `7e12761` (G19), `6eca255` (G20), `765150b` (suite).
+
+- **G19 FIXED (LOW):** three stdlib-only tests used a 3.10 API, so they skipped on the 3.9 interpreter they guard. They now resolve each module against the running interpreter's `sysconfig` stdlib dir. Green under the real CLT 3.9 (venv + pytest); a planted `import yaml` goes red on both 3.9 and 3.12.
+- **G20 FIXED (HIGH):** only a public projection of a run result leaves the seal — no per-stratum block, no bootstrap intervals, latency/RSS snapped up a coarse ladder. The full result stays in the sealed ledger; the client refuses anything that is not a projection. The covert-channel residual drops from ~376 to <= ~56 bits per run (measured). 4 guards mutation-checked.
+- **main-branch bug FIXED (not Z1b):** `tests/test_check_gate_index_rebuild.py` was 3/10 on `main` because its `git check-ignore` stub rejected the `timeout=` other callers pass; the stub now forwards everything except `git check-ignore`. 10/10.
+- **Decision #2 RESOLVED (built in execution):** untrusted git pack-decode moves from `zurvaneval` to a sandboxed `candidate_run.py prepare` subcommand; the broker parses only the bundle header. The integrity residual is benign in §2's threat model. See plan Decision 2.
+
 ## Simurgh gauntlet, inline (18:15)
 
 - **Sealed side under the real interpreter:** 1037 passed and 2 failed under the CLT Python 3.9 (venv plus pytest). Both failures are test-side: G19, and one adapter test that imports dev-side 3.12 code by design.

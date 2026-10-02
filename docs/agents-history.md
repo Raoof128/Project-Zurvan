@@ -1115,3 +1115,36 @@ constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
   - Two tests take 21 of the 27 minutes: a full live 50-query eval (997 s) and a live-index instrument scan (262 s). At 08:44 the whole suite took 9 minutes on the same index, so the slowdown is probably a cold disk cache, not code.
   - public_repo_guard passed. `git diff --check` is clean.
 - **Pushed** at Raouf's explicit request (`ZURVAN_ALLOW_PUSH=1`, this push only): `e778e29..464891a`, 9 commits, fast-forward, `public_repo_guard` passed first. Earlier the same day: `5983d5f..bb8d890` (Z1a, 23 commits) and `bb8d890..e778e29` (Z1a hardening, 4 commits).
+
+### 2026-10-02 (Australia/Sydney) — Z1b plan + dry-run gauntlet started (in flight, not accepted)
+**Raouf:**
+- **Scope:** plan and gauntlet only. There is no production Z1b code on `main`. Not done:
+  - `sudo`
+  - identity creation
+  - broker install
+  - sealed or DEV authoring
+  - model spend
+
+  The Z1a leftovers (#8, #23a), Boundary narrowing and audit optimisation, and the public mirror are out of scope.
+- **Summary:**
+  - Seven Sonnet writers, each in its own throwaway worktree, wrote real code and tests red-then-green, ran mutation checks and checked Python 3.9 compatibility. Each emitted plan task text byte-identical to what it ran, coded to an orchestrator-owned interface contract.
+  - Tasks 1-9 and 12-17 are dry-run and merged on the local branch `z1b-gauntlet`: 1396 passed, 1 skipped (the live-seal module reporting `Z1b: NOT CONFIGURED`).
+  - Tasks 10 and 11 (broker; leak scan and burn) are still being written.
+  - 16 spec/implementation discrepancies are recorded, not bridged silently. The highest are:
+    - macOS sudo keeps `HOME`, so sealed-side git would run the dev user's git config.
+    - `age` and `claude` are dev-writable binaries the sealed side would execute.
+    - `git bundle verify` passes a corrupted bundle, and a bundle can run a HEAD other than the frozen commit.
+    - A predeclaration cannot name its own commit.
+    - Authoring writes plaintext items to a path that Time Machine backs up.
+  - 23 orchestrator rulings so far.
+- **Files:** `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md` (progress record: method, task states, discrepancies D1-D16, added refusal codes, rulings R1-R23, remaining steps), `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
+- **Verification:** the merged gauntlet branch passes the Z1b test files (1396 passed, 1 skipped, 83.7 s). public_repo_guard passed and `git diff --check` is clean on this commit. The full suite was not run, because this commit changes docs only.
+- **Follow-ups:**
+  1. Finish Tasks 10 and 11.
+  2. Integration pass (R6, R7, R13-R15, R17, R18, R20, R21).
+  3. Assemble one plan file with requirement and gate matrices.
+  4. Run `test_plan_integrity`.
+  5. Replay the plan in a fresh worktree.
+  6. Run the full suite.
+  7. Adversarial review.
+  8. Raouf accepts or revises the plan, then runs the operator steps.

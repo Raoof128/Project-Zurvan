@@ -41,10 +41,15 @@ def _stub_gitignore(monkeypatch, ignored_suffixes):
     spelling it was given, so the stub matches on suffix and returns the input
     line verbatim rather than a relative path of its own.
     """
-    def _run(cmd, input, capture_output, text, cwd):
-        assert cmd[:2] == ["git", "check-ignore"]
+    real_run = subprocess.run
+
+    def _run(cmd, *args, **kwargs):
+        # Only `git check-ignore` is stubbed. `rebuild_index_mod.subprocess` IS the global module, and since
+        # the rebuild writes through the barrier other callers (with their own timeout=) run during the test.
+        if list(cmd[:2]) != ["git", "check-ignore"]:
+            return real_run(cmd, *args, **kwargs)
         hits = [
-            line for line in input.splitlines()
+            line for line in kwargs["input"].splitlines()
             if any(line.endswith(suffix) for suffix in ignored_suffixes)
         ]
         return subprocess.CompletedProcess(cmd, 0, stdout="\n".join(hits), stderr="")
