@@ -192,7 +192,7 @@ Executed inline, test-first, each commit mutation-checked. Full z1b suite on the
 | #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
 | #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
 | #14 | atomic sealed generations | NOT STARTED |
-| #7 | `allowed_signers` created deterministically at install | NOT STARTED |
+| #7 | `allowed_signers` created deterministically at install | DONE `f4d2005`. render.py derives `keys/allowed_signers` from the generated `signing_ed25519.pub` on every install (idempotent, self-healing, atomic), principal+namespace imported from manifest.py; signer==verifier (eval). Tested end-to-end (real ssh-keygen -Y accept/reject) + mutation-checked. |
 | #16 | broker-signed promotion attestation | NOT STARTED |
 
 The three done tasks are the ones that were pure-logic and self-contained. The two P0s and the four
