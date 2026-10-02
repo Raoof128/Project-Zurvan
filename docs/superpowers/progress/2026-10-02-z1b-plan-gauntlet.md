@@ -16,6 +16,12 @@ Order from here:
 2. Execute Tasks 1–18 inline on a branch, then merge locally.
 3. Run the operator steps from the repo root at the reviewed SHA.
 
+## Simurgh gauntlet, inline (18:15)
+
+- **Sealed side under the real interpreter:** 1037 passed and 2 failed under the CLT Python 3.9 (venv plus pytest). Both failures are test-side: G19, and one adapter test that imports dev-side 3.12 code by design.
+- **Fail-closed CLI:** on this machine `eval z1b status`, `seal-check` and `run` all refuse with `SEAL_NOT_CONFIGURED` (exit 2), and check.sh gate 24 prints NOT CONFIGURED, never a pass.
+- **New HIGH, G20:** the aggregate-result covert channel can carry about 223 bits per declared run (exhaustive count: 15,881 per-stratum outputs), about 223 bytes over the budget. That needs a spec decision; see plan Decision 8 (recommended: per-stratum output = the §9.5 rule booleans only).
+
 ## What the gauntlet established
 
 - **Writers:** seven Sonnet writers, each in its own worktree. Each wrote the real code test-first (red, then green), mutation-checked every security guard, checked Python 3.9 compatibility for the sealed package, and emitted task text byte-identical to the code it ran.

@@ -100,6 +100,8 @@ These are the five failure modes most likely to bite, each pinned by a named tes
 | G16 | MED | sandbox profile hard-coded the dev username | dev home only via `-D DEVHOME` (Task 18) |
 | G17 | MED | four cross-task signature drifts (`_walk`, `_is_int`, `run_key`, `wrapper_text`) | renamed at origin or superseded by a new name (Tasks 5, 6, 7, 18) |
 | G18 | LOW | first draft of a refresh-ACL test passed vacuously when the script was absent | asserts the refusal message (Task 18) |
+| G19 | LOW | `test_t7_ledger_file_is_private_and_modules_are_stdlib_only` uses `sys.stdlib_module_names` (3.10+), so it cannot run on the sealed interpreter (3.9) it protects | OPEN: replace with an explicit stdlib allowlist. Measured: under the real CLT 3.9 in a venv with pytest, the sealed-side suites give 1037 passed and 2 failed (this test, plus one adapter test that imports dev-side 3.12 code by design) |
+| G20 | HIGH | the spec §2 T11 bound is loose. A declared run's per-stratum block (R@1, R@3, R@10, MRR at 0.001 over 10 items) takes 15,881 distinct values, 14.0 bits per stratum, so about 223 bits per declared run and about 1,786 bits (223 bytes) over the 8-run budget. A malicious candidate already sees the queries in flight and could carry about 3 holdout queries out through the metrics alone. Undeclared runs carry at most about 32 bits each | OPEN: needs a spec decision (Decision 8). Measured by exhaustive enumeration |
 
 **A worktree cannot show** (each is verified by the operator steps and Task 19):
 - identity creation and hiding;
@@ -120,6 +122,13 @@ These are the five failure modes most likely to bite, each pinned by a named tes
 5. **Line locators.** `line_range` is refused (the index has no line numbers), so locators are `page|section`.
 6. **Per-category reject counts in the public manifest.** They are counts only, never reasons per item. They can be collapsed to stage totals if you want fewer bits out.
 7. **Incident acknowledgement.** It is authorised by possession of the incident id (64 random bits, readable only by `zurvaneval`/root). The tty check is not an operator identity check. The alternative is requiring root.
+
+8. **Covert-channel capacity of declared runs (G20, HIGH, spec change).** Spec §5.3 requires per-stratum metrics on declared runs, and the measured capacity is about 223 bits per run (about 223 bytes per suite lifetime). The options, in order of how much they shrink the channel:
+   - **(a)** per-stratum output = the four §9.5 rule booleans only, with intervals computed sealed-side: 4 bits per run, 32 bits per lifetime.
+   - **(b)** per-stratum Recall@10 hit count only: log2(11) × 16 ≈ 55 bits per run, about 443 bits per lifetime.
+   - **(c)** keep the spec as written and state the bound honestly in T11.
+
+   **Recommended: (a).** Promotion needs only the booleans, and canonical §9.5 already asks for uncertainty to be reported rather than laundered.
 
 ## Requirement → task matrix
 
