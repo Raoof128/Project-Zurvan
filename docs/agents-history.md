@@ -3,6 +3,18 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-02 (Australia/Sydney) — Z1b gauntlet round 2: all findings fixed; main index-rebuild test repaired
+**Raouf:**
+- **Scope:** fixed every finding the inline Simurgh gauntlet raised, test-first with mutation checks. Dry-run code on branch `z1b-gauntlet`; the plan on `main` records the fixes. No production Z1b on `main` still; no sudo, authoring or model spend.
+- **Fixed:**
+  - **G20 (HIGH):** only a public projection of a run result crosses the seal — no per-stratum block, no bootstrap intervals, latency/RSS snapped up a coarse ladder; the full result stays in the sealed ledger; the dev client refuses anything that is not a projection. Covert-channel residual drops from ~376 to <= ~56 bits per declared run (measured by exhaustive enumeration). `scripts/eval_seal/output.py`, `broker.py`, `scripts/z1b_client.py`; `tests/test_z1b_public_output.py` (21 tests, 4 guards mutation-checked).
+  - **G19 (LOW):** three stdlib-only tests used `sys.stdlib_module_names` (3.10+) and silently skipped on the 3.9 sealed interpreter; they now resolve against the running interpreter's `sysconfig` stdlib dir and run on 3.9.
+  - **Decision #2 RESOLVED:** untrusted git pack-decode moves from `zurvaneval` (key holder) to a sandboxed `candidate_run.py prepare` subcommand; the broker parses only the bundle header. Integrity residual benign in the §2 threat model. Built during execution.
+  - **main-branch bug (not Z1b):** `tests/test_check_gate_index_rebuild.py` was 3/10 because its `git check-ignore` stub rejected the `timeout=` keyword other callers pass through the barrier; the stub now forwards everything but `git check-ignore`. 10/10.
+- **Verification:** full z1b suite on the gauntlet branch **1692 passed, 1 skipped** (live seal NOT CONFIGURED), verified once under the real CLT Python 3.9 (1037 sealed-side passed). `test_plan_integrity`, `public_repo_guard`, `git diff --check` clean. The index-rebuild fix verified 10/10 on `main`.
+- **Files:** `tests/test_check_gate_index_rebuild.py`, `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
+- **Follow-ups:** Raouf answers the 8 plan decisions (#2 and #8 pre-resolved to the recommended options); then execute Tasks 1-19; then the operator steps.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b plan written and gauntleted (awaiting acceptance; no production code)
 **Raouf:**
 - **Scope:**

@@ -88,6 +88,16 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 P1 queue CLOSED (#7, #13, #16, #14, #12)
+**Raouf:**
+- **Scope:** the five remaining P1s, inline on branch `z1b-rev3`, test-first + mutation-checked; status on `main` (Rev 3 design §7b + CHANGELOG). No production code on `main`; no sudo/identity/authoring/model spend.
+- **#7 (`f4d2005`):** the manifest trust anchor `allowed_signers` is DERIVED from the generated signing key on every install (idempotent, atomic); principal+namespace from manifest.py.
+- **#13 (`59d79a6`):** the leak scanner now catches a leaked TARGET PAGE, but only an EXPLICIT answer-key association (Raouf's ruling) — CONFIRMED burns via a new `target_leak`; ambiguous co-occurrence is a non-blocking SUSPECT review note, never an auto-burn; bare path/id never burns (0/200-ceiling discipline).
+- **#16 (`932653b`):** a holdout PASS emits an EXPORTABLE broker-signed promotion attestation (`promotion.py`, distinct namespace `zurvan-z1b-promotion`, domain-separated from the manifest signature); the eval-owned ledger stays the authoritative anchor (R22).
+- **#14 (`081a9c2`+`e9fc7b1`):** the reseal is crash-ATOMIC — the four sealed files live in `generations/<seq>/` and one `active` symlink is promoted by a single os.replace (was 4 replaces → torn/wedged on crash). `sealed_store.py` is the sole path authority (grep-guarded). Fault-injection gate (os.fork at every durable boundary) proves only VALID gen N or N+1 is observable; gc keeps the live + previous healthy generation.
+- **#12 (`713cba9`):** the resource-only promotion route (canonical §9.5): equivalent quality + a materially-improved predeclared resource metric promotes. New `resource_improvement` predeclaration field; broker_verdict PASSes on non-inferiority + budget + (quality improvement OR resource improvement).
+- **Verification:** `-k z1b` **1631 passed / 2 skipped** on `z1b-rev3`; py3.9 parse clean; `public_repo_guard` + `boundary scan-diff` + `git diff --check` clean. **#1 remains Developer-closed only** — Operator closure (golden retrieval image + the installed-broker live gate, needs `sudo setup.sh`/`install.sh`) is Raouf-only and still pending. The branch is NOT merged to `main`.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b Rev 3 #1: read-only corpus provisioning PROVEN on real VZ (developer closure of #1 complete)
 **Raouf:**
 - **Scope:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` on branch `z1b-rev3` (`18612aa`). Status on `main`: Rev 3 design §7b/§7f/§7g + progress doc, this CHANGELOG. No production code on `main`; no sudo, identity creation, authoring or model spend.
@@ -98,15 +108,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
 - **Files:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` (branch `z1b-rev3`); `docs/superpowers/specs/2026-10-02-z1b-rev3-design.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/agents-history.md` (on `main`).
 - **Verification:** full live module **3 passed in 237 s** on a clean host; corpus gate + positive control **1 passed in 121 s**; 53 fake-runner unit + 5 broker-vm wiring tests; `-k z1b` **1593 passed / 2 skipped**; py3.9 parse clean; `public_repo_guard` + `boundary scan-diff` clean; `git diff --check` clean.
 - **#1 is NOT CLOSED.** Operator closure remains (§7f): golden retrieval image + the installed-broker closure gate (`tests/test_z1b_seal_live.py`, needs `sudo setup.sh`/`install.sh`, Raouf-only). Next: P1 queue #7 → #13 → #16 → #14 → #12.
-
-### 2026-10-02 (Australia/Sydney) — Z1b gauntlet round 2: all findings fixed; main index-rebuild test repaired
-**Raouf:**
-- **Scope:** fixed every finding the inline Simurgh gauntlet raised, test-first with mutation checks. Dry-run code on branch `z1b-gauntlet`; the plan on `main` records the fixes. No production Z1b on `main` still; no sudo, authoring or model spend.
-- **Fixed:**
-  - **G20 (HIGH):** only a public projection of a run result crosses the seal — no per-stratum block, no bootstrap intervals, latency/RSS snapped up a coarse ladder; the full result stays in the sealed ledger; the dev client refuses anything that is not a projection. Covert-channel residual drops from ~376 to <= ~56 bits per declared run (measured by exhaustive enumeration). `scripts/eval_seal/output.py`, `broker.py`, `scripts/z1b_client.py`; `tests/test_z1b_public_output.py` (21 tests, 4 guards mutation-checked).
-  - **G19 (LOW):** three stdlib-only tests used `sys.stdlib_module_names` (3.10+) and silently skipped on the 3.9 sealed interpreter; they now resolve against the running interpreter's `sysconfig` stdlib dir and run on 3.9.
-  - **Decision #2 RESOLVED:** untrusted git pack-decode moves from `zurvaneval` (key holder) to a sandboxed `candidate_run.py prepare` subcommand; the broker parses only the bundle header. Integrity residual benign in the §2 threat model. Built during execution.
-  - **main-branch bug (not Z1b):** `tests/test_check_gate_index_rebuild.py` was 3/10 because its `git check-ignore` stub rejected the `timeout=` keyword other callers pass through the barrier; the stub now forwards everything but `git check-ignore`. 10/10.
-- **Verification:** full z1b suite on the gauntlet branch **1692 passed, 1 skipped** (live seal NOT CONFIGURED), verified once under the real CLT Python 3.9 (1037 sealed-side passed). `test_plan_integrity`, `public_repo_guard`, `git diff --check` clean. The index-rebuild fix verified 10/10 on `main`.
-- **Files:** `tests/test_check_gate_index_rebuild.py`, `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
-- **Follow-ups:** Raouf answers the 8 plan decisions (#2 and #8 pre-resolved to the recommended options); then execute Tasks 1-19; then the operator steps.
