@@ -177,6 +177,29 @@ evidence-based.
 
 ---
 
+## 7b. Rev 3 execution status (branch `z1b-rev3`, 2026-10-02 20:00)
+
+Executed inline, test-first, each commit mutation-checked. Full z1b suite on the branch: **1701 passed,
+1 skipped** (was 1692 at the start of Rev 3). Branch is NOT merged to `main`.
+
+| # | Task | State | Commit |
+|---|---|---|---|
+| #8 | HOLDOUT requires a declaration (`DECLARATION_REQUIRED`); undeclared HOLDOUT abolished (canonical §9) | DONE | `0b84b43` |
+| #9 | `declaration_sha256` bound into the run key (v3) — two declarations in one commit never share a cached result | DONE | `0b84b43` |
+| #11 | corpus export carries every indexed root (docs/ + root .md), digest excludes volatile snapshot metadata | DONE | `b8b526f` |
+| #2 (P0) | `zurvanauthor` identity split | NOT STARTED — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
+| #1 (P0) | VM-per-run candidate isolation | NOT STARTED — needs `brew install lima` and must first falsify R3-D1 (entitlement vs pinned copy). Redesign of Task 9. |
+| #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
+| #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
+| #14 | atomic sealed generations | NOT STARTED |
+| #7 | `allowed_signers` created deterministically at install | NOT STARTED |
+| #16 | broker-signed promotion attestation | NOT STARTED |
+
+The three done tasks are the ones that were pure-logic and self-contained. The two P0s and the four
+remaining P1s are each a multi-file rework; they are the next focused passes, not one-turn patches. The
+plan's executable blocks and the content-addressed replay record are re-minted only after the branch work
+is complete (build-order step 7).
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
