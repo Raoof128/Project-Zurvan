@@ -440,15 +440,14 @@ def plan_setup(plan, dev_home, repo):
     plan.comment("setup: two non-admin identities, one shared corpus group, sealed directories, backup exclusion,")
     plan.comment("candidate network block, cron/at denial, read-only scan ACLs. Claude Code login is NOT done here (operator step).")
     plan.comment("Both identities get shell /usr/bin/false: sudo and launchd run commands directly, no login shell is ever needed.")
-    plan.comment("preflight: everything we are about to grant a read ACL on must already exist")
+    plan.comment("preflight: the ANCESTOR paths the eval identity must traverse have to exist. The read-ACL")
+    plan.comment("TARGETS themselves (logs, reports, the *Zurvan* transcript dirs) can legitimately be absent")
+    plan.comment("on a fresh machine -- they are granted below only if present (refresh_acl re-grants ones")
+    plan.comment("created later, and the scan fails closed if it ever cannot read a target), so requiring them")
+    plan.comment("here would abort the whole -euo pipefail install for a path that simply does not exist yet.")
     plan.cmd("/bin/test", "-d", "/Users/Shared")
     for p in search:
         plan.cmd("/bin/test", "-d", p)
-    for p in full:
-        if "*" in p:
-            plan.raw("/bin/ls -d %s >/dev/null" % _quote_target(p))
-        else:
-            plan.cmd("/bin/test", "-d", p)
     plan.comment("refuse to clobber existing identities")
     for kind, name in (("Users", EVAL_USER), ("Users", CANDIDATE_USER), ("Users", AUTHOR_USER),
                        ("Groups", EVAL_USER), ("Groups", CANDIDATE_USER), ("Groups", AUTHOR_USER),
