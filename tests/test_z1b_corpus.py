@@ -186,9 +186,15 @@ def test_t5_swap_between_listing_and_open_is_not_followed(tmp_path, monkeypatch)
     assert ei.value.code == "CORPUS_MISMATCH"
 
 
-def test_t5_corpus_pages_lists_markdown_under_wiki_only(tmp_path):
+def test_t5_corpus_pages_lists_store_relative_markdown_over_every_indexed_root(tmp_path):
+    # ruling R6: the path space is chunks.source_path as indexed ("wiki/x.md", "docs/y.md")
     root = _t5_tree(tmp_path / "c")
-    assert corpus_pages(root) == {"decisions/a.md", "notes/b.md", "notes/sub/c.md"}
+    assert corpus_pages(root) == {"wiki/decisions/a.md", "wiki/notes/b.md", "wiki/notes/sub/c.md"}
+    (root / "docs").mkdir()
+    (root / "docs" / "guide.md").write_text("guide\n")
+    (root / "docs" / "ignored.txt").write_text("not a page\n")
+    assert corpus_pages(root) == {"wiki/decisions/a.md", "wiki/notes/b.md", "wiki/notes/sub/c.md",
+                                  "docs/guide.md"}
 
 
 def test_t5_corpus_pages_refuses_symlink_and_missing_wiki(tmp_path):

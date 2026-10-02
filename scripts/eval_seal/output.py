@@ -27,11 +27,14 @@ VERDICTS = ("PASS", "FAIL")
 PROMOTION_RULES = ("non_inferiority_critical", "non_inferiority_overall", "improvement", "resource_budget")
 
 # Every check id the seal-check may report. A check outside this list cannot be printed.
+# (Ruling R7: the sets and runs hold ciphertext / opaque rows, so only keys/ needs a Time Machine
+# exclusion; dev_cannot_read_sealed is the CLIENT half and is merged in by the dev side.)
 CHECK_IDS = (
     "broker_root_owned", "broker_not_writable", "broker_sha_matches", "sudoers_valid", "pf_anchor_present",
     "keys_private", "sets_private", "runs_private", "corpus_read_only", "stage_private",
-    "candidate_cannot_read_sealed", "dev_cannot_read_sealed", "tm_excluded_keys", "tm_excluded_sets",
-    "tm_excluded_runs", "drop_dir_mode", "scan_agent_present",
+    "candidate_cannot_read_sealed", "dev_cannot_read_sealed", "tm_excluded_keys", "drop_dir_mode",
+    "scan_agent_present", "pinned_binaries_match", "interpreter_root_owned", "ledger_valid",
+    "manifest_valid",
 )
 
 _HEX16 = r"[0-9a-f]{16}"
@@ -289,7 +292,9 @@ def _check_parsed(parsed, schema, post):
 
 
 def _is_refusal(parsed) -> bool:
-    return type(parsed) is dict and parsed.get("ok") is False
+    # a FAILING seal-check is a legitimate document with ok=false; only a document carrying a refusal
+    # `code` (and no schema tag) is a refusal
+    return type(parsed) is dict and parsed.get("ok") is False and "code" in parsed and "schema" not in parsed
 
 
 def validate_result_json(text) -> dict:

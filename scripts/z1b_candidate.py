@@ -78,8 +78,11 @@ def _adapter_answer(qid, chunks, wiki_root, limit):
                        ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
 
 
-def serve(stdin, stdout, search_fn, wiki_root="wiki", limit=TOP_K):
-    """Protocol loop. Returns 0 on clean EOF, 2 on a malformed request (nothing is answered for it)."""
+def serve(stdin, stdout, search_fn, wiki_root="", limit=TOP_K):
+    """Protocol loop. Returns 0 on clean EOF, 2 on a malformed request (nothing is answered for it).
+
+    wiki_root defaults to "" (ruling R6): chunks.source_path is passed through UNCHANGED, because the
+    sealed grader's path space is the store-relative path exactly as the index stores it."""
     with protected_eval_context():
         while True:
             line = stdin.readline(MAX_LINE + 1)
