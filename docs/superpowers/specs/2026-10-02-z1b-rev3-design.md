@@ -187,8 +187,8 @@ Executed inline, test-first, each commit mutation-checked. Full z1b suite on the
 | #8 | HOLDOUT requires a declaration (`DECLARATION_REQUIRED`); undeclared HOLDOUT abolished (canonical §9) | DONE | `0b84b43` |
 | #9 | `declaration_sha256` bound into the run key (v3) — two declarations in one commit never share a cached result | DONE | `0b84b43` |
 | #11 | corpus export carries every indexed root (docs/ + root .md), digest excludes volatile snapshot metadata | DONE | `b8b526f` |
-| #2 (P0) | `zurvanauthor` identity split | NOT STARTED — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
-| #1 (P0) | VM-per-run candidate isolation | NOT STARTED — needs `brew install lima` and must first falsify R3-D1 (entitlement vs pinned copy). Redesign of Task 9. |
+| #2 (P0) | `zurvanauthor` identity split | DONE `c77504b` (draft/seal phase split) + `b41df1a` (OS identity, ACLs, read-denial live gate). WAS: — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
+| #1 (P0) | VM-per-run candidate isolation | IN PROGRESS — settling R3-D1 (entitlement vs pinned copy) empirically with a real Lima install first. Redesign of Task 9. |
 | #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
 | #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
 | #14 | atomic sealed generations | NOT STARTED |
