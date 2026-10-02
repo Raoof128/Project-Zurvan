@@ -188,7 +188,7 @@ Executed inline, test-first, each commit mutation-checked. Full z1b suite on the
 | #9 | `declaration_sha256` bound into the run key (v3) — two declarations in one commit never share a cached result | DONE | `0b84b43` |
 | #11 | corpus export carries every indexed root (docs/ + root .md), digest excludes volatile snapshot metadata | DONE | `b8b526f` |
 | #2 (P0) | `zurvanauthor` identity split | DONE `c77504b` (draft/seal phase split) + `b41df1a` (OS identity, ACLs, read-denial live gate). WAS: — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
-| #1 (P0) | VM-per-run candidate isolation | IN PROGRESS — settling R3-D1 (entitlement vs pinned copy) empirically with a real Lima install first. Redesign of Task 9. |
+| #1 (P0) | VM-per-run candidate isolation | BOUNDARY DONE: `vm_runner.py` (`15edd86`), VM-ISO live gate `c3ddb28` (2 passed, real VZ boots: in-guest candidate, no host crossover, teardown after success+kill), opt-in/serial `26f8cd1`. 12 unit tests + 2 live. REMAINING for full closure: wire the broker production launch to vm_launch, and golden-image + read-only corpus-disk provisioning in install (the workload, not the boundary). |
 | #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
 | #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
 | #14 | atomic sealed generations | NOT STARTED |
@@ -200,6 +200,48 @@ remaining P1s are each a multi-file rework; they are the next focused passes, no
 plan's executable blocks and the content-addressed replay record are re-minted only after the branch work
 is complete (build-order step 7).
 
+## 7c. VM boot experiment findings (2026-10-02, Lima 2.2.0 + lima-additional-guestagents)
+
+Running the real end-to-end boot (not another unit proof) surfaced build constraints the orchestration code must honour. Each is measured on this host (arm64, macOS 27.0.1):
+
+1. **`LIMA_HOME` path length.** The VZ `ssh.sock` path must be < 104 chars (`UNIX_PATH_MAX`). A deep scratch path overflows and `start` aborts. Production `LIMA_HOME` must be a SHORT path (e.g. `/Users/zurvancandidate/.lima`), asserted at install.
+2. **Guest agent is a separate package.** Lima 2.2 needs `lima-additional-guestagents` for the Linux aarch64 guest agent; without it `start` fails fast with `guest agent binary could not be found`. Install must pin these binaries too.
+3. **Pinning a bare `limactl` copy breaks asset discovery (refines R3-D1).** The entitlement and signature survive a copy, but lima resolves guest agents and templates RELATIVE TO THE BINARY (`../share/lima`). A lone copied `limactl` in an unrelated dir cannot find the guest agent. **Pinning must copy the whole lima asset tree** (`bin/limactl` + `share/lima/{templates,_images,guestagents}`) preserving lima's expected layout, or set `LIMA_HOME`/asset env explicitly — not just the one binary. This is the corrected form of the pinning invariant for the VM runner.
+4. **Default config mounts the host home.** `mounts: []` must be set explicitly (done in the experiment config); the guest must see no host filesystem.
+5. **Invalid-Linux-username warning is cosmetic.** Lima maps the host user (`dev`, and in production `zurvancandidate`) to the guest user `lima`; no action.
+
+These convert "the entitlement survives a copy" into the real constraint set for the VM runner's install and launch. The end-to-end boot + in-guest candidate + no-host-crossover + teardown is being verified next with the real asset tree.
+
+## 7d. VM boundary PROVEN end-to-end (2026-10-02 20:09)
+
+The real experiment (pinned-asset `limactl`, VZ, Alpine aarch64 guest) demonstrated the actual security boundary, not just a boot:
+
+- **Boot:** `ze Running vz aarch64`, guest `Linux lima-ze 6.18.22-0-virt aarch64`, ~98 s cold (image pull + boot).
+- **Candidate workload inside the guest, over the defined protocol:** `printf 'QUERY 1 hello-holdout' | limactl shell ze -- sh -c 'read ...; echo RESULT ...'` returned `RESULT 1 got:hello-holdout`. The host↔guest channel is `limactl shell` stdin/stdout.
+- **No host crossover:** inside the guest `ls /Users` -> "No such file or directory"; `cat <repo>/CLAUDE.md` -> "can't open". With `mounts: []` the guest sees no host filesystem, so host-side sealed secrets are unreachable.
+- **Teardown:** `limactl delete -f` removed the instance; `LIMA_HOME` left only `_config`.
+
+**Config the pinned launcher must use** (all measured-necessary): `mounts: []` (no host fs), `containerd: {system: false, user: false}` (Alpine has no systemd; without this lima marks the VM DEGRADED and `start` exits non-zero though the guest is usable), a SHORT `LIMA_HOME` (ssh.sock < 104 chars), and the pinned lima asset tree (`bin/limactl` + `share/lima/{templates,_images,guestagents}`) so guest-agent discovery works.
+
+This closes the architectural unknown. The orchestration code (`vm_runner.py`) is now built against a proven mechanism: create a per-run instance from the pinned config, stream QUERY/RESULT over `limactl shell`, tear down in a finally covering success/failure/timeout/kill, and the VM-ISO live gate replays this real sequence (skips NOT CONFIGURED without lima). The full torch/corpus candidate provisioning is a golden-image + read-only corpus-disk concern for the operator install, exercised by the live gate; the boundary itself is proven independent of the workload's size.
+
+## 7e. VM runner build findings (2026-10-02, measured)
+
+Building `vm_runner.py` against the proven mechanism surfaced two more measured constraints:
+
+1. **The socket path is longer than `ssh.sock`.** Lima's real control socket is
+   `<LIMA_HOME>/<name>/ssh.sock.<16 digits>`; the 16-digit suffix pushes a per-run `LIMA_HOME` nested under
+   `scratch/<run_id>` over the 104-char limit (measured 111). Fix: ONE short, persistent `LIMA_HOME` at
+   `candidate_home/lima` (which also caches the pinned image across runs), with a unique per-run instance
+   name (`z<run_id>`) and delete-after. Budget under `/Users/zurvancandidate/lima`: ~70 chars, well under 104.
+2. **Pinning really must copy the whole asset tree.** Confirmed by boot: a copy of `limactl` into
+   `broker/bin` PLUS `share/lima` copied to `broker/share/lima` boots cleanly ("Guest agent is running"),
+   because lima resolves guest agents at `<dir-of-limactl>/../share/lima`. The Linux-aarch64 guest agent is
+   a real 7.4 MB file in the Cellar `share/lima`; `lima-additional-guestagents` must be installed first.
+
+Per-run isolation is therefore the unique instance name + `limactl delete -f` after the run, not a
+per-run home; the image download is cached once in the shared home. `vm_leftover_instances` lists the
+shared home and reports any instance a teardown left behind (the sweep's VM arm, burns the run's items).
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
