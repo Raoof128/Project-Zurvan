@@ -392,6 +392,35 @@ image), stages the candidate commit's `scripts/` at `/opt/z1b/candidate` + a run
 place+verify `broker_dir/images/guest.qcow2`. Separately: the candidate needs `ZURVAN_SEARCH_DB` built
 from the read-only corpus (the broker's candidate-launch path must build/provide the index in-guest).
 
+## 7k. The REAL remaining critical path for #1 CLOSED: VM candidate-execution orchestration
+
+Found by inspecting the launch path (not just the status): `broker_vm_launch` boots the guest and
+returns a `limactl shell` Popen on `GUEST_CANDIDATE_CMD`, but it does NOT stage the corpus into the
+guest, mount it, build a search index, or pass the candidate env. The read-only corpus pieces
+(`vm_copy_into_guest`, `verify_corpus_image`, squashfs `-o ro`) exist and are PROVEN in the live gate,
+but are NOT wired into the broker launch path. And `z1b_candidate.py` hard-exits (`sys.exit(2)`) unless
+`ZURVAN_SEARCH_DB` already points at an index built over the corpus. The candidate env
+(`ZURVAN_SEARCH_DB`/`ZURVAN_CORPUS`) is currently set ONLY in the legacy host runner `candidate_run.py`,
+which #1 made unreachable. So a golden image alone cannot run a candidate end-to-end yet.
+
+**Ordered remaining build for a runnable candidate (each part TDD, no sudo except the final install):**
+1. **Orchestration in the broker launch path** (code): stage the corpus squashfs into the guest
+   (`vm_copy_into_guest` + `verify_corpus_image` against the run-identity digest), mount it read-only,
+   run the candidate commit's index build over the mounted corpus to produce `search.sqlite` in the
+   guest, and launch `z1b_candidate.py` with `ZURVAN_SEARCH_DB`/`ZURVAN_CORPUS`/`HF_HUB_OFFLINE=1`/
+   `HF_HOME` in the guest env (via `limactl shell --env` or a pinned in-guest wrapper). Unit-test with
+   the fake runner; keep the no-host-fallback invariant.
+2. **Golden image** (feasibility proven, §7j): bake Debian 12 aarch64 + runtime venv + candidate tree +
+   offline MiniLM cache, flatten to a self-contained `guest.qcow2`, digest-pin `GUEST_IMAGE_DIGEST`,
+   wire `install.sh` to place+verify `broker_dir/images/guest.qcow2`.
+3. **End-to-end live gate**: a real candidate run over a synthetic corpus returns graded rows through
+   the protocol; success/failure/timeout/kill/corpus-RO/clean-second-run/sweep all hold.
+4. **Installed-broker closure gate** via `zurvan eval z1b run` (the integration seam), then stamp
+   `#1 CLOSED -> Z1b CLOSED` and merge.
+
+Hardest unknowns are now retired: VM isolation (proven), read-only corpus (proven), runtime on glibc
+aarch64 (proven §7j). What remains is this orchestration wiring + the image bake + the live gates.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
