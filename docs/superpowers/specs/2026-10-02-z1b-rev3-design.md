@@ -308,6 +308,39 @@ fail-closed against this**: `vm_start` REFUSES a leftover instance in the stable
 poisoning it. Re-running the gate on a dev host requires reaping orphans first
 (`ps | grep ZurvanEval/broker/bin/limactl`); the install/operator runbook must note the same.
 
+## 7h. STATE at the end of Rev 3 implementation (2026-10-03) and the operator-closure plan
+
+**Record this state exactly — do not round the remaining operator proof up into a completed gate:**
+
+> **Z1b Rev 3 implementation complete. P1 queue closed. #1 developer closure complete. Operator
+> installation and installed-broker live closure remain. Branch intentionally unmerged.**
+
+SHAs at this point: `main` = `c86bada` (docs/status only), `z1b-rev3` = `713cba9` (all Rev 3 code). Both
+clean. The branch is **intentionally unmerged**: if the operator gate fails, the failure belongs to
+`z1b-rev3` and `main` stays the known-good control.
+
+**Developer-closed (proven on real VZ, branch `z1b-rev3`):** #1 VM isolation + broker-only execution +
+read-only corpus provisioning; P1 #7 #12 #13 #14 #16. **NOT yet claimable:** `#1 CLOSED`, `Z1b CLOSED`,
+and the merge — all require the installed environment.
+
+**Next session = operator closure only (narrow; Raouf runs the privileged steps):**
+1. Verify `main` and `z1b-rev3` are clean; record both SHAs.
+2. Review the exact `setup.sh` / `install.sh` commands from the accepted plan at the Rev 3 tip.
+3. Run the privileged setup/install from the **real repo**, never a gauntlet/worktree.
+4. Build/install the pinned golden retrieval image.
+5. Confirm the installed identities: Lima asset-tree identity, guest-image digest, generated signer /
+   `allowed_signers`, sealed-store **active generation**, broker installation identity.
+6. Run the full installed-broker live gate **through the public CLI surface** — `zurvan eval z1b run` and
+   the installed broker — **NOT direct Python internals**. This is the load-bearing acceptance condition:
+   entering through the internals could prove every component while leaving the INTEGRATION SEAM unproven.
+7. Exercise success, candidate failure, timeout, kill, corpus read-only, a clean second run, and the
+   post-run leftover sweep.
+8. Only if **every** operator oracle passes: stamp **#1 CLOSED → Z1b CLOSED** (spec status line + the
+   CLAUDE.md bullet, in a separate commit; never redefine a failed gate to get there).
+9. Then merge `z1b-rev3` into `main`.
+10. On the exact merged tree, re-run the full test suite, `public_repo_guard`, the Boundary gate, and
+    `git diff --check`. No remote push as part of closure unless Raouf explicitly asks for that push.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
