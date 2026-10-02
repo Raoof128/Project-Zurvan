@@ -97,3 +97,30 @@ Discrepancies D1–D16 are in this file's history (commit `fcd81d6`). The orches
 - R25 (T10 MED, decision for Raouf): no all-zero baseline. The first promotion needs an explicit baseline: a completed HOLDOUT run of the currently active commit, declared with `"role": "baseline"` (charged 1 budget). Until one exists, declared candidate runs report verdict FAIL with rule non_inferiority_* false. Alternative offered to Raouf: allow a one-time bootstrap promotion.
 - R26 (T10 HIGH): render.EXPORT_PATHS exports eval/z1b/spec.json; installed broker loads spec from broker_lib/eval/z1b/spec.json; Task 12 fixtures gain the file. Task 15 seal_suite must emit canaries.age in the format scan.py reads. refresh_acl.sh added to Task 12 (render-tested).
 - R27 (T10): accept scan_run(paths, ctx, ledger); reserve budget 1 per commit; ack-incident requires a tty; result ci = candidate mean CI (schema has no signed difference); verdict rules = paired-bootstrap lower-bound tests vs baseline.
+
+## External review — BLOCKED, Rev 3 required (19:30)
+
+An external reviewer read the full plan file and found it is **split-brain**: several rows claim "FIXED" / "RESOLVED" that the plan's own executable blocks do not contain. Verified against the files, the reviewer is right on the central charge. Adopt/reject with receipts:
+
+**CONFIRMED (adopted):**
+- **Split-brain / stale replay (their #3,#4,#5,#6,#18) — the cardinal sin.** G19 and G20 are real but live ONLY on branch `z1b-gauntlet` (commits `7e12761`, `6eca255`); the plan file still has 5 `stdlib_module_names` and no `public_projection`. Decision 2's `prepare` subcommand, the G9 candidate runtime (venv), and `allowed_signers` creation exist in NO code, plan or branch. The `1671 passed` replay predates all of it, so it is stale evidence for this file. The `1692` figure is the gauntlet BRANCH, not the plan. Rows now marked RETRACTED; a DO-NOT-EXECUTE banner is at the top of the plan.
+- **P0 #1 process-table exfiltration — NEW, never modelled.** The candidate necessarily receives each raw HOLDOUT query; the sandbox is `(allow default)` and does not deny process creation, so the candidate can exec a child whose argv carries the query, and the dev account reads it with `ps` before the sweep runs. Confirmed: `candidate.sb` has no `process-exec` deny. The post-run sweep cannot un-observe a secret. This defeats the confidentiality boundary on the same host.
+- **P0 #2 authoring identity inversion — NEW.** Task 15 runs `claude` as `zurvaneval`, which owns `keys/`, `sets/`, `runs/`. The corpus is untrusted (prompt-injection surface). Needs a separate `zurvanauthor` that reads corpus + public rubric only, with signing done afterwards by the broker.
+- **P1 #9 declaration not in the run key.** `run_key(commit, corpus, suite_manifest, evaluator, suite, runtime)` — confirmed, no declaration digest. Two declarations in one commit share a cache key.
+- **P1 #8 undeclared HOLDOUT.** Broker sets `declared = args["declare"] is not None` and runs HOLDOUT with overall metrics when None. Canonical §9 (line 773/786): holdout is "used only for declared promotion candidates." The Z1 design §5.4 deliberately allowed undeclared overall-only runs — a design-vs-canonical conflict that must be surfaced and decided, not silently kept. Task 19's "run twice undeclared to test caching" is a hill-climbing channel.
+- **P1 #11 corpus excludes non-`wiki/`.** `z1b_corpus.py` copies `wiki/` + the two stores only; R6 established 2,417 indexed chunks live outside `wiki/`. The frozen index can return a `docs/` page the corpus copy cannot resolve. A regression against my own R6 ruling.
+- **P1 #7 `allowed_signers` circular.** `render.py` never creates it (0 matches); Task 15 lists it as a precondition. Generate it deterministically at install from the signing pubkey; check it in seal-check.
+- **P1 #10 bootstrap baseline dev-selected**, #12 **no resource-only promotion route** (canonical §9.5 allows equivalent-quality + better-resource), #13 **scanner vs gate-9 target-only leak**, #14 **reseal not crash-atomic** (use immutable generations + atomic pointer swap), #16 **promotion record unsigned**: all confirmed.
+
+**Noted, lower:** #15 (`sandbox-exec` deprecated, pf is TCP/UDP only) — already documented P2; reinforced by #1.
+
+**The one correction to the reviewer:** G19/G20 are not vapourware — they are implemented and tested on `z1b-gauntlet` (1692 passed, incl. 21 `test_z1b_public_output` tests, verified once under real CLT 3.9). The reviewer's error is understandable: the PLAN FILE, which is what executes, was assembled before those commits and never re-synced. That is still my defect — the plan is the artifact of record, and it lied.
+
+## Rev 3 plan (no more prose patches above tasks)
+
+1. **Candidate isolation:** decide VM-per-run vs documented same-host residual. Same-userland leaves argv/ps, timing and IPC channels the current model ignores. (Decision for Raouf.)
+2. **Split authoring from seal ownership:** new `zurvanauthor` identity, corpus-read only.
+3. **Genuinely implement in the executable blocks:** G20 projection, G19 stdlib helper, Decision 2 `prepare`, the candidate runtime venv, `allowed_signers` creation.
+4. **Evaluation policy:** declaration mandatory for HOLDOUT; `declaration_sha256` in the run key, signed result and promotion record; operator-pinned initial baseline; resource-only promotion route.
+5. **Corpus completeness** (export the full indexed BUILD_INPUTS, not a `wiki/` subset) and **atomic sealed-generation publication**.
+6. **Re-run the gauntlet from a clean `main` worktree and mint a content-addressed replay record** (`plan_sha256`, baseline SHA, replay tree SHA, test output). One byte changes → replay STALE automatically. No hand-edited "FIXED" rows after the digest.
