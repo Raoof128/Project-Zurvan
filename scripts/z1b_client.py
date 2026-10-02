@@ -198,23 +198,6 @@ def broker_stale(installed_tree, repo: Path) -> bool:
 
 # ---------------------------------------------------------------------------- broker calls
 
-def _client_validate(text: str) -> dict:
-    """Strict validation by declared kind.
-
-    validate_broker_json treats ANY `ok: false` document as a refusal, so a seal-check that
-    honestly reports a failing check would be unreadable (and surface as INTERNAL). A document
-    that declares the seal-check schema is therefore validated as one; everything else goes through
-    the general dispatcher. Both validators are strict, so the pre-parse only chooses which.
-    """
-    try:
-        probe = json.loads(text)
-    except (ValueError, RecursionError):
-        raise ValueError("invalid broker output") from None
-    if type(probe) is dict and probe.get("schema") == _seal_output.SEALCHECK_SCHEMA_ID:
-        return _seal_output.validate_sealcheck_json(text)
-    return _seal_output.validate_broker_json(text)
-
-
 def call_broker(argv: list, *, runner=subprocess.run) -> dict:
     """Run the broker as zurvaneval and return its validated document.
 
@@ -232,7 +215,7 @@ def call_broker(argv: list, *, runner=subprocess.run) -> dict:
     if type(raw) is not bytes or not raw or len(raw) > _MAX_STDOUT:
         raise ClientRefusal("INTERNAL")
     try:
-        doc = _client_validate(raw.decode("utf-8"))
+        doc = _seal_output.validate_broker_json(raw.decode("utf-8"))  # R21: dispatches by document kind
     except (ValueError, UnicodeDecodeError):
         raise ClientRefusal("INTERNAL") from None
     if doc.get("ok") is False and "code" in doc:

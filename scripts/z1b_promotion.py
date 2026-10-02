@@ -110,7 +110,7 @@ def _promotion_check(value, schema, depth: int = 0) -> None:
 
 
 def validate_declaration(decl: dict, spec: dict) -> None:
-    """The five canonical s9.5 fields plus the commit and suite bindings, exactly and nothing else."""
+    """The five canonical s9.5 fields plus the suite binding and the role, exactly and nothing else (R20/R24)."""
     try:
         schema = spec["predeclaration_schema"]
     except (KeyError, TypeError):
@@ -261,8 +261,8 @@ def promote(commit: str, declaration: str, *, client=z1b_client, registry=None) 
         raise ClientRefusal(exc.code) from None
     decl = _promotion_read_declaration(commit, declaration)
     validate_declaration(decl, spec)
-    if decl["candidate_commit"] != commit or decl["suite_id"] != manifest["suite_id"]:
-        raise _promotion_refuse()
+    if decl["suite_id"] != manifest["suite_id"] or decl["role"] != "candidate":
+        raise _promotion_refuse()  # R20/R24: the commit binds the declaration; only a candidate is promoted
 
     result = client.run(commit, "holdout", declare=declaration)
 

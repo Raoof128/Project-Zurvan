@@ -75,7 +75,7 @@ def test_t2_predeclaration_schema_covers_the_five_canonical_fields_plus_bindings
     schema = sp.load_spec(_T2_SPEC_PATH)["predeclaration_schema"]
     assert set(schema["required"]) == {
         "primary_metric", "critical_strata", "non_inferiority_margins", "improvement_target",
-        "resource_budgets", "candidate_commit", "suite_id",
+        "resource_budgets", "role", "suite_id",
     }
     assert set(schema["properties"]) == set(schema["required"])
 

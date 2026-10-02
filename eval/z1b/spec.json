@@ -211,7 +211,7 @@
   },
   "predeclaration_schema": {
     "required": [
-      "candidate_commit",
+      "role",
       "suite_id",
       "primary_metric",
       "critical_strata",
@@ -220,9 +220,12 @@
       "resource_budgets"
     ],
     "properties": {
-      "candidate_commit": {
+      "role": {
         "type": "string",
-        "pattern": "^[0-9a-f]{40}$"
+        "enum": [
+          "baseline",
+          "candidate"
+        ]
       },
       "suite_id": {
         "type": "string",

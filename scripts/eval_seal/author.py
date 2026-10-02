@@ -33,6 +33,7 @@ from . import manifest as author_manifest
 from . import spec as author_spec
 from . import sysenv
 from .codes import SealRefusal
+from .corpus import corpus_pages as author_corpus_pages
 from .corpus import corpus_sha256 as author_corpus_sha256
 from .paths import SealPaths
 
@@ -101,7 +102,10 @@ def claude_runner(claude_bin, home, *, mcp_config=None, timeout_s: int = 900, ru
 
     def runner(role: str, model: str, prompt: str, *, cwd) -> str:
         argv = author_claude_argv(claude_bin, model, mcp)
-        env = sysenv.clean_env(home, AUTHOR_CLAUDE_ENV)
+        # R18: claude keeps session transcripts (plaintext prompts and items) under its config dir; that dir
+        # must be the Time Machine-excluded private/ dir of the eval home, never ~/.claude.
+        extra = dict(AUTHOR_CLAUDE_ENV, CLAUDE_CONFIG_DIR=str(home / "private" / "claude"))
+        env = sysenv.clean_env(home, extra)
         try:
             proc = runner_run(argv, input=prompt.encode("utf-8"), cwd=str(cwd), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s, check=False)
@@ -165,30 +169,6 @@ def author_jaccard_est(a, b) -> float:
 
 
 # ------------------------------------------------------------------------------------------------ pages
-
-def author_store_pages(corpus_dir) -> set:
-    """Store-relative path of every *.md under the corpus export, over every indexed root (R6)."""
-    root = Path(corpus_dir)
-    pages = set()
-    stack = [(root, "")]
-    while stack:
-        directory, prefix = stack.pop()
-        try:
-            entries = list(os.scandir(directory))
-        except OSError:
-            raise SealRefusal("CORPUS_MISMATCH") from None
-        for entry in entries:
-            try:
-                st = entry.stat(follow_symlinks=False)
-            except OSError:
-                raise SealRefusal("CORPUS_MISMATCH") from None
-            rel = prefix + entry.name
-            if stat.S_ISDIR(st.st_mode):
-                stack.append((Path(entry.path), rel + "/"))
-            elif stat.S_ISREG(st.st_mode) and entry.name.endswith(".md"):
-                pages.add(rel)
-    return pages
-
 
 def _author_read_page(corpus_dir, page) -> str:
     fd = os.open(str(Path(corpus_dir) / page), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -259,7 +239,7 @@ def author_filters(cands, dev_items, corpus_dir, spec, *, pages=None):
     """Deterministic filters, in order: schema, target exists (store-relative), answer leakage, DEV
     contamination, exact duplicate, normalised lexical overlap, MinHash near-duplicate. Candidates are
     judged in input order; the earlier of two near-identical candidates wins. Returns (kept, counts)."""
-    pages = author_store_pages(corpus_dir) if pages is None else pages
+    pages = author_corpus_pages(corpus_dir) if pages is None else pages
     counts = {r: 0 for r in AUTHOR_REJECT_REASONS}
 
     def profile(query):
@@ -541,7 +521,7 @@ def author_suite(spec, rubric, dev_items, corpus_dir, runner, models, *, seed, t
     models = _author_check_models(models)
     templates = _author_check_templates(templates)
     corpus_dir = Path(corpus_dir)
-    pages = author_store_pages(corpus_dir)
+    pages = author_corpus_pages(corpus_dir)
     audit = _Audit(audit_dir)
     counts = {r: 0 for r in AUTHOR_REJECT_REASONS}
 
@@ -601,6 +581,19 @@ def _author_utc_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def author_canary_records(tokens) -> bytes:
+    """canaries.age plaintext, in exactly the format scan.scan_load_canaries reads (R26): one JSON object
+    per line, {"token": str, "item_id": null}. A set-level canary names no item, so a hit burns every live
+    item. Refuses any token the reader would refuse, before anything is encrypted."""
+    lines = []
+    for token in tokens:
+        if (type(token) is not str or not 16 <= len(token) <= 80 or not token.isascii()
+                or not token.isprintable() or " " in token):
+            raise SealRefusal("BAD_ARGS")
+        lines.append(json.dumps({"token": token, "item_id": None}, sort_keys=True, separators=(",", ":")))
+    return ("\n".join(lines) + "\n").encode("ascii")
+
+
 def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1, now=None) -> dict:
     """Encrypt both pools and the canaries, write and sign the manifest, return the PUBLIC manifest.
     Refuses (BAD_ARGS) to overwrite any existing sealed file; validates everything before writing."""
@@ -622,7 +615,7 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
         digests = {}
         for name, data in (("holdout.age", _author_jsonl(bundle["holdout"])),
                            ("reserve.age", _author_jsonl(bundle["reserve"])),
-                           ("canaries.age", ("\n".join(canaries) + "\n").encode("utf-8"))):
+                           ("canaries.age", author_canary_records(canaries))):
             out = sets / name
             encrypt(data, out)
             if not out.is_file():
@@ -777,7 +770,7 @@ def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_
         if make_canaries is None:
             from . import scan as author_scan
             make_canaries = author_scan.make_canaries
-        audit = Path(paths.runs_dir) / "authoring" / secrets.token_hex(8)
+        audit = Path(paths.private_dir) / "authoring" / secrets.token_hex(8)  # R18: plaintext, never backed up
         bundle = author_suite(spec, rubric, dev_items, Path(paths.corpus_dir), runner, models, seed=seed,
                               templates=templates, dev_sha256=dev_sha, audit_dir=audit)
         public = seal_suite(bundle, paths, encrypt=encrypt, sign=sign, make_canaries=make_canaries,

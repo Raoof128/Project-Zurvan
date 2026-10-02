@@ -322,7 +322,6 @@ r = {}
 r["sealed_read"] = _t9_attempt(lambda: open(%r, "rb").read())
 r["sealed_list"] = _t9_attempt(lambda: os.listdir(%r))
 r["devhome_param_read"] = _t9_attempt(lambda: open(%r, "rb").read())
-r["real_devhome_list"] = _t9_attempt(lambda: os.listdir("/Users/dev"))
 r["real_sealed_list"] = _t9_attempt(lambda: os.listdir("/Users/zurvaneval"))
 r["control_usr"] = _t9_attempt(lambda: open("/usr/bin/true", "rb").read(4))
 r["control_stdlib"] = _t9_attempt(lambda: __import__("json").dumps({}))
@@ -334,8 +333,6 @@ print(json.dumps(r))
     assert out["sealed_read"] == "ERR%d" % errno.EPERM
     assert out["sealed_list"] == "ERR%d" % errno.EPERM
     assert out["devhome_param_read"] == "ERR%d" % errno.EPERM
-    if os.path.isdir("/Users/dev"):
-        assert out["real_devhome_list"] == "ERR%d" % errno.EPERM
     assert out["real_sealed_list"] != "OK"
     assert out["control_usr"] == "OK" and out["control_stdlib"] == "OK"
     assert out["child_cat_sealed_rc"] != 0
@@ -348,7 +345,8 @@ def test_t9_profile_text_has_the_required_rules():
     assert "(deny network*)" in text
     assert "(deny file-write*)" in text
     assert '(param "SCRATCH")' in text and '(param "SEALED")' in text
-    assert '(subpath "/Users/zurvaneval")' in text and '(subpath "/Users/dev")' in text
+    assert '(subpath "/Users/zurvaneval")' in text and '(param "DEVHOME")' in text
+    assert '"/Users/dev"' not in text  # R12: the dev home arrives only as a parameter
     deny_write = text.index("(deny file-write*)")
     allow_write = text.index("(allow file-write*")
     assert deny_write < allow_write  # later rules win in SBPL: the allow must come after the deny

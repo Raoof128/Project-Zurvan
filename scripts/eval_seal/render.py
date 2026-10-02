@@ -1,6 +1,6 @@
 """Operator-script engine for the sealed evaluation (spec s5.1, s5.2; contract s5).
 
-Every operator script (setup.sh, install.sh, install_corpus.sh, tamper_drill.sh, uninstall.sh) is a thin
+Every operator script (setup.sh, install.sh, install_corpus.sh, tamper_drill.sh, uninstall.sh, refresh_acl.sh) is a thin
 shell wrapper around this module. It builds a PLAN: the files that would be installed (written under the
 stage directory, mirroring absolute paths) and `commands.txt`, one shell command per line.
 
@@ -45,6 +45,7 @@ CORPUS_DIR = str(_P.corpus_dir)
 STAGE_DIR = str(_P.stage_dir)
 EVAL_HOME = str(_P.eval_home)
 KEYS_DIR = str(_P.keys_dir)
+PRIVATE_DIR = str(_P.private_dir)
 SETS_DIR = str(_P.sets_dir)
 RUNS_DIR = str(_P.runs_dir)
 INCIDENTS_DIR = str(_P.incidents_dir)
@@ -63,14 +64,14 @@ PF_PLIST = "/Library/LaunchDaemons/%s.plist" % PF_LABEL
 HF_MODEL_RE = re.compile(r"models--[A-Za-z0-9_.-]+")
 DEFAULT_HF_MODEL = "models--sentence-transformers--all-MiniLM-L6-v2"
 
-WRAPPERS = (  # wrapper name -> module that provides main(argv)
-    ("zurvan-broker", "broker"),
-    ("zurvan-candidate-run", "candidate_run"),
-    ("zurvan-author", "author"),
+WRAPPERS = (  # (wrapper name, module, entry function): the entry is a module-level function taking argv
+    ("zurvan-broker", "broker", "broker_main"),
+    ("zurvan-candidate-run", "candidate_run", "main"),
+    ("zurvan-author", "author", "author_main"),
 )
 BROKER_WRAPPER = BROKER_BIN + "/zurvan-broker"
 CANDIDATE_WRAPPER = BROKER_BIN + "/zurvan-candidate-run"
-EXPORT_PATHS = ("scripts/eval_seal", "scripts/boundary/d1.py")
+EXPORT_PATHS = ("scripts/eval_seal", "scripts/boundary/d1.py", "eval/z1b/spec.json")
 USER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 RESERVED_USERS = frozenset(["root", "ALL", EVAL_USER, CANDIDATE_USER])
@@ -229,7 +230,7 @@ def _blob_oid(data):
 
 
 def export_sources(repo, sha, git_user):
-    """git archive <sha> scripts/eval_seal scripts/boundary/d1.py, verified; returns {relpath: bytes}."""
+    """git archive <sha> over EXPORT_PATHS (the sealed code and the signed spec), verified; returns {relpath: bytes}."""
     validate_sha(sha)
     rc, out, _e = _git(repo, git_user, ["ls-tree", "-r", "-z", "--full-tree", sha, "--"] + list(EXPORT_PATHS))
     if rc != 0 or not out:
@@ -260,7 +261,7 @@ def export_sources(repo, sha, git_user):
             if not m.isfile():
                 raise OperatorRefusal("the archive contains a special file: %s" % name)
             parts = name.split("/")
-            if name.startswith("/") or ".." in parts or not name.startswith(("scripts/eval_seal/", "scripts/boundary/")):
+            if name.startswith("/") or ".." in parts or not name.startswith(("scripts/eval_seal/", "scripts/boundary/", "eval/z1b/")):
                 raise OperatorRefusal("the archive contains an unexpected path: %s" % name)
             got[name] = tf.extractfile(m).read()
     if set(got) != set(want):
@@ -273,14 +274,16 @@ def export_sources(repo, sha, git_user):
 
 # ------------------------------------------------------------------ wrappers, sudoers
 
-def wrapper_text(module):
+def wrapper_text(module, entry):
+    if re.fullmatch(r"[a-z_][a-z0-9_]*", module) is None or re.fullmatch(r"[a-z_][a-z0-9_]*", entry) is None:
+        raise OperatorRefusal("internal: bad wrapper module or entry name")
     return (
         "#!%s -I\n"
         "import sys\n"
         'sys.path.insert(0, "%s")\n'
-        "from scripts.eval_seal.%s import main\n"
-        "sys.exit(main(sys.argv[1:]))\n"
-    ) % (CLT_PYTHON, BROKER_LIB, module)
+        "from scripts.eval_seal.%s import %s as _entry\n"
+        "sys.exit(_entry(sys.argv[1:]))\n"
+    ) % (CLT_PYTHON, BROKER_LIB, module, entry)
 
 
 def _sha256(data):
@@ -470,7 +473,7 @@ def plan_setup(plan, dev_home, repo):
         (RUNTIME_DIR, ("root", "wheel", "0755")),
         (CORPUS_DIR, ("root", CORPUS_GROUP, "0750")),
         (STAGE_DIR, (EVAL_USER, CANDIDATE_USER, "0750")),
-        (EVAL_HOME, ev), (KEYS_DIR, ev), (SETS_DIR, ev), (RUNS_DIR, ev), (INCIDENTS_DIR, ev),
+        (EVAL_HOME, ev), (KEYS_DIR, ev), (PRIVATE_DIR, ev), (SETS_DIR, ev), (RUNS_DIR, ev), (INCIDENTS_DIR, ev),
         (CANDIDATE_HOME, cd), (SCRATCH_DIR, cd),
         (DROP_DIR, ("root", "wheel", "1733")),
     )
@@ -479,6 +482,8 @@ def plan_setup(plan, dev_home, repo):
     plan.cmd("/bin/chmod", "1733", DROP_DIR)
     plan.comment("T7: keys never reach a Time Machine backup (seal-check proves it with tmutil isexcluded)")
     plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", KEYS_DIR)
+    plan.comment("R18: private/ holds the plaintext authoring audit files and the claude session state: never backed up either")
+    plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", PRIVATE_DIR)
     plan.comment("T3: the candidate identity has no outbound network (pf matches user for TCP/UDP only: defence in depth)")
     plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
                       "root", "wheel", "0644")
@@ -565,7 +570,9 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
     if real:
         assert_clean_tree(repo, sha, git_user)
     files = export_sources(repo, sha, git_user)
-    for _name, mod in WRAPPERS:
+    if "eval/z1b/spec.json" not in files:
+        raise OperatorRefusal("eval/z1b/spec.json is missing at %s: the installed broker would have no spec" % sha)
+    for _name, mod, _entry in WRAPPERS:
         if "scripts/eval_seal/%s.py" % mod not in files:
             raise OperatorRefusal("scripts/eval_seal/%s.py is missing at %s: nothing to install for that wrapper" % (mod, sha))
     rc, tree_out, _e = _git(repo, git_user, ["rev-parse", "%s:scripts/eval_seal" % sha])
@@ -603,8 +610,8 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
         plan.install_file(BROKER_DIR + "/lib/" + rel, files[rel], "root", "wheel", "0444")
 
     wrappers = {}
-    for name, mod in WRAPPERS:
-        data = wrapper_text(mod).encode()
+    for name, mod, entry in WRAPPERS:
+        data = wrapper_text(mod, entry).encode()
         wrappers[BROKER_BIN + "/" + name] = data
         plan.install_file(BROKER_BIN + "/" + name, data, "root", "wheel", "0555")
 
@@ -725,6 +732,19 @@ def plan_install_corpus(plan, export_dir):
     plan.cmd(CLT_PYTHON, "-I", "-c", code)
 
 
+def plan_refresh_acl(plan, dev_home):
+    """R15: re-grant the read-only scan ACL on every CURRENT Claude Code transcript directory for this repo."""
+    glob = dev_home + "/.claude/projects/*Zurvan*"
+    perms = _acl("read,list,search,readattr,file_inherit,directory_inherit")
+    plan.comment("refresh_acl: transcript directories created after setup (new worktrees) are unreadable to the eval identity")
+    plan.comment("until this runs, and the scan then reports SCAN_INCOMPLETE (fail closed). Read-only grant, same ACL as setup.")
+    plan.cmd("/bin/test", "-d", dev_home + "/.claude/projects")
+    plan.raw("/bin/ls -d %s >/dev/null" % _quote_target(glob))
+    plan.comment("remove an identical entry first so running this twice never stacks duplicates, then grant")
+    plan.raw("/bin/chmod -R -a %s %s || true" % (shlex.quote(perms), _quote_target(glob)))
+    plan.raw("/bin/chmod -R +a %s %s" % (shlex.quote(perms), _quote_target(glob)))
+
+
 def plan_tamper_drill(plan, dev_user):
     validate_user(dev_user)
     b = BROKER_WRAPPER
@@ -778,6 +798,7 @@ def plan_uninstall(plan, dev_home, repo, purge):
     plan.raw("/bin/rmdir %s || true" % DROP_DIR)
     if purge:
         plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", KEYS_DIR)
+        plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", PRIVATE_DIR)
         plan.cmd("/bin/rm", "-rf", EVAL_HOME)
         plan.cmd("/bin/rm", "-rf", CANDIDATE_HOME)
         for user in (EVAL_USER, CANDIDATE_USER):
@@ -800,7 +821,7 @@ def build_parser():
         p.add_argument("--real", action="store_true")
         p.add_argument("--search-path", default=None)
 
-    for k in ("setup", "tamper-drill"):
+    for k in ("setup", "tamper-drill", "refresh-acl"):
         common(sub.add_parser(k))
     p = sub.add_parser("uninstall")
     common(p)
@@ -833,6 +854,8 @@ def render_main(argv=None):
             plan_install_corpus(plan, args.export_dir)
         elif args.kind == "tamper-drill":
             plan_tamper_drill(plan, dev_user)
+        elif args.kind == "refresh-acl":
+            plan_refresh_acl(plan, dev_home)
         elif args.kind == "uninstall":
             plan_uninstall(plan, dev_home, repo, args.purge_sealed)
         plan.write()

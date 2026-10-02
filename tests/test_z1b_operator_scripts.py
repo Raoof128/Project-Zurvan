@@ -57,12 +57,13 @@ def _t12_git(repo, *args):
 _T12_FILES = {
     "scripts/eval_seal/__init__.py": "",
     "scripts/eval_seal/paths.py": "X = 1\n",
-    "scripts/eval_seal/broker.py": "def main(argv=None):\n    return 0\n",
+    "scripts/eval_seal/broker.py": "def broker_main(argv=None):\n    return 0\n",
     "scripts/eval_seal/candidate_run.py": "def main(argv):\n    return 0\n",
-    "scripts/eval_seal/author.py": "def main(argv):\n    return 0\n",
+    "scripts/eval_seal/author.py": "def author_main(argv):\n    return 0\n",
     "scripts/eval_seal/corpus.py": "def corpus_sha256(d):\n    return ''\n",
     "scripts/eval_seal/sandbox/candidate.sb": "(version 1)\n",
     "scripts/boundary/d1.py": "D1 = True\n",
+    "eval/z1b/spec.json": "{}\n",
     "README.md": "not exported\n",
 }
 
@@ -185,7 +186,7 @@ def _t12_expected_dirs():
         str(p.runtime_dir): ("root", "wheel", "0755"),
         str(p.corpus_dir): ("root", "zurvancorpus", "0750"),
         str(p.stage_dir): ("zurvaneval", "zurvancandidate", "0750"),
-        str(p.eval_home): ev, str(p.keys_dir): ev, str(p.sets_dir): ev, str(p.runs_dir): ev,
+        str(p.eval_home): ev, str(p.keys_dir): ev, str(p.private_dir): ev, str(p.sets_dir): ev, str(p.runs_dir): ev,
         str(p.incidents_dir): ev,
         str(p.candidate_home): cand, str(p.scratch_dir): cand,
         str(p.drop_dir): ("root", "wheel", "1733"),
@@ -314,6 +315,7 @@ def test_t12_setup_users_groups_and_login_hiding(t12_world):
 def test_t12_setup_time_machine_exclusion_for_keys(t12_world):
     lines = _t12_lines(t12_world["setup"])
     assert "/usr/bin/tmutil addexclusion -p /Users/zurvaneval/keys" in lines
+    assert "/usr/bin/tmutil addexclusion -p /Users/zurvaneval/private" in lines  # R18
     # exclusion is applied after the directory exists
     assert lines.index("/usr/bin/tmutil addexclusion -p /Users/zurvaneval/keys") > next(
         i for i, ln in enumerate(lines) if ln.endswith(" /Users/zurvaneval/keys") and ln.startswith("/usr/bin/install -d"))
@@ -444,7 +446,7 @@ def _t12_stage_file(stage, final):
 def test_t12_install_exports_only_reviewed_sources_with_layout(t12_world):
     lib = _t12_stage_file(t12_world["install"], "/Library/ZurvanEval/broker/lib")
     got = sorted(str(p.relative_to(lib)) for p in lib.rglob("*") if p.is_file())
-    assert got == sorted(k for k in _T12_FILES if k.startswith(("scripts/eval_seal", "scripts/boundary")))
+    assert got == sorted(k for k in _T12_FILES if k.startswith(("scripts/eval_seal", "scripts/boundary", "eval/z1b/")))
     assert not (lib / "scripts/__init__.py").exists()
     assert not any(p.is_symlink() for p in lib.rglob("*"))
 
@@ -502,15 +504,16 @@ def test_t12_install_copies_hf_model_without_symlinks_or_blobs(t12_world):
 
 @needs_clt
 def test_t12_wrappers_use_clt_python_isolated_and_absolute_lib(t12_world):
-    for name, mod in (("zurvan-broker", "broker"), ("zurvan-candidate-run", "candidate_run"), ("zurvan-author", "author")):
+    for name, mod, entry in (("zurvan-broker", "broker", "broker_main"), ("zurvan-candidate-run", "candidate_run", "main"),
+                             ("zurvan-author", "author", "author_main")):
         text = _t12_stage_file(t12_world["install"], f"/Library/ZurvanEval/broker/bin/{name}").read_text()
         first = text.splitlines()[0]
         assert first == f"#!{CLT_PY} -I"
         assert "/opt/" not in text and "/usr/local" not in text and "anaconda" not in text
         assert "environ" not in text and "getenv" not in text and "import os" not in text
         assert 'sys.path.insert(0, "/Library/ZurvanEval/broker/lib")' in text
-        assert f"from scripts.eval_seal.{mod} import main" in text
-        assert "sys.exit(main(sys.argv[1:]))" in text
+        assert f"from scripts.eval_seal.{mod} import {entry} as _entry" in text
+        assert "sys.exit(_entry(sys.argv[1:]))" in text
         # compiles under the python that will run it
         compile(text.split("\n", 1)[1], name, "exec")
 
@@ -811,7 +814,7 @@ def test_t12_export_sources_returns_verified_bytes(tmp_path):
     files = R.export_sources(repo, sha, None)
     assert files["scripts/eval_seal/paths.py"] == b"X = 1\n"
     assert "README.md" not in files
-    assert set(files) == {k for k in _T12_FILES if k.startswith(("scripts/eval_seal", "scripts/boundary"))}
+    assert set(files) == {k for k in _T12_FILES if k.startswith(("scripts/eval_seal", "scripts/boundary", "eval/z1b/"))}
 
 
 # ------------------------------------------------------------------ install_corpus.sh
@@ -935,6 +938,7 @@ def test_t12_uninstall_purge_removes_identities_and_everything(t12_world):
     text = "\n".join(_t12_lines(t12_world["purge"]))
     for needle in ("/usr/bin/dscl . -delete /Users/zurvaneval", "/usr/bin/dscl . -delete /Users/zurvancandidate",
                    "/usr/bin/dscl . -delete /Groups/zurvancorpus", "/usr/bin/tmutil removeexclusion -p /Users/zurvaneval/keys",
+                   "/usr/bin/tmutil removeexclusion -p /Users/zurvaneval/private",
                    "rm -rf /Users/zurvaneval", "rm -rf /Users/zurvancandidate"):
         assert needle in text, needle
     lines = _t12_lines(t12_world["purge"])

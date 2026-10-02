@@ -34,7 +34,7 @@ CHECK_IDS = (
     "keys_private", "sets_private", "runs_private", "corpus_read_only", "stage_private",
     "candidate_cannot_read_sealed", "dev_cannot_read_sealed", "tm_excluded_keys", "drop_dir_mode",
     "scan_agent_present", "pinned_binaries_match", "interpreter_root_owned", "ledger_valid",
-    "manifest_valid",
+    "manifest_valid", "tm_excluded_private",
 )
 
 _HEX16 = r"[0-9a-f]{16}"

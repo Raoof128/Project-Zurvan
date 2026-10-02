@@ -30,8 +30,9 @@ SSH_KEYGEN = "/usr/bin/ssh-keygen"
 
 
 def _t16_decl(commit=_T16_CANDIDATE, **over):
+    # R20/R24: the commit that contains the declaration binds it; `commit` is no longer written into it
     decl = {
-        "candidate_commit": commit, "suite_id": _T16_SID, "primary_metric": "mrr",
+        "role": "candidate", "suite_id": _T16_SID, "primary_metric": "mrr",
         "critical_strata": ["exact_identifier", "path"],
         "non_inferiority_margins": {"critical": 0.02, "overall": 0.01},
         "improvement_target": {"metric": "mrr", "min_delta": 0.02},
@@ -264,7 +265,7 @@ def test_t16_a_complete_declaration_validates():
     zp.validate_declaration(_t16_decl(critical_strata=list(STRATA)), _t16_spec())
 
 
-@pytest.mark.parametrize("field", ["candidate_commit", "suite_id", "primary_metric", "critical_strata",
+@pytest.mark.parametrize("field", ["role", "suite_id", "primary_metric", "critical_strata",
                                    "non_inferiority_margins", "improvement_target", "resource_budgets"])
 def test_t16_each_missing_field_is_declaration_invalid_and_no_broker_call(t16, field):
     decl = _t16_decl()
@@ -301,7 +302,7 @@ def test_t16_each_missing_field_is_declaration_invalid_and_no_broker_call(t16, f
     {"resource_budgets": {"latency_p95_ms": True, "peak_rss_mb": 4000}},
     {"resource_budgets": {"latency_p95_ms": 500, "peak_rss_mb": 0}},
     {"suite_id": "ABCDEF0123456789"}, {"suite_id": "short"}, {"suite_id": 7},
-    {"candidate_commit": "D" * 40}, {"candidate_commit": "d" * 39}, {"candidate_commit": None},
+    {"role": "Candidate"}, {"role": None}, {"role": "promoted"}, {"candidate_commit": "d" * 40},
 ])
 def test_t16_malformed_declaration_values_are_declaration_invalid(bad):
     _t16_refused("DECLARATION_INVALID", zp.validate_declaration, _t16_decl(**bad), _t16_spec())
@@ -309,7 +310,7 @@ def test_t16_malformed_declaration_values_are_declaration_invalid(bad):
 
 def test_t16_a_declaration_for_another_commit_or_suite_is_refused_by_promote(t16):
     client = _T16Client(_t16_result())
-    t16.state["decl"] = _t16_decl(commit="e" * 40)  # names a different candidate
+    t16.state["decl"] = _t16_decl(role="baseline")  # a baseline declaration is measured, never promoted
     _t16_refused("DECLARATION_INVALID", zp.promote, _T16_CANDIDATE, t16.decl_path, client=client)
     t16.state["decl"] = _t16_decl(suite_id="f" * 16)  # names a different suite version
     _t16_refused("DECLARATION_INVALID", zp.promote, _T16_CANDIDATE, t16.decl_path, client=client)
@@ -381,27 +382,6 @@ def test_t16_a_committed_but_malformed_declaration_is_declaration_invalid(t16git
         assert exc.code == "DECLARATION_INVALID"
     else:
         _t16_refused("DECLARATION_INVALID", zp.validate_declaration, got, _t16_spec())
-
-
-def test_t16_a_declaration_cannot_name_the_commit_that_contains_it_so_binding_to_the_same_commit_never_holds(t16git):
-    """Falsification of the contract's binding rule: a file's own commit id depends on the file's bytes.
-
-    Writing the id of a guessed commit into the declaration changes the commit that results, so the
-    committed declaration names a commit that is not the one containing it. promote() can therefore never
-    see `candidate_commit == commit` for a REAL committed declaration. This pins the observation that the
-    plan's deviation note relies on; revisit it when the contract is amended.
-    """
-    path = t16git.repo / "eval" / "z1b" / "declarations" / "pre-one.json"
-    guess = t16git.base
-    for _ in range(4):  # chase the fixed point: a SHA-1 fixed point does not exist
-        _t16_git(t16git.repo, "reset", "-q", "--soft", t16git.base)
-        path.write_text(json.dumps(_t16_decl(commit=guess)))
-        _t16_git(t16git.repo, "add", "-A")
-        _t16_git(t16git.repo, "commit", "-q", "-m", "declare")
-        actual = _t16_git(t16git.repo, "rev-parse", "HEAD")
-        assert actual != guess
-        assert zp._promotion_read_declaration(actual, "eval/z1b/declarations/pre-one.json")["candidate_commit"] != actual
-        guess = actual
 
 
 def test_t16_an_oversized_but_valid_declaration_is_refused_by_the_reader(t16git):

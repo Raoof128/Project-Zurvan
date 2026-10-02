@@ -865,15 +865,18 @@ def test_t10_reserve_with_the_flag_but_no_prior_holdout_pass_is_not_eligible(tmp
 
 _T10_DECL_PATH = "eval/z1b/declarations/cand-1.json"
 _T10_DECL_PATH2 = "eval/z1b/declarations/cand-2.json"
+_T10_DECL_BASE = "eval/z1b/declarations/base-1.json"
 
 
 def _t10_declared(E, *, parent=None, decl=None, extra_files=None, margins=None, budgets=None,
                   path=_T10_DECL_PATH):
-    """Commit P (code) then C = P + the declaration file `path` (a NEW file). Returns (C, P, drop name)."""
+    """Commit P (code) then C = P + the declaration file `path`. Returns (C, P, drop name).
+    R20/R24: the declaration is bound by the commit that contains it; it has no candidate_commit field and
+    carries a role (candidate by default)."""
     if parent is None:
         parent = _t10_commit(E, "code for declaration %s\n" % os.urandom(4).hex())
     body = {
-        "candidate_commit": parent, "suite_id": "0123456789abcdef", "primary_metric": "recall_at_10",
+        "role": "candidate", "suite_id": "0123456789abcdef", "primary_metric": "recall_at_10",
         "critical_strata": ["exact_identifier", "path"],
         "non_inferiority_margins": margins or {"critical": 0.05, "overall": 0.02},
         "improvement_target": {"metric": "mrr", "min_delta": 0.01},
@@ -887,8 +890,19 @@ def _t10_declared(E, *, parent=None, decl=None, extra_files=None, margins=None, 
     return commit, parent, _t10_drop(E, commit)
 
 
+def _t10_weak_baseline(E):
+    """R25: a declared BASELINE run of a candidate that answers nothing; later candidates compare to it."""
+    saved = E.cand_cfg["oracle"]
+    E.cand_cfg["oracle"] = {}
+    commit, _p, name = _t10_declared(E, decl={"role": "baseline"}, path=_T10_DECL_BASE)
+    rc, _t, doc = _t10_run(E, commit, declare=_T10_DECL_BASE, name=name)
+    E.cand_cfg["oracle"] = saved
+    assert rc == 0 and doc["promotion"] is None and doc["per_stratum"] is not None
+    return commit
+
 def test_t10_a_declared_run_returns_per_stratum_and_a_promotion_verdict(tmp_path):
     E = _t10_build(tmp_path)
+    _t10_weak_baseline(E)
     commit, _p, name = _t10_declared(E)
     rc, _t, doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)
     assert rc == 0
@@ -898,36 +912,35 @@ def test_t10_a_declared_run_returns_per_stratum_and_a_promotion_verdict(tmp_path
         "non_inferiority_critical": True, "non_inferiority_overall": True, "improvement": True,
         "resource_budget": True}}
 
-
 def test_t10_a_blown_resource_budget_fails_the_declared_run(tmp_path):
     E = _t10_build(tmp_path)
+    _t10_weak_baseline(E)
     commit, _p, name = _t10_declared(E, budgets={"latency_p95_ms": 100000, "peak_rss_mb": 1})
     doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]
     assert doc["promotion"]["verdict"] == "FAIL" and doc["promotion"]["rules"]["resource_budget"] is False
     assert doc["promotion"]["rules"]["improvement"] is True
 
-
 def test_t10_the_second_declared_run_is_compared_with_the_promoted_baseline(tmp_path):
     E = _t10_build(tmp_path)
+    _t10_weak_baseline(E)
     c1, _p, n1 = _t10_declared(E)
     assert _t10_run(E, c1, declare=_T10_DECL_PATH, name=n1)[2]["promotion"]["verdict"] == "PASS"
     c2, _p2, n2 = _t10_declared(E, path=_T10_DECL_PATH2)
     doc = _t10_run(E, c2, declare=_T10_DECL_PATH2, name=n2)[2]
     rules = doc["promotion"]["rules"]
-    # identical to the baseline: non-inferior everywhere, but no improvement beyond noise
+    # identical to the promoted run (not the weak baseline): non-inferior everywhere, no improvement beyond noise
     assert rules["non_inferiority_critical"] and rules["non_inferiority_overall"] and rules["resource_budget"]
     assert rules["improvement"] is False and doc["promotion"]["verdict"] == "FAIL"
 
-
 def test_t10_a_candidate_worse_than_the_baseline_fails_non_inferiority(tmp_path):
     E = _t10_build(tmp_path)
+    _t10_weak_baseline(E)
     c1, _p, n1 = _t10_declared(E)
     _t10_run(E, c1, declare=_T10_DECL_PATH, name=n1)
     c2, _p2, n2 = _t10_declared(E, path=_T10_DECL_PATH2)
     E.cand_cfg["oracle"] = {}
     rules = _t10_run(E, c2, declare=_T10_DECL_PATH2, name=n2)[2]["promotion"]["rules"]
     assert rules["non_inferiority_critical"] is False and rules["non_inferiority_overall"] is False
-
 
 def test_t10_declaration_naming_the_wrong_commit_is_declaration_invalid(tmp_path):
     E = _t10_build(tmp_path)
@@ -937,19 +950,11 @@ def test_t10_declaration_naming_the_wrong_commit_is_declaration_invalid(tmp_path
 
 
 def test_t10_declaration_naming_an_unrelated_earlier_commit_is_declaration_invalid(tmp_path):
-    # a declaration cannot name the commit that contains it (it would have to contain its own hash); the
-    # binding is to the FIRST PARENT, so naming any other commit, including an ancestor, is refused
+    # R20/R24: the commit binds the declaration; a candidate_commit field of any value is an unknown key
     E = _t10_build(tmp_path)
     commit, parent, name = _t10_declared(E, decl={"candidate_commit": E.commits[0]})
     assert E.commits[0] != parent
     _t10_refused(_t10_run(E, commit, declare=_T10_DECL_PATH, name=name), "DECLARATION_INVALID")
-
-
-def test_t10_declaration_commit_that_changes_more_than_the_declaration_is_declaration_invalid(tmp_path):
-    E = _t10_build(tmp_path)
-    commit, _p, name = _t10_declared(E, extra_files={"scripts/sneaky.py": "print('code changed after the declaration')\n"})
-    _t10_refused(_t10_run(E, commit, declare=_T10_DECL_PATH, name=name), "DECLARATION_INVALID")
-
 
 def test_t10_declaration_for_a_different_suite_is_declaration_invalid(tmp_path):
     E = _t10_build(tmp_path)
@@ -978,6 +983,7 @@ def test_t10_a_declaration_file_that_is_not_in_the_commit_is_declaration_invalid
 
 def test_t10_reserve_after_a_passing_declared_holdout_run_is_accepted_once_per_commit(tmp_path):
     E = _t10_build(tmp_path)
+    _t10_weak_baseline(E)
     commit, _p, name = _t10_declared(E)
     assert _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]["promotion"]["verdict"] == "PASS"
     # a different commit has no pass, so it is not eligible even with the flag
@@ -988,9 +994,6 @@ def test_t10_reserve_after_a_passing_declared_holdout_run_is_accepted_once_per_c
     assert doc["budget_remaining"] == 0 and doc["promotion"] is None
     again = _t10_run(E, commit, suite="reserve", final=True)[2]
     assert again["cached"] is True and again["budget_remaining"] == 0
-
-
-# ================================================================ sandbox sweep
 
 def _t10_burned(E):
     return _t10_ledger(E).burned_ids()
@@ -1217,7 +1220,8 @@ def test_t10_seal_check_passes_on_a_compliant_layout_and_fails_each_violation(tm
                                                                "incidents_dir": "EACCES",
                                                                "manifest_file": "EACCES"})
         failing("candidate_cannot_read_sealed", probe=lambda: {})
-        failing("tm_excluded_keys", tmutil_isexcluded=lambda p: False)
+        failing("tm_excluded_keys", tmutil_isexcluded=lambda p: p != E.paths.keys_dir)
+        failing("tm_excluded_private", tmutil_isexcluded=lambda p: p != E.paths.private_dir)  # R18
         failing("scan_agent_present", scan_agent_present=lambda: False)
         failing("broker_root_owned", only=False, root_uid=os.getuid() + 7)
     finally:
@@ -1388,3 +1392,39 @@ def test_t10_ledger_burn_items_is_idempotent_irreversible_and_validated(tmp_path
 def test_t10_the_installed_wrapper_entry_name_exists():
     # the installed wrapper does `from scripts.eval_seal.broker import main`; ruling R11 names the function broker_main
     assert B.main is B.broker_main
+
+
+def test_t10_a_declared_candidate_with_no_baseline_fails_and_is_never_compared_to_zero(tmp_path):
+    # R25: no all-zero baseline. Without a baseline or a promoted run nothing is non-inferior or improved.
+    E = _t10_build(tmp_path)
+    commit, _p, name = _t10_declared(E)
+    doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]
+    assert doc["promotion"]["verdict"] == "FAIL"
+    assert doc["promotion"]["rules"] == {"non_inferiority_critical": False, "non_inferiority_overall": False,
+                                         "improvement": False, "resource_budget": True}
+
+
+def test_t10_a_baseline_run_is_measured_but_never_judged_and_cannot_unlock_reserve(tmp_path):
+    E = _t10_build(tmp_path)
+    base = _t10_weak_baseline(E)
+    _t10_refused(_t10_run(E, base, suite="reserve", final=True), "RESERVE_NOT_ELIGIBLE")
+
+
+@pytest.mark.parametrize("role", ["promoted", "Candidate", None, 1])
+def test_t10_a_declaration_with_an_unknown_role_is_declaration_invalid_and_charges_nothing(tmp_path, role):
+    E = _t10_build(tmp_path)
+    commit, _p, name = _t10_declared(E, decl={"role": role})
+    _t10_refused(_t10_run(E, commit, declare=_T10_DECL_PATH, name=name), "DECLARATION_INVALID")
+    assert "reserved" not in _t10_kinds(E)
+
+
+def test_t10_an_undeclared_holdout_run_never_becomes_the_baseline(tmp_path):
+    # R25: only a DECLARED baseline (per_stratum present, promotion null) or a promoted run is a baseline;
+    # an ordinary run also has promotion null, so without that distinction any run would set the bar
+    E = _t10_build(tmp_path)
+    E.cand_cfg["oracle"] = {}
+    assert _t10_run(E)[0] == 0
+    E.cand_cfg["oracle"] = _t10_oracle(E.holdout + E.reserve)
+    commit, _p, name = _t10_declared(E)
+    doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]
+    assert doc["promotion"]["verdict"] == "FAIL" and doc["promotion"]["rules"]["improvement"] is False

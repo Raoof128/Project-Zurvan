@@ -11,6 +11,5 @@
     (literal "/dev/dtracehelper"))
 (deny file-read*
     (subpath "/Users/zurvaneval")
-    (subpath "/Users/dev")
     (subpath (param "SEALED"))
     (subpath (param "DEVHOME")))

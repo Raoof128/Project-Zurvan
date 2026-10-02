@@ -35,7 +35,7 @@ def _check_root(root):
     return root
 
 
-def _walk(root: Path):
+def _corpus_walk(root: Path):
     """Yield (relpath, abspath) of every regular file; refuse anything else."""
     stack = [(root, "")]
     while stack:
@@ -85,7 +85,7 @@ def _hash_file(path: str) -> str:
 def corpus_sha256(corpus_dir: Path) -> str:
     root = _check_root(corpus_dir)
     lines = []
-    for rel, abspath in _walk(root):
+    for rel, abspath in _corpus_walk(root):
         lines.append((rel.encode("utf-8", "surrogateescape"), _hash_file(abspath)))
     lines.sort()
     outer = hashlib.sha256()
@@ -104,7 +104,7 @@ def corpus_pages(corpus_dir: Path) -> set:
     root = _check_root(corpus_dir)
     _check_root(root / "wiki")
     pages = set()
-    for rel, _abs in _walk(root):
+    for rel, _abs in _corpus_walk(root):
         if rel.endswith(".md"):
             pages.add(rel)
     return pages

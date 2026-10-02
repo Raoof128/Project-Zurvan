@@ -54,7 +54,7 @@ CHECK_TIMEOUT = 60
 STARTUP_FACTOR = 10          # the first query also pays for loading the candidate's models
 FINISH_TIMEOUT = 30          # after the last answer: EOF and a clean exit
 MAX_DECLARATION_BYTES = 65536
-EXEC_FILES = frozenset(("setup.sh", "install.sh", "install_corpus.sh", "tamper_drill.sh", "uninstall.sh"))
+EXEC_FILES = frozenset(("setup.sh", "install.sh", "install_corpus.sh", "tamper_drill.sh", "uninstall.sh", "refresh_acl.sh"))
 
 _HEX16 = re.compile(r"[0-9a-f]{16}")
 _HEX40 = re.compile(r"[0-9a-f]{40}")
@@ -428,15 +428,20 @@ def _broker_number(value, lo, hi) -> bool:
     return (type(value) in (int, float) and math.isfinite(value) and lo <= value <= hi)
 
 
-def broker_validate_declaration(decl, spec, *, commit_parent: str, suite_id: str) -> None:
-    """Predeclaration (spec s5.4 / canonical s9.5): exactly the five fields + the two bindings."""
+def broker_check_declaration(decl, spec, *, suite_id: str) -> None:
+    """Predeclaration (spec s5.4 / canonical s9.5): the five fields, the suite binding and the role (R20/R24).
+
+    The commit binding is the commit itself: the declaration is read from the evaluated commit, so it
+    cannot name that commit (a file cannot contain the hash of the commit that holds it) and has no
+    candidate_commit field. Changing a declaration needs a new commit, hence a new run key and a new charge.
+    """
     bad = SealRefusal("DECLARATION_INVALID")
     if type(decl) is not dict:
         raise bad
     required = spec["predeclaration_schema"]["required"]
     if set(decl) != set(required):
         raise bad
-    if decl["candidate_commit"] != commit_parent or decl["suite_id"] != suite_id:
+    if decl["suite_id"] != suite_id or decl["role"] not in ("baseline", "candidate") or type(decl["role"]) is not str:
         raise bad
     if decl["primary_metric"] not in _METRICS or type(decl["primary_metric"]) is not str:
         raise bad
@@ -465,14 +470,9 @@ def _broker_git(args, env, git_dir):
     return intake._intake_git(args, env, git_dir)
 
 
-def broker_read_declaration(paths: SealPaths, ctx, staged: Path, commit: str, decl_path: str):
-    """Read `decl_path` out of the commit in the staged bundle. Returns (decl_dict, parent_sha).
-
-    Binding (deviation from the contract text, see plan notes): a commit cannot contain its own hash,
-    so the declaration names the FIRST PARENT of the evaluated commit, and the evaluated commit must
-    differ from that parent by adding exactly this one file. The declaration is therefore committed
-    on top of the code it declares, before any run, and cannot change the code under test.
-    """
+def broker_load_declaration(paths: SealPaths, ctx, staged: Path, commit: str, decl_path: str) -> dict:
+    """Read `decl_path` out of `commit` in the staged (already verified) bundle (R20/R24). A regular
+    100644 blob, at most MAX_DECLARATION_BYTES, strict JSON without duplicate keys or NaN/Infinity."""
     bad = SealRefusal("DECLARATION_INVALID")
     work = None
     try:
@@ -484,15 +484,6 @@ def broker_read_declaration(paths: SealPaths, ctx, staged: Path, commit: str, de
             raise bad
         if _broker_git(["bundle", "unbundle", str(staged)], env, repo).returncode != 0:
             raise bad
-        done = _broker_git(["rev-list", "--parents", "-n", "1", commit], env, repo)
-        fields = done.stdout.decode("ascii", "replace").split()
-        if done.returncode != 0 or len(fields) != 2 or fields[0] != commit or not _HEX40.fullmatch(fields[1]):
-            raise bad
-        parent = fields[1]
-        done = _broker_git(["diff-tree", "-r", "--no-commit-id", "--name-status", "--no-renames",
-                            "-z", parent, commit], env, repo)
-        if done.returncode != 0 or done.stdout != b"A\x00" + decl_path.encode("ascii") + b"\x00":
-            raise bad
         spec_arg = commit + ":" + decl_path
         tree = _broker_git(["ls-tree", commit, "--", decl_path], env, repo)
         if tree.returncode != 0 or not tree.stdout.startswith(b"100644 blob "):
@@ -503,9 +494,8 @@ def broker_read_declaration(paths: SealPaths, ctx, staged: Path, commit: str, de
         blob = _broker_git(["cat-file", "blob", spec_arg], env, repo)
         if blob.returncode != 0:
             raise bad
-        decl = json.loads(blob.stdout.decode("utf-8"), object_pairs_hook=_broker_no_dups,
+        return json.loads(blob.stdout.decode("utf-8"), object_pairs_hook=_broker_no_dups,
                           parse_constant=_broker_no_const)
-        return decl, parent
     except SealRefusal:
         raise
     except Exception:  # noqa: BLE001 - nothing but a code crosses this boundary
@@ -683,16 +673,22 @@ def broker_ci(vals: list, base, *, resamples: int, seed: int):
 
 
 def broker_baseline(ledger: Ledger, paths: SealPaths, suite_id: str):
-    """The most recent PROMOTED run for this suite: (result, rows) or (None, None)."""
-    last = None
+    """The comparison point for a declared candidate (R25): the most recent PROMOTED holdout run of this
+    suite (verdict PASS); before any promotion, the most recent declared BASELINE run (per_stratum present,
+    promotion null). (result, rows), or (None, None) when neither exists. There is no all-zero baseline."""
+    promoted = baseline = None
     for entry in ledger.entries():
         if entry["kind"] != "completed":
             continue
         res = entry["result"]
+        if res.get("suite") != "holdout" or res.get("suite_id") != suite_id:
+            continue
         promo = res.get("promotion")
-        if (res.get("suite") == "holdout" and res.get("suite_id") == suite_id
-                and isinstance(promo, dict) and promo.get("verdict") == "PASS"):
-            last = entry
+        if isinstance(promo, dict) and promo.get("verdict") == "PASS":
+            promoted = entry
+        elif promo is None and res.get("per_stratum") is not None:
+            baseline = entry
+    last = promoted if promoted is not None else baseline
     if last is None:
         return None, None
     try:
@@ -706,11 +702,19 @@ def broker_baseline(ledger: Ledger, paths: SealPaths, suite_id: str):
 def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: int) -> dict:
     """Spec s9.5 evaluated from the predeclaration. Every interval is a paired bootstrap over the items
     both runs scored (a lower bound, not a point estimate: small strata report uncertainty honestly).
-    With no promoted baseline the comparison is against an all-zero baseline (flagged in the plan notes).
+    With no baseline (R25) nothing can be shown non-inferior or improved: both quality rules are False and
+    the verdict is FAIL. There is no all-zero baseline.
     """
+    budgets = decl["resource_budgets"]
+    resource_ok = (result["latency_ms"]["p95"] <= budgets["latency_p95_ms"]
+                   and result["peak_rss_mb"] <= budgets["peak_rss_mb"])
+    if base_rows is None:
+        rules = {"non_inferiority_critical": False, "non_inferiority_overall": False, "improvement": False,
+                 "resource_budget": resource_ok}
+        return {"declared": True, "rules": rules, "verdict": "FAIL"}
     resamples = spec["run_policy"]["bootstrap_resamples"]
     cand_vals = broker_row_values(rows, spec)
-    base_vals = broker_row_values(base_rows, spec) if base_rows is not None else None
+    base_vals = broker_row_values(base_rows, spec)
     strata_of = {r["id"]: r["stratum"] for r in rows}
 
     def diff_lo(metric, stratum=None):
@@ -718,10 +722,7 @@ def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: 
         for item_id in sorted(cand_vals):
             if stratum is not None and strata_of[item_id] != stratum:
                 continue
-            if base_vals is None:
-                cand.append(cand_vals[item_id][metric])
-                base.append(0.0)
-            elif item_id in base_vals:
+            if item_id in base_vals:
                 cand.append(cand_vals[item_id][metric])
                 base.append(base_vals[item_id][metric])
         if not cand:
@@ -731,14 +732,12 @@ def broker_verdict(decl: dict, rows: list, base_rows, result: dict, spec, seed: 
     primary = decl["primary_metric"]
     margins = decl["non_inferiority_margins"]
     target = decl["improvement_target"]
-    budgets = decl["resource_budgets"]
     rules = {
         "non_inferiority_critical": all(diff_lo(primary, s) >= -margins["critical"]
                                         for s in decl["critical_strata"]),
         "non_inferiority_overall": diff_lo(primary) >= -margins["overall"],
         "improvement": (lambda lo: lo > 0 and lo >= target["min_delta"])(diff_lo(target["metric"])),
-        "resource_budget": (result["latency_ms"]["p95"] <= budgets["latency_p95_ms"]
-                            and result["peak_rss_mb"] <= budgets["peak_rss_mb"]),
+        "resource_budget": resource_ok,
     }
     return {"declared": True, "rules": rules, "verdict": "PASS" if all(rules.values()) else "FAIL"}
 
@@ -826,8 +825,8 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
             # 8. declaration (optional)
             decl = None
             if declared:
-                decl, parent = broker_read_declaration(paths, ctx, staged, commit, args["declare"])
-                broker_validate_declaration(decl, spec, commit_parent=parent, suite_id=m["suite_id"])
+                decl = broker_load_declaration(paths, ctx, staged, commit, args["declare"])
+                broker_check_declaration(decl, spec, suite_id=m["suite_id"])
             # 9. RESERVE is reachable only as a final acceptance of a candidate that passed HOLDOUT
             if suite == "reserve":
                 if not args["final_acceptance"] or not broker_holdout_passed(led, commit, m["suite_id"]):
@@ -913,7 +912,7 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
             "budget_remaining": led.budget_remaining(budget_id, budget_n),
             "promotion": None,
         }
-        if declared:
+        if declared and decl["role"] == "candidate":  # R25: a baseline run is measured, never judged
             result["promotion"] = broker_verdict(decl, rows, baseline_rows, result, spec, seed)
         serialize_result(result)  # validate BEFORE anything is committed to the ledger
         rows_path = broker_write_rows(paths, run_id, rows)
@@ -1106,6 +1105,11 @@ def _broker_check_tm(paths, ctx) -> bool:
     return bool(ctx.tmutil_isexcluded(paths.keys_dir))
 
 
+def _broker_check_tm_private(paths, ctx) -> bool:
+    """R18: private/ holds plaintext authoring state; it must be excluded from Time Machine like keys/."""
+    return bool(ctx.tmutil_isexcluded(paths.private_dir))
+
+
 def _broker_check_drop(paths, ctx) -> bool:
     st = os.lstat(str(paths.drop_dir))
     return stat.S_ISDIR(st.st_mode) and (st.st_mode & 0o7777) == 0o1733 and st.st_uid == ctx.root_uid
@@ -1174,6 +1178,7 @@ _SEAL_CHECKS = (
     ("interpreter_root_owned", _broker_check_interpreter),
     ("ledger_valid", _broker_check_ledger),
     ("manifest_valid", _broker_check_manifest),
+    ("tm_excluded_private", _broker_check_tm_private),
 )
 
 

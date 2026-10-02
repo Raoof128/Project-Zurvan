@@ -86,6 +86,10 @@ class SealPaths:
         return self.eval_home / "keys"
 
     @property
+    def private_dir(self) -> Path:  # 0700, TM-excluded: plaintext authoring audit files, claude session state
+        return self.eval_home / "private"
+
+    @property
     def sets_dir(self) -> Path:  # holdout.age reserve.age dev-ref.jsonl canaries.age
         return self.eval_home / "sets"
 

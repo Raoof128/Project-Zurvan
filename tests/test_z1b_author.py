@@ -201,7 +201,8 @@ def test_t15_claude_runner_uses_clean_env_pinned_binary_and_corpus_cwd(tmp_path,
     assert seen["argv"][seen["argv"].index("--mcp-config") + 1] == str(broker / "empty-mcp.json")
     assert kw["cwd"] == str(tmp_path / "corpus")
     assert kw["input"] == b"THE PROMPT" and "THE PROMPT" not in " ".join(seen["argv"])
-    expect = sysenv.clean_env(home, {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"})
+    expect = sysenv.clean_env(home, {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                                     "CLAUDE_CONFIG_DIR": str(home / "private" / "claude")})  # R18
     assert kw["env"] == expect
     assert "ANTHROPIC_API_KEY" not in kw["env"] and kw["env"]["HOME"] == str(home)
     assert "stdin" not in kw                     # the prompt is `input=`, never an inherited stdin
@@ -831,7 +832,7 @@ def test_t15_author_main_keeps_prompts_and_raw_outputs_only_under_the_eval_home_
     fk = _T15Fake(_t15_world())
     paths, _, rc = _t15_run_main(tmp_path, fk)
     assert rc == 0
-    runs = paths.runs_dir / "authoring"
+    runs = paths.private_dir / "authoring"  # R18: plaintext audit lives in the TM-excluded private/ dir
     dirs = list(runs.iterdir())
     assert len(dirs) == 1 and _t15_modes(dirs[0]) == 0o700 and _t15_modes(runs) == 0o700
     files = list(dirs[0].iterdir())
@@ -839,7 +840,7 @@ def test_t15_author_main_keeps_prompts_and_raw_outputs_only_under_the_eval_home_
     for f in paths.sets_dir.glob("*.age"):
         assert _t15_modes(f) == 0o600
     root = tmp_path / "root"
-    allowed = (root / "Library" / "ZurvanEval" / "corpus", paths.sets_dir, paths.runs_dir)
+    allowed = (root / "Library" / "ZurvanEval" / "corpus", paths.sets_dir, paths.runs_dir, paths.private_dir)
     for f in (p for p in root.rglob("*") if p.is_file()):
         assert any(a in f.parents for a in allowed) or f.parent == paths.eval_home, f
         if f.parent == paths.eval_home:

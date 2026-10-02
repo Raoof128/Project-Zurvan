@@ -44,7 +44,7 @@ _RUN_POLICY_FIXED = {
 }
 _RUN_POLICY_KEYS = frozenset(_RUN_POLICY_FIXED) | {"query_timeout_s", "run_timeout_s", "bootstrap_resamples"}
 _PREDECLARATION_FIELDS = frozenset((
-    "candidate_commit", "suite_id", "primary_metric", "critical_strata", "non_inferiority_margins",
+    "role", "suite_id", "primary_metric", "critical_strata", "non_inferiority_margins",
     "improvement_target", "resource_budgets",
 ))
 _LOCATOR_KINDS = ["page", "section"]
