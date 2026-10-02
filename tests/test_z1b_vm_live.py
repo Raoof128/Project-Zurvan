@@ -29,6 +29,13 @@ _LIMACTL = shutil.which("limactl")
 if _LIMACTL is None:
     pytest.skip("Z1b: NOT CONFIGURED - limactl is not installed; the VM-ISO gate is UNVERIFIED on this "
                 "machine (brew install lima lima-additional-guestagents)", allow_module_level=True)
+# These boot real VMs (minutes) and must run SERIALLY - never in a parallel (xdist) pool, where two guests
+# collide on VZ resources. So they are opt-in: the default/parallel suite skips them, and the dedicated
+# serial VM-ISO step sets ZURVAN_Z1B_VM_LIVE=1. This mirrors the NOT CONFIGURED discipline: never a false
+# pass, and never a spurious parallel failure.
+if os.environ.get("ZURVAN_Z1B_VM_LIVE") != "1":
+    pytest.skip("Z1b: VM-ISO gate is opt-in and serial; set ZURVAN_Z1B_VM_LIVE=1 to run it (it boots real "
+                "VMs). UNVERIFIED in this run.", allow_module_level=True)
 
 _IMG_CACHE = Path("/tmp/z1b-vm-image/alpine-aarch64.qcow2")
 
