@@ -232,6 +232,15 @@ Operator steps and the six live gates (plus VM-ISO) run only after Raouf execute
   was installed) rather than copying it into the broker tree — i.e. a different pinning shape from the
   Python wrappers. Until this is settled, the VM MVP is not buildable as specified; it is the first thing
   Rev 3's gauntlet must falsify in a throwaway worktree.
+- **R3-D1 RESOLVED (measured 2026-10-02, Lima 2.2.0 installed):** the feared failure does NOT occur on this
+  host. `limactl` carries `com.apple.security.virtualization`, and a plain byte COPY of it keeps both the
+  entitlement (`codesign -d --entitlements`) and a valid signature (`codesign -v` exits 0). The entitlement
+  is embedded in the Mach-O and `com.apple.security.virtualization` is not an Apple-only restricted
+  entitlement, so a validly-signed copy may claim it. The "pin a root-owned COPY, digest-checked" invariant
+  therefore works for the VM runner exactly as for the Python wrappers — no special installed-path pinning
+  is needed. **Residual, still to close with a live boot:** that VZ actually accepts the copied binary when
+  it boots a guest (the signature+entitlement surviving is necessary; a real `limactl start` of the pinned
+  copy is the sufficient check, and is part of the VM-ISO live gate).
 - **Consequence for the operator steps:** VM install + image build is added to the Raouf-only setup, and
   the VM-ISO live gate cannot be shown on a machine without Lima installed (it reports NOT CONFIGURED, like
   the other live gates).
