@@ -50,6 +50,7 @@ from .paths import CANDIDATE_USER, EVAL_USER, SealPaths
 from .spec import STRATA, load_spec, validate_item
 
 ZERO_SHA = "0" * 40
+ZERO_SHA64 = "0" * 64
 CHECK_TIMEOUT = 60
 STARTUP_FACTOR = 10          # the first query also pays for loading the candidate's models
 FINISH_TIMEOUT = 30          # after the last answer: EOF and a clean exit
@@ -470,6 +471,13 @@ def _broker_git(args, env, git_dir):
     return intake._intake_git(args, env, git_dir)
 
 
+def broker_declaration_digest(decl: dict) -> str:
+    """Canonical digest of a predeclaration (Rev 3 P1 #9), bound into the run key, the result and the
+    promotion record so a cached result can never be served under a different declaration."""
+    body = json.dumps(decl, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return hashlib.sha256(body.encode("ascii")).hexdigest()
+
+
 def broker_load_declaration(paths: SealPaths, ctx, staged: Path, commit: str, decl_path: str) -> dict:
     """Read `decl_path` out of `commit` in the staged (already verified) bundle (R20/R24). A regular
     100644 blob, at most MAX_DECLARATION_BYTES, strict JSON without duplicate keys or NaN/Infinity."""
@@ -822,17 +830,22 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
             provisional = os.urandom(8).hex()
             staged = intake.stage_bundle(args["bundle"], paths, expected_uid=expected_uid, run_id=provisional)
             intake.verify_bundle(staged, commit, env=ctx.git_env)
-            # 8. declaration (optional)
+            # 8. declaration. Rev 3 P1 #8: HOLDOUT is only for a declared promotion candidate (canonical §9).
             decl = None
+            decl_sha = ZERO_SHA64
+            if suite == "holdout" and not declared:
+                raise SealRefusal("DECLARATION_REQUIRED")
             if declared:
                 decl = broker_load_declaration(paths, ctx, staged, commit, args["declare"])
                 broker_check_declaration(decl, spec, suite_id=m["suite_id"])
+                decl_sha = broker_declaration_digest(decl)
             # 9. RESERVE is reachable only as a final acceptance of a candidate that passed HOLDOUT
             if suite == "reserve":
                 if not args["final_acceptance"] or not broker_holdout_passed(led, commit, m["suite_id"]):
                     raise SealRefusal("RESERVE_NOT_ELIGIBLE")
             # 10. cache or charge
-            key = run_key(commit, corpus_sha, smsha, grade.EVALUATOR_VERSION, suite, ctx.runtime_sha256())
+            key = run_key(commit, corpus_sha, smsha, grade.EVALUATOR_VERSION, suite, ctx.runtime_sha256(),
+                          decl_sha)
             if suite == "holdout":
                 budget_id, budget_n = m["suite_id"], policy["holdout_budget"]
             else:

@@ -66,27 +66,31 @@ def _t7_canon(obj) -> bytes:
 
 def test_t7_run_key_is_deterministic_and_sensitive_to_every_input():
     # ruling R14: the runtime digest is part of the key, so a changed runtime is never served from cache
-    base = run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32)
-    assert base == run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32)
+    D = "dd" * 32
+    base = run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32, D)
+    assert base == run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32, D)
     assert len(base) == 64
     variants = [
-        run_key("d" * 40, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32),
-        run_key(COMMIT, "ac" * 32, "cd" * 32, "1.0.0", "holdout", "ef" * 32),
-        run_key(COMMIT, H64, "ce" * 32, "1.0.0", "holdout", "ef" * 32),
-        run_key(COMMIT, H64, "cd" * 32, "1.0.1", "holdout", "ef" * 32),
-        run_key(COMMIT, H64, "cd" * 32, "1.0.0", "reserve", "ef" * 32),
-        run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "f0" * 32),
+        run_key("d" * 40, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32, D),
+        run_key(COMMIT, "ac" * 32, "cd" * 32, "1.0.0", "holdout", "ef" * 32, D),
+        run_key(COMMIT, H64, "ce" * 32, "1.0.0", "holdout", "ef" * 32, D),
+        run_key(COMMIT, H64, "cd" * 32, "1.0.1", "holdout", "ef" * 32, D),
+        run_key(COMMIT, H64, "cd" * 32, "1.0.0", "reserve", "ef" * 32, D),
+        run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "f0" * 32, D),
+        run_key(COMMIT, H64, "cd" * 32, "1.0.0", "holdout", "ef" * 32, "ee" * 32),  # P1 #9: declaration digest
     ]
-    assert len({base, *variants}) == 7
+    assert len({base, *variants}) == 8
 
 
 @pytest.mark.parametrize("args", [
-    ("short", H64, H64, "1.0.0", "holdout", H64), (COMMIT, "x", H64, "1.0.0", "holdout", H64),
-    (COMMIT, H64, "x", "1.0.0", "holdout", H64), (COMMIT, H64, H64, "v1", "holdout", H64),
-    (COMMIT, H64, H64, "1.0.0", "dev", H64), (COMMIT.upper(), H64, H64, "1.0.0", "holdout", H64),
-    (COMMIT, H64, H64, "1.0.0\n", "holdout", H64),
-    (COMMIT, H64, H64, "1.0.0", "holdout", "short"), (COMMIT, H64, H64, "1.0.0", "holdout", H64.upper()),
-    (COMMIT, H64, H64, "1.0.0", "holdout", None),
+    ("short", H64, H64, "1.0.0", "holdout", H64, H64), (COMMIT, "x", H64, "1.0.0", "holdout", H64, H64),
+    (COMMIT, H64, "x", "1.0.0", "holdout", H64, H64), (COMMIT, H64, H64, "v1", "holdout", H64, H64),
+    (COMMIT, H64, H64, "1.0.0", "dev", H64, H64), (COMMIT.upper(), H64, H64, "1.0.0", "holdout", H64, H64),
+    (COMMIT, H64, H64, "1.0.0\n", "holdout", H64, H64),
+    (COMMIT, H64, H64, "1.0.0", "holdout", "short", H64), (COMMIT, H64, H64, "1.0.0", "holdout", H64.upper(), H64),
+    (COMMIT, H64, H64, "1.0.0", "holdout", None, H64),
+    (COMMIT, H64, H64, "1.0.0", "holdout", H64, "short"), (COMMIT, H64, H64, "1.0.0", "holdout", H64, None),
+    (COMMIT, H64, H64, "1.0.0", "holdout", H64, H64.upper()),
 ])
 def test_t7_run_key_refuses_malformed_inputs(args):
     _t7_refused(lambda: run_key(*args), "BAD_ARGS")

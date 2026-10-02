@@ -76,9 +76,10 @@ def _entry_hash(entry: dict) -> str:
 
 
 def run_key(candidate_commit: str, corpus_sha: str, suite_manifest_sha: str, evaluator_version: str,
-            suite: str, runtime_sha256: str) -> str:
-    """Cache key of a run. Ruling R14: runtime_sha256 (the candidate runtime's identity) is part of the
-    key, so a changed runtime is never served from a result computed under another one."""
+            suite: str, runtime_sha256: str, declaration_sha256: str) -> str:
+    """Cache key of a run. Ruling R14: runtime_sha256 is part of the key. Rev 3 P1 #9:
+    declaration_sha256 (the canonical digest of the predeclaration, or 64 zeros for an undeclared reserve
+    run) is part of the key too, so two declarations in one commit never share a cached result."""
     ok = (
         type(candidate_commit) is str and _HEX40.fullmatch(candidate_commit)
         and type(corpus_sha) is str and _HEX64.fullmatch(corpus_sha)
@@ -86,11 +87,12 @@ def run_key(candidate_commit: str, corpus_sha: str, suite_manifest_sha: str, eva
         and type(evaluator_version) is str and _VERSION.fullmatch(evaluator_version)
         and suite in SUITES
         and type(runtime_sha256) is str and _HEX64.fullmatch(runtime_sha256)
+        and type(declaration_sha256) is str and _HEX64.fullmatch(declaration_sha256)
     )
     if not ok:
         raise SealRefusal("BAD_ARGS")
-    material = "\x00".join(("zurvan.z1b.runkey.v2", candidate_commit, corpus_sha, suite_manifest_sha,
-                            evaluator_version, suite, runtime_sha256))
+    material = "\x00".join(("zurvan.z1b.runkey.v3", candidate_commit, corpus_sha, suite_manifest_sha,
+                            evaluator_version, suite, runtime_sha256, declaration_sha256))
     return hashlib.sha256(material.encode("ascii")).hexdigest()
 
 

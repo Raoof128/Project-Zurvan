@@ -186,7 +186,11 @@ def _t10_build(tmp_path, *, n_holdout=10, n_reserve=5, commits=1):
     _t10_git(E.repo, "init", "-q")
     E.commits = []
     for i in range(commits):
-        E.commits.append(_t10_commit(E, "candidate code v%d\n" % i))
+        # Rev 3: HOLDOUT now requires a declaration (canonical §9), so commit 0 carries a default one;
+        # _t10_run auto-declares holdout runs against it unless a test opts out with declare=None.
+        E.commits.append(_t10_commit(E, "candidate code v%d\n" % i,
+                                     extra={_T10_DECL_DEFAULT: json.dumps(_t10_decl_body(E))}))
+    E.default_decl = _T10_DECL_DEFAULT
     E.manifest = _t10_seal(E)
     return E
 
@@ -267,8 +271,14 @@ def _t10_call(E, argv, ctx=None, paths=None):
     return rc, text, output.validate_broker_json(text)
 
 
-def _t10_run(E, commit=None, *, suite="holdout", ctx=None, declare=None, final=False, name=None):
+_T10_AUTO = object()
+
+
+def _t10_run(E, commit=None, *, suite="holdout", ctx=None, declare=_T10_AUTO, final=False, name=None):
     commit = commit or E.commits[0]
+    if declare is _T10_AUTO:
+        # holdout must be declared; reserve is never declared. A test forces undeclared with declare=None.
+        declare = getattr(E, "default_decl", None) if suite == "holdout" else None
     name = name or _t10_drop(E, commit)
     return _t10_call(E, _t10_argv(commit, name, suite, declare, final), ctx)
 
@@ -685,7 +695,9 @@ def test_t10_a_perfect_candidate_run_returns_a_valid_overall_only_result(tmp_pat
     assert doc["metrics"]["recall_at_1"] == 0.875 and doc["metrics"]["recall_at_3"] == 1.0
     assert doc["metrics"]["recall_at_10"] == 1.0 and doc["metrics"]["mrr"] == 1.0
     assert doc["abstain"] == {"passed": 2, "n": 2}
-    assert doc["per_stratum"] is None and doc["promotion"] is None
+    # Rev 3: holdout is always declared. No baseline exists, so promotion is a FAIL verdict (never None),
+    # and the per-stratum block never leaves the seal (G20).
+    assert doc["per_stratum"] is None and doc["promotion"]["verdict"] == "FAIL"
     assert doc["cached"] is False and doc["seal_valid"] is True and doc["budget_remaining"] == 7
     # G20: the printed result is the projection (memory and latency snapped up the ladder); the sealed
     # ledger keeps the exact figures
@@ -871,6 +883,19 @@ def test_t10_reserve_with_the_flag_but_no_prior_holdout_pass_is_not_eligible(tmp
 _T10_DECL_PATH = "eval/z1b/declarations/cand-1.json"
 _T10_DECL_PATH2 = "eval/z1b/declarations/cand-2.json"
 _T10_DECL_BASE = "eval/z1b/declarations/base-1.json"
+_T10_DECL_DEFAULT = "eval/z1b/declarations/default.json"
+
+
+def _t10_decl_body(E, *, margins=None, budgets=None, **over):
+    body = {
+        "role": "candidate", "suite_id": "0123456789abcdef", "primary_metric": "recall_at_10",
+        "critical_strata": ["exact_identifier", "path"],
+        "non_inferiority_margins": margins or {"critical": 0.05, "overall": 0.02},
+        "improvement_target": {"metric": "mrr", "min_delta": 0.01},
+        "resource_budgets": budgets or {"latency_p95_ms": 100000, "peak_rss_mb": 4096},
+    }
+    body.update(over)
+    return body
 
 
 def _t10_declared(E, *, parent=None, decl=None, extra_files=None, margins=None, budgets=None,
@@ -986,7 +1011,8 @@ def test_t10_malformed_declarations_are_declaration_invalid(tmp_path, bad):
 
 def test_t10_a_declaration_file_that_is_not_in_the_commit_is_declaration_invalid(tmp_path):
     E = _t10_build(tmp_path)
-    _t10_refused(_t10_run(E, E.commits[0], declare=_T10_DECL_PATH), "DECLARATION_INVALID")
+    # _T10_DECL_PATH2 is not committed anywhere, so naming it is DECLARATION_INVALID
+    _t10_refused(_t10_run(E, E.commits[0], declare=_T10_DECL_PATH2), "DECLARATION_INVALID")
 
 
 def test_t10_reserve_after_a_passing_declared_holdout_run_is_accepted_once_per_commit(tmp_path):
@@ -1073,7 +1099,7 @@ def test_t10_a_failed_reseal_does_not_mask_the_violation(tmp_path):
 def _t10_child(E, commit, name, queue):
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        rc = B.broker_main(_t10_argv(commit, name), paths=E.paths, ctx=_t10_ctx(E))
+        rc = B.broker_main(_t10_argv(commit, name, declare=E.default_decl), paths=E.paths, ctx=_t10_ctx(E))
     queue.put((rc, out.getvalue()))
 
 
@@ -1426,13 +1452,43 @@ def test_t10_a_declaration_with_an_unknown_role_is_declaration_invalid_and_charg
     assert "reserved" not in _t10_kinds(E)
 
 
-def test_t10_an_undeclared_holdout_run_never_becomes_the_baseline(tmp_path):
-    # R25: only a DECLARED baseline (per_stratum present, promotion null) or a promoted run is a baseline;
-    # an ordinary run also has promotion null, so without that distinction any run would set the bar
+def test_t10_a_candidate_role_run_never_becomes_the_baseline(tmp_path):
+    # R25 / Rev 3: only a DECLARED baseline-role run or a PROMOTED run is a baseline. A completed
+    # candidate-role run (verdict present) must not set the bar for the next candidate.
     E = _t10_build(tmp_path)
-    E.cand_cfg["oracle"] = {}
-    assert _t10_run(E)[0] == 0
-    E.cand_cfg["oracle"] = _t10_oracle(E.holdout + E.reserve)
+    assert _t10_run(E, E.commits[0])[0] == 0            # a candidate-role run completes (no baseline -> FAIL)
     commit, _p, name = _t10_declared(E)
     doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)[2]
     assert doc["promotion"]["verdict"] == "FAIL" and doc["promotion"]["rules"]["improvement"] is False
+
+
+# ================================================================ Rev 3: mandatory declaration + key binding
+
+def test_t10_rev3_holdout_without_a_declaration_is_refused_and_charges_nothing(tmp_path):
+    # canonical §9 / P1 #8: the sealed HOLDOUT is only for a declared promotion candidate
+    E = _t10_build(tmp_path)
+    _t10_refused(_t10_run(E, declare=None), "DECLARATION_REQUIRED")
+    assert "reserved" not in _t10_kinds(E) and "completed" not in _t10_kinds(E)
+
+
+def test_t10_rev3_two_declarations_in_one_commit_do_not_share_a_cache_entry(tmp_path):
+    # P1 #9: declaration_sha256 is in the run key, so declaration B is never served A's cached result
+    E = _t10_build(tmp_path)
+    base = _t10_weak_baseline(E)
+    commit = _t10_commit(E, "one commit, two declarations\n", extra={
+        _T10_DECL_PATH: json.dumps(_t10_decl_body(E)),
+        _T10_DECL_PATH2: json.dumps(_t10_decl_body(E, primary_metric="recall_at_1")),
+    })
+    na = _t10_drop(E, commit)
+    a = _t10_run(E, commit, declare=_T10_DECL_PATH, name=na)[2]
+    assert a["cached"] is False
+    nb = _t10_drop(E, commit)
+    b = _t10_run(E, commit, declare=_T10_DECL_PATH2, name=nb)[2]
+    assert b["cached"] is False  # different declaration digest => different key => not A's cache
+    completed = [e for e in _t10_ledger(E).entries() if e["kind"] == "completed"
+                 and e["result"]["suite"] == "holdout"]
+    assert len(completed) == 3  # baseline + A + B, all distinct keys
+    # re-running A with a fresh bundle IS cached (same declaration digest)
+    na2 = _t10_drop(E, commit)
+    a2 = _t10_run(E, commit, declare=_T10_DECL_PATH, name=na2)[2]
+    assert a2["cached"] is True

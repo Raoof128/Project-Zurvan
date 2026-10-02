@@ -15,7 +15,7 @@ ADDED_CODES = (
     "BUNDLE_INVALID",      # drop-dir file fails name/owner/nlink/symlink/size/verify checks
     "LEDGER_INVALID",      # hash chain broken, malformed line, unknown schema
     "RESERVE_NOT_ELIGIBLE",  # reserve run without --final-acceptance or without a prior HOLDOUT pass
-    "DECLARATION_INVALID",  # --declare path/pattern/schema bad
+    "DECLARATION_INVALID", "DECLARATION_REQUIRED",  # --declare path/pattern/schema bad
     "SCAN_INCOMPLETE",     # a leak-scan target unreadable (TCC/ACL) -> run refused
     "CANDIDATE_FAILED",    # candidate crashed/timed out/protocol violation (run charged to budget)
     "SANDBOX_VIOLATION",   # post-run sweep found candidate-owned files outside scratch or live processes
