@@ -88,6 +88,17 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-10-02 (Australia/Sydney) — Z1b Rev 3 #1: read-only corpus provisioning PROVEN on real VZ (developer closure of #1 complete)
+**Raouf:**
+- **Scope:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` on branch `z1b-rev3` (`18612aa`). Status on `main`: Rev 3 design §7b/§7f/§7g + progress doc, this CHANGELOG. No production code on `main`; no sudo, identity creation, authoring or model spend.
+- **What this proves.** The third developer-level property of #1 (VM-per-run candidate isolation): the candidate READS the frozen eval corpus but can never mutate it, and the exact corpus is bound to the run identity. Completes the developer trio with VM isolation (`c3ddb28`) and broker-only execution (`1adeb18`).
+- **Mechanism + honest refinement.** §7f(a) specified a `readonly` virtio disk; the gate uses a **squashfs** staged by `limactl copy` (scp over lima's ssh, NOT a host mount), loop-mounted `-o ro`. Stronger than a flag — squashfs has no kernel write path, so a compromised root in the guest cannot `remount,rw`. `verify_corpus_image` fails closed (`CORPUS_MISMATCH`) unless the image is a squashfs (`hsqs` magic) whose whole-file sha256 equals the declared identity (immutability and correct-identity are separate checks). `vm_copy_into_guest` stages it (`CANDIDATE_FAILED` on failure).
+- **Live gate (opt-in + serial, `ZURVAN_Z1B_VM_LIVE=1`).** Clean host: read the known file; write/create/delete/rename all fail "Read-only file system" even under sudo; no `/Users` mount; host image byte-unchanged; second guest pristine; teardown leaves no instance; wrong-digest rejection asserted. Positive control: the same write-probe on a writable tmpfs SUCCEEDS, so the read-only assertions are load-bearing.
+- **Operational finding (recorded, not a defect).** An interrupted run orphans a `limactl hostagent` VZ process that contends for VZ and flakes later back-to-back boots. Production is fail-closed: `vm_start` refuses a leftover instance (`SANDBOX_VIOLATION`). A dev re-run reaps orphans first (`ps | grep ZurvanEval/broker/bin/limactl`).
+- **Files:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` (branch `z1b-rev3`); `docs/superpowers/specs/2026-10-02-z1b-rev3-design.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/agents-history.md` (on `main`).
+- **Verification:** full live module **3 passed in 237 s** on a clean host; corpus gate + positive control **1 passed in 121 s**; 53 fake-runner unit + 5 broker-vm wiring tests; `-k z1b` **1593 passed / 2 skipped**; py3.9 parse clean; `public_repo_guard` + `boundary scan-diff` clean; `git diff --check` clean.
+- **#1 is NOT CLOSED.** Operator closure remains (§7f): golden retrieval image + the installed-broker closure gate (`tests/test_z1b_seal_live.py`, needs `sudo setup.sh`/`install.sh`, Raouf-only). Next: P1 queue #7 → #13 → #16 → #14 → #12.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b gauntlet round 2: all findings fixed; main index-rebuild test repaired
 **Raouf:**
 - **Scope:** fixed every finding the inline Simurgh gauntlet raised, test-first with mutation checks. Dry-run code on branch `z1b-gauntlet`; the plan on `main` records the fixes. No production Z1b on `main` still; no sudo, authoring or model spend.
@@ -99,38 +110,3 @@ Newest first. Entries older than the most recent two are archived **verbatim** i
 - **Verification:** full z1b suite on the gauntlet branch **1692 passed, 1 skipped** (live seal NOT CONFIGURED), verified once under the real CLT Python 3.9 (1037 sealed-side passed). `test_plan_integrity`, `public_repo_guard`, `git diff --check` clean. The index-rebuild fix verified 10/10 on `main`.
 - **Files:** `tests/test_check_gate_index_rebuild.py`, `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
 - **Follow-ups:** Raouf answers the 8 plan decisions (#2 and #8 pre-resolved to the recommended options); then execute Tasks 1-19; then the operator steps.
-
-### 2026-10-02 (Australia/Sydney) — Z1b plan written and gauntleted (awaiting acceptance; no production code)
-**Raouf:**
-- **Scope:**
-  - The plan is at `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`: 19 tasks, 23.8k lines.
-  - Its "Gauntlet" section holds the replay evidence. It also has a requirement → task matrix, a §9 gate → test/oracle matrix, the "Decisions for Raouf" section, and the exact operator commands (not run).
-  - The progress record `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md` is updated.
-  - Not done: `sudo`, identity creation, broker install, authoring, model spend, push.
-- **Summary:**
-  - Tasks 1–17 were dry-run by seven Sonnet writers in throwaway worktrees. Task 18 (integration fixes) and the assembly, replay and review were done inline.
-  - 18 gauntlet defects (G1–G18) were fixed in the plan, nine of them HIGH:
-    - G1: sudo keeps `HOME`, so the dev user's git config would run.
-    - G2: the sealed side would execute dev-writable `age`/`claude` binaries.
-    - G3/G4: `git bundle verify` passes corrupted packs, and a bundle could run another HEAD.
-    - G5: a predeclaration cannot name its own commit.
-    - G6: the installed wrappers imported the wrong entry, so the seal would not start.
-    - G7: plaintext authoring state sat in a path Time Machine backs up.
-    - G8: the installed broker had no spec.
-    - G9: no candidate runtime existed.
-  - Every §9 gate maps to an existing test; `tests/test_z1b_closure.py` enforces it. Gates 1, 1b, 4, 5, 8 and 9 additionally need the live oracles in Task 19, which run only after the operator steps.
-- **Files:** `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md` (new), `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
-- **Verification:**
-  - A mechanical replay of the plan into a fresh worktree from `main` gives **1671 passed, 1 skipped** on the Z1b set. The skip is the live seal reporting NOT CONFIGURED.
-  - Its code is unit-for-unit identical to the gauntlet branch.
-  - Full suite, replay vs clean `main` worktree: the same 10 failures and the same 6 live-store-guard teardown errors in both. The 3 tests that differed pass serially in both trees.
-  - `test_plan_integrity` passed, the Boundary scan of the plan is clean, `public_repo_guard` passed, and `git diff --check` is clean.
-- **Found on `main` (not fixed, out of scope):** `tests/test_check_gate_index_rebuild.py` fails 7 of 10 tests on the current checkout. Its `_stub_gitignore` stub rejects the `timeout=` keyword that `rebuild_index.py` passes.
-- **Status update (10:58):** Raouf tried `sudo scripts/eval_seal/setup.sh` and got `command not found`. That is expected: the script exists only on the throwaway `z1b-gauntlet` branch until Tasks 1–18 are executed and merged. Nothing ran.
-  - Order from here: accept the plan or answer its decisions; execute Tasks 1–18 inline on a branch; merge locally; then run the operator steps from the repo root at the reviewed SHA (`setup.sh`, then `install.sh <SHA>`).
-  - Never run the operator steps from a gauntlet worktree.
-- **Follow-ups:**
-  1. Raouf accepts or revises the plan and answers its 7 decisions (recommended: move untrusted git pack parsing to `zurvancandidate`).
-  2. Execute Tasks 1–19 Step 3 on a branch.
-  3. Raouf runs the operator steps.
-  4. Run Task 19 Steps 4–7 to close Z1b, or report which gate failed.

@@ -124,3 +124,27 @@ An external reviewer read the full plan file and found it is **split-brain**: se
 4. **Evaluation policy:** declaration mandatory for HOLDOUT; `declaration_sha256` in the run key, signed result and promotion record; operator-pinned initial baseline; resource-only promotion route.
 5. **Corpus completeness** (export the full indexed BUILD_INPUTS, not a `wiki/` subset) and **atomic sealed-generation publication**.
 6. **Re-run the gauntlet from a clean `main` worktree and mint a content-addressed replay record** (`plan_sha256`, baseline SHA, replay tree SHA, test output). One byte changes → replay STALE automatically. No hand-edited "FIXED" rows after the digest.
+
+## Rev 3 execution — #1 DEVELOPER CLOSURE COMPLETE (2026-10-02 21:15)
+
+Three developer-level properties of #1 are now PROVEN on real Apple VZ (branch `z1b-rev3`), each by an
+opt-in/serial live gate that SKIPS `NOT CONFIGURED` without lima:
+
+- **VM isolation** (`c3ddb28`): candidate runs inside a disposable guest; `ls /Users` / `cat <repo>/CLAUDE.md`
+  fail (no host crossover); results only over `limactl shell` stdin/stdout; teardown leaves no instance,
+  including after a mid-run kill.
+- **Broker-only execution** (`1adeb18`): production `launch_candidate` executes the candidate ONLY via
+  `broker_vm_launch`; the host `run` subcommand is refused; a VM failure fails closed (never host execution).
+- **Read-only corpus provisioning** (`18612aa`, design §7g): squashfs staged by `limactl copy` (not a host
+  mount), loop-mounted `-o ro`; read succeeds, write/create/delete/rename all fail even under sudo; host
+  image byte-unchanged; second guest pristine; digest bound to the run identity (`verify_corpus_image`
+  rejects the wrong disk). Positive control: the same probe on a writable tmpfs SUCCEEDS, so the assertions
+  are load-bearing. Full live module 3 passed in 237 s on a clean host.
+
+Operational finding recorded in design §7g: an interrupted run orphans a `limactl hostagent` that contends
+for VZ and flakes later boots; production is fail-closed (`SANDBOX_VIOLATION` on a leftover instance), and a
+dev re-run needs orphans reaped first.
+
+**#1 is NOT stamped CLOSED.** Operator closure remains (design §7f): the golden retrieval image + the full
+installed-broker closure gate (`tests/test_z1b_seal_live.py`), which need `sudo setup.sh`/`install.sh` and
+are Raouf-only. Next: the P1 queue in order #7 → #13 → #16 → #14 → #12.

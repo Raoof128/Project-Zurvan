@@ -3,6 +3,41 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-02 (Australia/Sydney) — Z1b plan written and gauntleted (awaiting acceptance; no production code)
+**Raouf:**
+- **Scope:**
+  - The plan is at `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md`: 19 tasks, 23.8k lines.
+  - Its "Gauntlet" section holds the replay evidence. It also has a requirement → task matrix, a §9 gate → test/oracle matrix, the "Decisions for Raouf" section, and the exact operator commands (not run).
+  - The progress record `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md` is updated.
+  - Not done: `sudo`, identity creation, broker install, authoring, model spend, push.
+- **Summary:**
+  - Tasks 1–17 were dry-run by seven Sonnet writers in throwaway worktrees. Task 18 (integration fixes) and the assembly, replay and review were done inline.
+  - 18 gauntlet defects (G1–G18) were fixed in the plan, nine of them HIGH:
+    - G1: sudo keeps `HOME`, so the dev user's git config would run.
+    - G2: the sealed side would execute dev-writable `age`/`claude` binaries.
+    - G3/G4: `git bundle verify` passes corrupted packs, and a bundle could run another HEAD.
+    - G5: a predeclaration cannot name its own commit.
+    - G6: the installed wrappers imported the wrong entry, so the seal would not start.
+    - G7: plaintext authoring state sat in a path Time Machine backs up.
+    - G8: the installed broker had no spec.
+    - G9: no candidate runtime existed.
+  - Every §9 gate maps to an existing test; `tests/test_z1b_closure.py` enforces it. Gates 1, 1b, 4, 5, 8 and 9 additionally need the live oracles in Task 19, which run only after the operator steps.
+- **Files:** `docs/superpowers/plans/2026-10-02-z1b-sealed-eval.md` (new), `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md`.
+- **Verification:**
+  - A mechanical replay of the plan into a fresh worktree from `main` gives **1671 passed, 1 skipped** on the Z1b set. The skip is the live seal reporting NOT CONFIGURED.
+  - Its code is unit-for-unit identical to the gauntlet branch.
+  - Full suite, replay vs clean `main` worktree: the same 10 failures and the same 6 live-store-guard teardown errors in both. The 3 tests that differed pass serially in both trees.
+  - `test_plan_integrity` passed, the Boundary scan of the plan is clean, `public_repo_guard` passed, and `git diff --check` is clean.
+- **Found on `main` (not fixed, out of scope):** `tests/test_check_gate_index_rebuild.py` fails 7 of 10 tests on the current checkout. Its `_stub_gitignore` stub rejects the `timeout=` keyword that `rebuild_index.py` passes.
+- **Status update (10:58):** Raouf tried `sudo scripts/eval_seal/setup.sh` and got `command not found`. That is expected: the script exists only on the throwaway `z1b-gauntlet` branch until Tasks 1–18 are executed and merged. Nothing ran.
+  - Order from here: accept the plan or answer its decisions; execute Tasks 1–18 inline on a branch; merge locally; then run the operator steps from the repo root at the reviewed SHA (`setup.sh`, then `install.sh <SHA>`).
+  - Never run the operator steps from a gauntlet worktree.
+- **Follow-ups:**
+  1. Raouf accepts or revises the plan and answers its 7 decisions (recommended: move untrusted git pack parsing to `zurvancandidate`).
+  2. Execute Tasks 1–19 Step 3 on a branch.
+  3. Raouf runs the operator steps.
+  4. Run Task 19 Steps 4–7 to close Z1b, or report which gate failed.
+
 ### 2026-09-28g (Australia/Sydney) — Z0 CLOSED: all 20 §10 gate items demonstrated by named tests, enforced by a matrix that cannot rot
 **Raouf:**
 - **Scope:** `scripts/cli.py` (`zurvan knowledge callers --strict`; a store with no ledger says "nothing recorded"), `scripts/check.sh` (`[13/23]` runs it), new `tests/test_z0_closure.py` (the gated inventory, and `test_every_gate_item_names_a_test_that_exists`, which fails if any test the matrix names stops existing), `tests/test_coherent_capture.py` (+8: real-kill gates 4, 5, 7, 18; real-write gate 11 ×2; STALE clauses of 12 and 17), spec §10.5 closure matrix. Plan `docs/superpowers/plans/2026-09-28-z0-step7-closure.md`.

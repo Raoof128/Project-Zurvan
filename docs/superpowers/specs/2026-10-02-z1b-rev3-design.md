@@ -188,7 +188,7 @@ Executed inline, test-first, each commit mutation-checked. Full z1b suite on the
 | #9 | `declaration_sha256` bound into the run key (v3) — two declarations in one commit never share a cached result | DONE | `0b84b43` |
 | #11 | corpus export carries every indexed root (docs/ + root .md), digest excludes volatile snapshot metadata | DONE | `b8b526f` |
 | #2 (P0) | `zurvanauthor` identity split | DONE `c77504b` (draft/seal phase split) + `b41df1a` (OS identity, ACLs, read-denial live gate). WAS: — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
-| #1 (P0) | VM-per-run candidate isolation | BOUNDARY + WIRING DONE, not yet CLOSED. `vm_runner.py` (`15edd86`), VM-ISO live gate `c3ddb28` (real VZ boots), opt-in/serial `26f8cd1`, broker->VM wiring + no-host-path `1adeb18`. REMAINING (operator-install, §7f): golden image + read-only corpus disk, and the installed-broker closure gate. |
+| #1 (P0) | VM-per-run candidate isolation | **DEVELOPER CLOSURE COMPLETE, not yet CLOSED.** `vm_runner.py` (`15edd86`), VM-ISO live gate `c3ddb28` (real VZ boots), opt-in/serial `26f8cd1`, broker->VM wiring + no-host-path `1adeb18`, read-only corpus provisioning boundary `18612aa` (live, §7g). The three developer-level properties are PROVEN on real VZ: VM isolation (no host crossover), broker-only execution (no host path, fail-closed), read-only corpus provisioning (candidate reads, cannot mutate; digest bound to run identity). REMAINING (operator-install, §7f): golden retrieval image + the full installed-broker closure gate. **Do NOT stamp #1 CLOSED until (b) is green on real identities.** |
 | #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
 | #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
 | #14 | atomic sealed generations | NOT STARTED |
@@ -264,8 +264,49 @@ mount is read-only), and a second run starts from a clean guest (fresh instance;
 Not a direct vm_runner call: `zurvan eval z1b run --commit <sha> --suite holdout --declare ...` driving the
 INSTALLED broker, pinned Lima asset tree, golden image, real corpus provisioning. Assert success, failure,
 timeout and kill all behave, and the post-run sweep leaves no instance. Only when this gate is green on the
-real identities is #1 stamped CLOSED. Until then #1 is: boundary PROVEN, broker-wired, no host path;
-provisioning + the installed-broker closure gate pending the operator steps.
+real identities is #1 stamped CLOSED. Until then #1 is: boundary PROVEN, broker-wired, no host path,
+read-only corpus provisioning PROVEN (§7g); the golden retrieval image + the installed-broker closure gate
+pending the operator steps.
+
+## 7g. Read-only corpus provisioning PROVEN (2026-10-02 21:15), with a mechanism refinement
+
+The read-only-corpus property of §7f(a) is now proven on real VZ, independent of the golden image. Branch
+`z1b-rev3` `18612aa`.
+
+**Mechanism refinement (honest delta from §7f(a)).** §7f(a) specified the corpus as an `additionalDisks:
+readonly` virtio disk. The live gate instead provisions a **squashfs** image, staged into the guest with
+`limactl copy` (scp over lima's ssh — *not* a host mount) and loop-mounted `-o ro`. This is a **stronger**
+guarantee than a `readonly` flag: squashfs has no write path in the kernel at all, so a compromised root
+inside the guest cannot `mount -o remount,rw` its way back to a writable corpus. A `readonly` virtio disk
+relies on the flag being honoured; squashfs is physically unwritable. The operator install may still attach
+it as `additionalDisks: readonly` for convenience, but the gate asserts the squashfs physical guarantee.
+
+**`vm_runner` additions (`18612aa`).** `corpus_image_sha256` / `verify_corpus_image` fail closed
+(`CORPUS_MISMATCH`) unless the image is a squashfs (`hsqs` magic) whose whole-file sha256 equals the
+declared identity — *immutability* and *correct identity* are separate requirements, so a genuine read-only
+disk that is simply the WRONG disk is still refused. `vm_copy_into_guest` stages via `limactl copy`
+(`CANDIDATE_FAILED` on failure). Constants `GUEST_CORPUS_SQUASHFS`, `GUEST_CORPUS_MOUNT`.
+
+**Live gate (measured, `tests/test_z1b_vm_live.py::test_t1_vm_iso_gate_read_only_corpus_boundary`, opt-in +
+serial).** On a clean host: candidate READS the known file (`known-corpus-content-v1`); write / create /
+delete / rename ALL fail "Read-only file system" even under sudo; no host mount (`/Users`) visible; the host
+corpus image is byte-for-byte unchanged after the run; a SECOND guest starts from the pristine corpus (no
+state carried over); teardown leaves no instance. `verify_corpus_image` rejecting a wrong digest is asserted
+too. **Mutation / positive control:** the SAME write-probe against a writable tmpfs mount SUCCEEDS (rc=0),
+so the read-only assertions are load-bearing — a corpus wired to a writable backing WOULD turn the gate red.
+Full live module **3 passed in 237 s**; corpus gate with the positive control **1 passed in 121 s**; 53
+fake-runner unit tests + 5 broker-vm wiring tests; `-k z1b` 1593 passed / 2 skipped; py3.9 parse clean;
+public_repo_guard + boundary scan-diff clean.
+
+**Operational finding (recorded, not a defect).** An INTERRUPTED live run (the broker SIGKILLed before its
+teardown finally, or the `LIMA_HOME` `rm -rf`'d out from under a live instance) orphans a `limactl
+hostagent` VZ process that keeps a guest alive and contends for VZ resources, making later back-to-back
+boots flake (`CANDIDATE_FAILED` on the 2nd/3rd boot). This was diagnosed to the orphan — a clean host runs
+all gates green, and two guests back-to-back both boot and both `limactl copy` succeed. **Production is
+fail-closed against this**: `vm_start` REFUSES a leftover instance in the stable `LIMA_HOME`
+(`SANDBOX_VIOLATION`) rather than contend, so an orphaned prior run blocks the next run instead of
+poisoning it. Re-running the gate on a dev host requires reaping orphans first
+(`ps | grep ZurvanEval/broker/bin/limactl`); the install/operator runbook must note the same.
 
 ## 8. Build order for the Rev 3 plan
 
