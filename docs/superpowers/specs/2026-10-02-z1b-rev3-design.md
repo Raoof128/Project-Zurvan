@@ -373,6 +373,25 @@ aarch64 guest image (§7f a.1) and place it at `broker_dir/images/guest.qcow2`; 
 corpus (`install_corpus`); author + seal a suite (model spend, as `zurvanauthor`); then the full
 installed-broker live gate through `zurvan eval z1b run` incl. a real VM candidate run.
 
+## 7j. Golden-image feasibility PROVEN on Debian 12 aarch64 (2026-10-03)
+
+The load-bearing unknown of the golden-image build (does the retrieval runtime actually run on a glibc
+aarch64 guest?) is settled empirically. A Debian 12 (bookworm) aarch64 Lima guest (Python 3.11.2),
+booted with `mounts: []` + containerd off, `pip install torch sentence-transformers sqlite-vec numpy`
+succeeded (all have glibc-aarch64 wheels: torch 2.14.1 cp311/manylinux_2_28, st 6.1.0, sqlite-vec
+0.1.9, numpy 2.4.6), and `SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2").encode(...)`
+returned a 384-dim vector -> `SPIKE_OK torch=2.14.1 dim=384`. Guest torn down clean. So **Debian 12
+aarch64 is the golden-image base** (Python 3.11 matches the cp311 wheels; glibc 2.36 satisfies
+manylinux_2_28). The pinned Alpine base stays ONLY for the isolation proof.
+
+**Remaining golden-image build (now de-risked, reproducible):** a build script that boots a pinned
+Debian 12 aarch64 base, installs python3.11 + the stack (prefer the CPU-only torch wheel to shrink the
+image), stages the candidate commit's `scripts/` at `/opt/z1b/candidate` + a runtime venv at
+`/opt/z1b/runtime`, bakes the MiniLM model HF cache offline-ready, flattens the disk to a self-contained
+`guest.qcow2` (`qemu-img convert`), and digests it -> `GUEST_IMAGE_DIGEST`; then wire `install.sh` to
+place+verify `broker_dir/images/guest.qcow2`. Separately: the candidate needs `ZURVAN_SEARCH_DB` built
+from the read-only corpus (the broker's candidate-launch path must build/provide the index in-guest).
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
