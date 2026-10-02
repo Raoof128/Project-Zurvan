@@ -686,6 +686,20 @@ def test_t12_install_generates_keys_as_eval_user_only_when_absent(t12_world):
 
 
 @needs_clt
+def test_t12_install_derives_allowed_signers_as_eval_after_the_signing_key(t12_world):
+    # #7: the manifest-verify trust anchor is created at install, as the eval identity, from the pubkey of
+    # the signing key generated just above it. Never left to a pre-existing or externally supplied file.
+    lines = _t12_lines(t12_world["install"])
+    al = [ln for ln in lines if "/Users/zurvaneval/keys/allowed_signers" in ln and "-u zurvaneval" in ln]
+    assert len(al) == 1, al
+    ln = al[0]
+    assert "/Users/zurvaneval/keys/signing_ed25519.pub" in ln
+    assert 'namespaces=' in ln and "zurvan-z1b-manifest" in ln and "zurvaneval" in ln
+    ssh = next(i for i, l in enumerate(lines) if "ssh-keygen" in l and "-u zurvaneval" in l)
+    assert lines.index(ln) > ssh  # derived only after the signing key exists
+
+
+@needs_clt
 def test_t12_install_requires_setup_first_and_the_clt_python(t12_world):
     text = "\n".join(_t12_lines(t12_world["install"]))
     assert "/bin/test -d /Library/ZurvanEval" in text

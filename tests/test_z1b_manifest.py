@@ -348,3 +348,46 @@ def test_t6_top_level_key_that_is_a_digest_is_refused_by_the_standalone_guard():
     m2 = _t6_manifest()
     m2[1] = "x"
     _t6_refused(lambda: M.assert_no_per_item_digests(m2))
+
+
+# ------------------------------------------------------------------ #7: allowed_signers derived at install
+
+def test_t7_install_derivation_matches_the_known_good_signers_format_and_verifies(tmp_path):
+    """The install-time derivation (render.allowed_signers_derive_sh) must produce byte-for-byte the same
+    anchor the hand-written fixture does, and ssh-keygen -Y must then accept the signing key and reject any
+    other. This is #7: the trust anchor is created deterministically from the generated key, never missing,
+    stale or externally supplied."""
+    from scripts.eval_seal import render as R
+    keys = tmp_path / "keys"
+    key = _t6_keygen(keys, "signing_ed25519")
+    inner = R.allowed_signers_derive_sh(str(keys / "signing_ed25519.pub"), str(keys / "allowed_signers"))
+    r = subprocess.run(["/bin/sh", "-c", inner], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    derived = (keys / "allowed_signers").read_text()
+    # byte-identical to the authoritative fixture format
+    expected = _t6_signers(tmp_path / "expected_signers", key).read_text()
+    assert derived == expected
+    # the pinned principal + namespace, not whatever happened to be in a file
+    pub = (keys / "signing_ed25519.pub").read_text().split()
+    assert derived == 'zurvaneval namespaces="zurvan-z1b-manifest" %s %s\n' % (pub[0], pub[1])
+    # end-to-end: a manifest signed by the key verifies against the DERIVED anchor; another key is refused
+    mf = tmp_path / "manifest.json"
+    M.write_manifest(mf, _t6_manifest())
+    assert M.verify(mf, M.sign(mf, key), keys / "allowed_signers")
+    other = _t6_keygen(tmp_path / "other", "signing_ed25519")
+    with pytest.raises(SealRefusal):
+        M.verify(mf, M.sign(mf, other), keys / "allowed_signers")
+
+
+def test_t7_derivation_is_idempotent_and_atomic(tmp_path):
+    """Re-running the derivation rebuilds the same anchor (self-healing) and leaves no .new temp behind."""
+    from scripts.eval_seal import render as R
+    keys = tmp_path / "keys"
+    _t6_keygen(keys, "signing_ed25519")
+    inner = R.allowed_signers_derive_sh(str(keys / "signing_ed25519.pub"), str(keys / "allowed_signers"))
+    for _ in range(2):
+        assert subprocess.run(["/bin/sh", "-c", inner], capture_output=True, timeout=30).returncode == 0
+    first = (keys / "allowed_signers").read_text()
+    assert subprocess.run(["/bin/sh", "-c", inner], capture_output=True, timeout=30).returncode == 0
+    assert (keys / "allowed_signers").read_text() == first
+    assert not (keys / "allowed_signers.new").exists()

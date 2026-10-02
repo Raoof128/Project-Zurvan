@@ -28,9 +28,11 @@ from string import Template
 
 try:
     from .paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
+    from .manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
 except ImportError:  # run as a script: scripts/eval_seal is not a package here
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
+    from scripts.eval_seal.manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
 
 _P = SealPaths.real()
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -576,6 +578,28 @@ def _ancestors(rel):
     return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
 
+def allowed_signers_derive_sh(pub_path: str, out_path: str) -> str:
+    """Inner POSIX shell (no privilege change) that (re)derives the manifest-verify trust anchor from an
+    ed25519 signing pubkey, as the EXACT line `manifest.verify` expects:
+    `<principal> namespaces="<ns>" <keytype> <keydata>`. Atomic (temp + rename), idempotent and
+    self-healing: it is rebuilt from the CURRENT pub on every install, so a missing, stale or externally
+    supplied `allowed_signers` can never be trusted — the anchor always binds the key just generated, with
+    the fixed principal/namespace the verifier pins. `\\042` is printf's octal for `"`, so no literal quote
+    has to survive three shell quoting levels."""
+    tmp = out_path + ".new"
+    return ("umask 077; k=\"$(/usr/bin/cut -d' ' -f1,2 %s)\" && "
+            "/usr/bin/printf '%%s namespaces=\\042%%s\\042 %%s\\n' '%s' '%s' \"$k\" > %s && "
+            "/bin/mv -f %s %s") % (pub_path, MANIFEST_PRINCIPAL, MANIFEST_NAMESPACE, tmp, tmp, out_path)
+
+
+def allowed_signers_cmd(keys_dir: str, eval_user: str) -> str:
+    """The install step: derive `allowed_signers` AS the eval identity (the keys dir is eval-owned 0700, and
+    the broker that reads the anchor also runs as the eval identity — signer and verifier are one trusted
+    identity, so the anchor lives beside the key)."""
+    inner = allowed_signers_derive_sh(keys_dir + "/signing_ed25519.pub", keys_dir + "/allowed_signers")
+    return "/usr/bin/sudo -u %s -H /bin/sh -c %s" % (eval_user, shlex.quote(inner))
+
+
 def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keygen, claude, hf_dir, real):
     validate_sha(sha)
     validate_user(dev_user)
@@ -672,6 +696,10 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
              % (KEYS_DIR, EVAL_USER, BROKER_BIN, KEYS_DIR))
     plan.raw("if [ ! -e %s/signing_ed25519 ]; then /usr/bin/sudo -u %s -H /usr/bin/ssh-keygen -q -t ed25519 -N '' "
              "-C zurvan-eval-signing -f %s/signing_ed25519; fi" % (KEYS_DIR, EVAL_USER, KEYS_DIR))
+    plan.comment("the manifest-verify trust anchor is DERIVED from the just-generated signing key on EVERY "
+                 "install (idempotent, self-healing): a missing, stale or externally supplied allowed_signers "
+                 "can never be trusted, and it always binds the current key with the pinned principal+namespace")
+    plan.raw(allowed_signers_cmd(KEYS_DIR, EVAL_USER))
 
     sudoers = render_sudoers(dev_user, wrappers)
     staged = plan.stage_bytes(SUDOERS_FILE, sudoers.encode())
