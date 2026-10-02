@@ -53,9 +53,11 @@ def test_t1vm_lima_home_stays_well_under_the_ssh_sock_limit(tmp_path):
     # the VZ ssh.sock path is <LIMA_HOME>/<name>/ssh.sock and must be < 104 chars (UNIX_PATH_MAX). Under a
     # real sealed scratch (/Users/zurvancandidate/scratch) the name is short; assert the suffix budget here.
     p = SealPaths.real()
-    home = V._vm_lima_home(p, RID)
-    sock = str(home / V.vm_instance_name(RID) / "ssh.sock")
+    home = V._vm_lima_home(p)
+    # lima's real control socket is <LIMA_HOME>/<name>/ssh.sock.<16 digits>; budget for the whole thing.
+    sock = str(home / V.vm_instance_name(RID)) + "/ssh.sock." + "0" * 16
     assert len(sock) < 104, (len(sock), sock)
+    assert home == p.candidate_home / "lima"
 
 
 def test_t1vm_start_builds_the_pinned_launcher_argv_and_writes_the_config(tmp_path):
@@ -66,15 +68,15 @@ def test_t1vm_start_builds_the_pinned_launcher_argv_and_writes_the_config(tmp_pa
     assert argv[0] == str(p.broker_bin / "limactl") and argv[1] == "start"
     assert "--name=z" + RID in argv
     cfg = Path(argv[-1])
-    assert cfg.read_text() == V.vm_config_text() and (cfg.stat().st_mode & 0o777) in (0o600, 0o644)
-    # nothing inherited; LIMA_HOME is short and under the scratch
-    assert "LIMA_HOME" in kw["env"] and kw["env"]["LIMA_HOME"].startswith(str(p.scratch_dir))
+    assert cfg.read_text() == V.vm_config_text() and cfg.name == "z" + RID + ".yaml"
+    # nothing inherited; LIMA_HOME is the short shared candidate home dir
+    assert kw["env"]["LIMA_HOME"] == str(p.candidate_home / "lima")
     assert "PYTHONPATH" not in kw["env"]
 
 
-def test_t1vm_start_refuses_a_leftover_lima_home_as_a_sandbox_violation(tmp_path):
+def test_t1vm_start_refuses_a_leftover_instance_as_a_sandbox_violation(tmp_path):
     p = _vm_paths(tmp_path)
-    V._vm_lima_home(p, RID).mkdir(parents=True)
+    (V._vm_lima_home(p) / V.vm_instance_name(RID)).mkdir(parents=True)  # a prior teardown left the instance
     with pytest.raises(SealRefusal) as ei:
         V.vm_start(RID, p, runner=_vm_recorder())
     assert ei.value.code == "SANDBOX_VIOLATION"
@@ -109,30 +111,38 @@ def test_t1vm_launch_boots_then_returns_a_shell_popen_on_the_protocol_channel(tm
     assert seen["kw"]["close_fds"] is True and proc.pid == 4321
 
 
-def test_t1vm_teardown_deletes_the_instance_and_removes_the_lima_home(tmp_path):
+def test_t1vm_teardown_deletes_the_instance_and_the_per_run_config_but_keeps_the_shared_home(tmp_path):
     p = _vm_paths(tmp_path)
-    home = V._vm_lima_home(p, RID)
+    home = V._vm_lima_home(p)
     home.mkdir(parents=True)
-    (home / "junk").write_text("x")
+    (home / ("z" + RID + ".yaml")).write_text("cfg")
     r = _vm_recorder()
     V.vm_teardown(RID, p, runner=r)
     assert r.calls[0][0][1:3] == ["delete", "-f"] and ("z" + RID) in r.calls[0][0]
-    assert not home.exists()
+    assert not (home / ("z" + RID + ".yaml")).exists()  # per-run config gone
+    assert home.exists()  # the shared home (image cache) stays
 
 
 def test_t1vm_teardown_never_raises_even_when_delete_fails(tmp_path):
     p = _vm_paths(tmp_path)
-    home = V._vm_lima_home(p, RID)
+    home = V._vm_lima_home(p)
     home.mkdir(parents=True)
+    (home / ("z" + RID + ".yaml")).write_text("cfg")
 
     def boom(argv, **kw):
         raise OSError("limactl exploded")
     V.vm_teardown(RID, p, runner=boom)   # must not raise
-    assert not home.exists()             # and still removes the state
+    assert not (home / ("z" + RID + ".yaml")).exists()  # still cleans the per-run config
 
 
 def test_t1vm_leftover_instances_reports_an_instance_a_teardown_left_behind(tmp_path):
     p = _vm_paths(tmp_path)
-    V._vm_lima_home(p, RID).mkdir(parents=True)
+    V._vm_lima_home(p).mkdir(parents=True)
     assert V.vm_leftover_instances(p, runner=_vm_recorder(stdout=b"")) == []
     assert V.vm_leftover_instances(p, runner=_vm_recorder(stdout=b"z" + RID.encode() + b"\n")) == ["z" + RID]
+
+
+def test_t1vm_config_uses_a_pinned_image_location_override_when_given():
+    # production pins the image FILE (guest has no network); the default stays the pinned URL
+    assert 'location: "file:///pinned/alpine.qcow2"' in V.vm_config_text("file:///pinned/alpine.qcow2")
+    assert V.GUEST_IMAGE_URL in V.vm_config_text()

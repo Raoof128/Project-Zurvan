@@ -35,7 +35,7 @@ START_TIMEOUT = 300
 TEARDOWN_TIMEOUT = 120
 
 
-def vm_config_text() -> str:
+def vm_config_text(image_location: str = None) -> str:
     """The pinned Lima config. Every line here is measured-necessary (design s7d):
     - `mounts: []`        : the guest sees NO host filesystem (the boundary against host-side secrets);
     - `containerd` off    : Alpine has no systemd, so lima's containerd check would mark the VM DEGRADED
@@ -54,7 +54,7 @@ def vm_config_text() -> str:
         "cpus: 2\n"
         'memory: "1GiB"\n'
         'disk: "4GiB"\n'
-    ) % (GUEST_IMAGE_URL, GUEST_IMAGE_ARCH, GUEST_IMAGE_DIGEST)
+    ) % (image_location or GUEST_IMAGE_URL, GUEST_IMAGE_ARCH, GUEST_IMAGE_DIGEST)
 
 
 def vm_instance_name(run_id: str) -> str:
@@ -78,23 +78,29 @@ def _vm_env(paths, lima_home: Path) -> dict:
     return clean_env(paths.candidate_home, {"LIMA_HOME": str(lima_home)})
 
 
-def _vm_lima_home(paths, run_id: str) -> Path:
-    # Under the candidate scratch, kept short on purpose.
-    return Path(paths.scratch_dir) / ("l" + run_id)
+# lima appends a 16-digit suffix to the control socket: <LIMA_HOME>/<name>/ssh.sock.<16 digits>. That whole
+# path must stay under UNIX_PATH_MAX (104). So LIMA_HOME is one SHORT, persistent dir (it also caches the
+# pinned image across runs), and per-run isolation is the unique instance name plus delete-after-run.
+SSH_SOCK_SUFFIX = len("/ssh.sock.") + 16
 
 
-def vm_start(run_id: str, paths, *, runner=None) -> None:
-    """Create and boot the per-run instance from the pinned config. Raises CANDIDATE_FAILED on any failure
+def _vm_lima_home(paths) -> Path:
+    return Path(paths.candidate_home) / "lima"
+
+
+def vm_start(run_id: str, paths, *, runner=None, image_location: str = None) -> None:
+    """Boot this run's instance in the shared LIMA_HOME from the pinned config. A pre-existing instance of
+    the same name means a prior teardown failed (SANDBOX_VIOLATION). CANDIDATE_FAILED on any boot failure
     (a VM that will not boot is a failed run, charged by the broker)."""
     runner = runner or subprocess.run
     name = vm_instance_name(run_id)
-    lima_home = _vm_lima_home(paths, run_id)
-    if lima_home.exists():
-        raise SealRefusal("SANDBOX_VIOLATION")  # a leftover LIMA_HOME means a prior teardown failed
-    lima_home.mkdir(parents=True)
+    lima_home = _vm_lima_home(paths)
+    lima_home.mkdir(parents=True, exist_ok=True)
     os.chmod(str(lima_home), 0o700)
-    cfg = lima_home / "z1b.yaml"
-    cfg.write_text(vm_config_text())
+    if (lima_home / name).exists():
+        raise SealRefusal("SANDBOX_VIOLATION")  # a leftover instance means a prior teardown failed
+    cfg = lima_home / (name + ".yaml")
+    cfg.write_text(vm_config_text(image_location))
     argv = [_vm_limactl(paths), "start", "--tty=false", "--name=" + name, str(cfg)]
     try:
         done = runner(argv, env=_vm_env(paths, lima_home), stdin=subprocess.DEVNULL,
@@ -111,13 +117,13 @@ def vm_shell_argv(run_id: str, paths, guest_cmd) -> list:
     return [_vm_limactl(paths), "shell", vm_instance_name(run_id), "--"] + list(guest_cmd)
 
 
-def vm_launch(run_id: str, paths, guest_cmd, *, runner=None, popen=None):
+def vm_launch(run_id: str, paths, guest_cmd, *, runner=None, popen=None, image_location: str = None):
     """Boot the instance, then return a started Popen of `limactl shell` whose stdin/stdout are the
     candidate protocol channel. The caller (broker) drives the existing one-query-at-a-time loop and must
     call vm_teardown(run_id, paths) in a finally."""
     popen = popen or subprocess.Popen
-    vm_start(run_id, paths, runner=runner)
-    lima_home = _vm_lima_home(paths, run_id)
+    vm_start(run_id, paths, runner=runner, image_location=image_location)
+    lima_home = _vm_lima_home(paths)
     return popen(vm_shell_argv(run_id, paths, guest_cmd), env=_vm_env(paths, lima_home),
                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, close_fds=True,
                  start_new_session=True)
@@ -129,35 +135,31 @@ def vm_teardown(run_id: str, paths, *, runner=None) -> None:
     regardless of each other's outcome."""
     runner = runner or subprocess.run
     name = vm_instance_name(run_id)
-    lima_home = _vm_lima_home(paths, run_id)
+    lima_home = _vm_lima_home(paths)
     env = _vm_env(paths, lima_home)
     try:
         runner([_vm_limactl(paths), "delete", "-f", name], env=env, stdin=subprocess.DEVNULL,
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         pass
-    shutil.rmtree(str(lima_home), ignore_errors=True)
+    try:
+        (lima_home / (name + ".yaml")).unlink()
+    except OSError:
+        pass
 
 
 def vm_leftover_instances(paths, *, runner=None) -> list:
-    """Any z1b instances still present after teardown (the post-run sweep's VM arm): a non-empty list is a
-    teardown failure that must burn the run's items. Lists across the scratch LIMA_HOMEs."""
+    """Any instances still present in the shared LIMA_HOME (the post-run sweep's VM arm): a non-empty list
+    is a teardown failure that must burn the run's items."""
     runner = runner or subprocess.run
-    scratch = Path(paths.scratch_dir)
-    leftover = []
-    if not scratch.is_dir():
-        return leftover
-    for entry in sorted(scratch.glob("l*")):
-        if not entry.is_dir():
-            continue
-        try:
-            done = runner([_vm_limactl(paths), "list", "--format", "{{.Name}}"],
-                          env=_vm_env(paths, entry), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
-        except (OSError, subprocess.SubprocessError):
-            leftover.append(entry.name)
-            continue
-        out = getattr(done, "stdout", b"") or b""
-        names = [n for n in out.decode("ascii", "replace").split() if n]
-        leftover.extend(names)
-    return leftover
+    lima_home = _vm_lima_home(paths)
+    if not lima_home.is_dir():
+        return []
+    try:
+        done = runner([_vm_limactl(paths), "list", "--format", "{{.Name}}"],
+                      env=_vm_env(paths, lima_home), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return ["<limactl-list-failed>"]
+    out = getattr(done, "stdout", b"") or b""
+    return [n for n in out.decode("ascii", "replace").split() if n]
