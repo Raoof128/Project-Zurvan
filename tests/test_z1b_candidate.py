@@ -796,6 +796,8 @@ def test_t9_run_default_launcher_kills_the_process_group_on_timeout(tmp_path):
 
 @_t9_needs_sandbox
 def test_t9_run_end_to_end_under_the_real_sandbox_confines_the_candidate(tmp_path, capfd):
+    # Legacy host-sandbox executor, exercised directly. It is NOT reachable from candidate_run.main in VM
+    # mode (see test_t9_candidate_run_main_grammar_is_strict); the production candidate runs in a VM.
     p = _t9_paths(tmp_path)
     (p.keys_dir).mkdir(parents=True)
     (p.keys_dir / "age.key").write_bytes(b"SEALED-KEY-BYTES")
@@ -827,11 +829,22 @@ def test_t9_run_end_to_end_under_the_real_sandbox_confines_the_candidate(tmp_pat
 
 def test_t9_candidate_run_main_grammar_is_strict(tmp_path, capsys):
     p = _t9_paths(tmp_path)
-    for argv in ([], ["bogus"], ["run"], ["run", "../x"], ["run", _T9_RUN, "extra"], ["probe", "x"], ["wipe"],
-                 ["wipe", "../x"], ["wipe", _T9_RUN, "y"], ["RUN", _T9_RUN]):
+    # Rev 3 #1: `run` is refused in every form - the wrapper cannot execute candidate code on the host.
+    for argv in ([], ["bogus"], ["run"], ["run", _T9_RUN], ["run", "../x"], ["run", _T9_RUN, "extra"],
+                 ["probe", "x"], ["wipe"], ["wipe", "../x"], ["wipe", _T9_RUN, "y"], ["RUN", _T9_RUN]):
         assert candidate_run.main(argv, paths=p) == 2, argv
     out = capsys.readouterr()
     assert out.out == "" and out.err == ""
+
+
+def test_t9_candidate_run_main_never_invokes_the_host_executor(tmp_path, monkeypatch):
+    # Rev 3 #1 anti-escape-hatch: `run` must be refused WITHOUT ever calling run(). This distinguishes a
+    # real refusal from run() happening to fail, so re-wiring main to the host executor is caught.
+    p = _t9_paths(tmp_path)
+    called = []
+    monkeypatch.setattr(candidate_run, "run", lambda *a, **k: called.append(a) or 0)
+    assert candidate_run.main(["run", _T9_RUN], paths=p) == 2
+    assert called == []
 
 
 def test_t9_candidate_run_main_probe_prints_json_and_wipe_works(tmp_path, capsys):

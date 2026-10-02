@@ -157,9 +157,21 @@ class BrokerContext:
     candidate_uid: int
 
 
-def broker_runtime_sha256(paths: SealPaths) -> str:
-    """Ruling R14: identity of the candidate runtime = sha256 over a sorted listing of the whole runtime
-    tree (path, kind, size, mtime, symlink target) plus the bytes of the resolved interpreter."""
+# Rev 3 #1: the candidate executes inside a disposable VM. The in-guest candidate entry and the pinned
+# guest image are part of the runtime identity, so a changed image/config is never served from cache.
+GUEST_CANDIDATE_CMD = ("/opt/z1b/runtime/bin/python3", "-B", "-E", "-s", "/opt/z1b/candidate/z1b_candidate.py")
+
+
+def broker_guest_image(paths: SealPaths) -> str:
+    """The pinned guest image FILE under the broker asset tree (installed offline; the guest has no
+    network, so it never downloads at boot). A file:// location for the VM config."""
+    return "file://" + str(Path(paths.broker_dir) / "images" / "guest.qcow2")
+
+
+def broker_runtime_material(paths: SealPaths) -> str:
+    """The text whose sha256 is the runtime identity (R14 + Rev 3 #1): the runtime tree listing, the
+    interpreter bytes, and the pinned guest image digest + VM config."""
+    from . import vm_runner as vmr
     root = paths.runtime_dir
     py = root / "bin" / "python3"
     if not root.is_dir() or not py.exists():
@@ -180,10 +192,33 @@ def broker_runtime_sha256(paths: SealPaths) -> str:
             else:
                 raise SealRefusal("SEAL_NOT_CONFIGURED")
             lines.append("%s\0%s\n" % (rel, detail))
-    h = hashlib.sha256()
-    h.update("".join(lines).encode("utf-8", "surrogateescape"))
-    h.update(b"interpreter:" + broker_file_sha256(Path(os.path.realpath(str(py)))).encode("ascii"))
-    return h.hexdigest()
+    lines.append("interpreter:" + broker_file_sha256(Path(os.path.realpath(str(py)))) + "\n")
+    lines.append("guest-image:" + vmr.GUEST_IMAGE_DIGEST + "\n")
+    lines.append("guest-cmd:" + "\0".join(GUEST_CANDIDATE_CMD) + "\n")
+    lines.append("vm-config:" + hashlib.sha256(vmr.vm_config_text().encode()).hexdigest() + "\n")
+    return "".join(lines)
+
+
+def broker_runtime_sha256(paths: SealPaths) -> str:
+    return hashlib.sha256(broker_runtime_material(paths).encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def broker_vm_launch(run_id: str, paths: SealPaths):
+    """The ONE candidate-execution path: boot this run's disposable VM and return a shell Popen on the
+    protocol channel. There is no host-side execution fallback; a boot/protocol failure propagates as a
+    SealRefusal the broker charges and fails closed on."""
+    from . import vm_runner as vmr
+    return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, image_location=broker_guest_image(paths))
+
+
+def broker_vm_wipe(run_id: str, paths: SealPaths) -> None:
+    from . import vm_runner as vmr
+    vmr.vm_teardown(run_id, paths)
+
+
+def broker_vm_leftovers(paths: SealPaths) -> list:
+    from . import vm_runner as vmr
+    return vmr.vm_leftover_instances(paths)
 
 
 def broker_rss_mb() -> int:
@@ -200,6 +235,7 @@ def _broker_run_tool(cmd, env, *, data=None, timeout=CHECK_TIMEOUT):
 def production_context(paths: SealPaths) -> BrokerContext:
     """The real seams. Built only by main(); nothing here is consulted from the environment."""
     from . import scan as scan_mod  # lazy: scan imports this module
+    from . import vm_runner as _vmr  # noqa: F841 (imported for monkeypatch visibility in tests)
 
     env = sysenv.clean_env(sysenv.home_of_euid())
     try:
@@ -211,6 +247,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
     keygen = str(paths.broker_bin / "age-keygen")
     age_key = str(paths.keys_dir / "age.key")
     wrapper = str(paths.broker_bin / "zurvan-candidate-run")
+    # The candidate wrapper is used ONLY for the read-denial probe (seal-check), never to execute candidate
+    # code: execution is the VM (Rev 3 #1). There is deliberately no `run` subcommand invocation here.
     sudo = ["/usr/bin/sudo", "-n", "-u", CANDIDATE_USER, wrapper]
 
     def decrypt(path):
@@ -238,15 +276,10 @@ def production_context(paths: SealPaths) -> BrokerContext:
         os.chmod(str(dest), 0o600)
 
     def launch(run_id):
-        return subprocess.Popen(sudo + ["run", run_id], env=env, stdin=subprocess.PIPE,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, close_fds=True,
-                                start_new_session=True)
+        return broker_vm_launch(run_id, paths)   # the ONLY candidate executor: a disposable VM
 
     def wipe(run_id):
-        try:
-            _broker_run_tool(sudo + ["wipe", run_id], env, timeout=120)
-        except (OSError, subprocess.SubprocessError):
-            pass  # the sweep that follows decides whether anything is left
+        broker_vm_wipe(run_id, paths)            # destroy the guest; never raises (sweep then checks)
 
     def probe():
         try:
@@ -273,8 +306,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
         tmutil_isexcluded=tmutil,
         now=lambda: datetime.datetime.now(datetime.timezone.utc),
         sudo_uid=sysenv.sudo_uid,
-        sweep_leftovers=lambda: sweep.find_candidate_leftovers(
-            paths, cand_uid, roots=sweep.sweep_roots(paths, cand_uid)),
+        sweep_leftovers=lambda: (sweep.find_candidate_leftovers(
+            paths, cand_uid, roots=sweep.sweep_roots(paths, cand_uid)) + broker_vm_leftovers(paths)),
         sweep_processes=lambda: sweep.candidate_processes(cand_uid),
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,

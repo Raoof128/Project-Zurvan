@@ -196,12 +196,18 @@ def wipe(paths: SealPaths, run_id: str, *, killer=None) -> None:
 # ---------------------------------------------------------------- entry point
 
 def main(argv, *, paths: SealPaths = None, killer=None) -> int:
-    """run <run_id> | probe | wipe <run_id>. stdout belongs to the protocol (run) or one JSON doc (probe)."""
+    """probe | wipe <run_id>.
+
+    Rev 3 #1: candidate CODE no longer executes through this wrapper. The candidate runs inside a
+    disposable VM (vm_runner), so the privileged `sudo -u zurvancandidate zurvan-candidate-run` door
+    exposes only the read-denial probe and the scratch wipe - never `run`. `run()` below is the legacy
+    host-sandbox executor, kept for its tests but unreachable from main: there is no host execution path.
+    """
     try:
         paths = paths or SealPaths.real()
         argv = list(argv)
-        if len(argv) == 2 and argv[0] == "run":
-            return 0 if run(_cr_check_run_id(argv[1]), paths) == 0 else 1
+        if argv and argv[0] == "run":
+            return 2  # host candidate execution is removed in VM mode; the broker boots a VM instead
         if argv == ["probe"]:
             sys.stdout.write(json.dumps(probe(paths), sort_keys=True) + "\n")
             sys.stdout.flush()
