@@ -234,12 +234,13 @@ def test_t11_symlinks_are_not_followed(tmp_path):
     d = _t11_scan_dir(tmp_path, {"plain.txt": "x"})
     os.symlink(str(outside), str(d / "dirlink"))
     os.symlink(str(outside / "leak.txt"), str(d / "filelink"))
-    assert S.scan([d], [], {"i": q}) == {"hits": [], "canary_hits": 0, "canary_found": [], "unreadable": 0}
+    assert S.scan([d], [], {"i": q}) == {"hits": [], "canary_hits": 0, "canary_found": [], "unreadable": 0,
+                                         "target_confirmed": [], "target_suspect": []}
 
 
 def test_t11_scan_takes_only_sealed_needles_and_a_target_list():
     import inspect
-    assert list(inspect.signature(S.scan).parameters) == ["targets", "canaries", "queries"]
+    assert list(inspect.signature(S.scan).parameters) == ["targets", "canaries", "queries", "items"]
     assert list(inspect.signature(S.scan_run).parameters) == ["paths", "ctx", "ledger"]
 
 
@@ -631,3 +632,121 @@ def test_t11_burned_items_are_excluded_from_the_scan_even_while_a_reseal_is_pend
     # the set still holds the burned item: refused for THAT reason, not as a fresh scan hit
     _t10_refused(_t10_run(E, ctx=no_reseal), "MANIFEST_INVALID")
     assert not _t10_ledger(E).open_incidents()
+
+
+# ================================================================ #13: target-page (answer-key) leaks
+
+_TID = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"   # a real 32-hex item id
+_TPAGE = "wiki/x.md"
+
+
+def _classify(text, iid=_TID, pages=(_TPAGE,)):
+    return S.classify_target_associations(text, [{"id": iid, "pages": list(pages)}])
+
+
+def _verdict(text, **kw):
+    r = _classify(text, **kw)
+    if r["confirmed"]:
+        return "burn"
+    if r["suspect"]:
+        return "suspect"
+    return "clean"
+
+
+def test_t13_bare_path_and_bare_id_and_manifest_are_clean():
+    assert _verdict("see wiki/x.md for details") == "clean"               # bare path
+    assert _verdict("item %s was slow" % _TID) == "clean"                 # bare id
+    manifest = "\n".join("wiki/%s.md" % n for n in ("a", "x", "b", "c"))  # corpus manifest of paths, no id
+    assert _verdict(manifest) == "clean"
+
+
+def test_t13_id_and_path_far_apart_or_unrelated_same_page_are_clean():
+    far = "item %s ran\n" % _TID + ("filler line\n" * 50) + "the page wiki/x.md exists\n"
+    assert _verdict(far) == "clean"                                       # far apart in a log
+    same_page = "notes about item %s here\nand separately wiki/x.md is a page\n" % _TID
+    assert _verdict(same_page) == "clean"                                 # different lines, no relation
+
+
+def test_t13_structured_record_one_line_and_multiline_burns():
+    assert _verdict('{"item":"%s","target":"%s"}' % (_TID, _TPAGE)) == "burn"
+    assert _verdict('{\n  "item": "%s",\n  "expected": "%s"\n}' % (_TID, _TPAGE)) == "burn"
+    assert _verdict('{"id": "%s", "answer": ["%s"]}' % (_TID, _TPAGE)) == "burn"
+
+
+def test_t13_arrow_mapping_and_relation_sentence_burn():
+    assert _verdict("%s -> %s" % (_TID, _TPAGE)) == "burn"
+    assert _verdict("%s => %s" % (_TID, _TPAGE)) == "burn"
+    assert _verdict("answer to %s is %s" % (_TID, _TPAGE)) == "burn"      # the prose the old #3 wrongly allowed
+    assert _verdict("The expected target for item %s is %s" % (_TID, _TPAGE)) == "burn"
+
+
+def test_t13_case_whitespace_and_order_variants_hold_the_verdict():
+    assert _verdict("ANSWER  to  %s  is  %s" % (_TID, _TPAGE)) == "burn"
+    assert _verdict("%s    ->    %s" % (_TID, _TPAGE)) == "burn"
+    assert _verdict("%s <- %s" % (_TPAGE, _TID)) == "burn"                # reversed arrow
+    assert _verdict('{"target":"%s","item":"%s"}' % (_TPAGE, _TID)) == "burn"  # reversed key order
+
+
+def test_t13_ambiguous_association_is_suspect_not_a_burn():
+    # a mapping-shaped line (brace/colon hint) with both tokens but no clean grammar: review, never burn
+    assert _verdict("row { %s ... some text ... %s } end" % (_TID, _TPAGE)) == "suspect"
+
+
+def test_t13_basename_only_does_not_burn_the_canonical_target():
+    # the mapping names only the basename; the canonical target page is wiki/x.md -> not a confirmed leak
+    assert _verdict("%s -> x.md" % _TID) == "clean"
+
+
+def test_t13_abstain_items_have_no_pages_and_never_match():
+    assert S.classify_target_associations("%s -> %s" % (_TID, _TPAGE),
+                                          [{"id": _TID, "pages": []}]) == {"confirmed": [], "suspect": []}
+
+
+def test_t13_confirmed_answer_key_in_a_scanned_location_burns_via_target_leak(tmp_path):
+    E = _t11_build(tmp_path)
+    (E.devrepo / "logs").mkdir()
+    victim = next(i for i in E.holdout if i["targets"])
+    # an answer key pairing the item id with its target page: the exfiltration #13 must catch
+    (E.devrepo / "logs" / "answers.jsonl").write_text(
+        '{"item":"%s","target":"%s"}\n' % (victim["id"], victim["targets"][0]["page"]))
+    _t10_refused(_t11_run(E), "INTEGRITY_INCIDENT")
+    assert victim["id"] in _t10_ledger(E).burned_ids()
+    assert victim["id"] not in (_t11_holdout_ids(E) | _t11_reserve_ids(E))
+    m = manifest_mod.verify(E.paths.manifest_file, Path(str(E.paths.manifest_file) + ".sig"),
+                            E.paths.keys_dir / "allowed_signers")
+    assert victim["id"] in {e["id"] for e in m["burn_ledger"]}
+    assert "target_leak" in {e["reason"] for e in m["burn_ledger"]}
+
+
+def test_t13_suspect_association_is_recorded_for_review_and_never_burns(tmp_path):
+    E = _t11_build(tmp_path)
+    (E.devrepo / "logs").mkdir()
+    victim = next(i for i in E.holdout if i["targets"])
+    # ambiguous: id and page inside a brace-ish blob but no clean answer-key grammar -> review, not burn
+    (E.devrepo / "logs" / "notes.txt").write_text(
+        "row { %s ... some notes ... %s } end\n" % (victim["id"], victim["targets"][0]["page"]))
+    rc, _t, doc = _t11_run(E)
+    assert rc == 0                                              # a suspect never blocks the run
+    assert victim["id"] not in _t10_ledger(E).burned_ids()     # and never burns
+    assert victim["id"] in _t11_holdout_ids(E)                 # the item survives
+    reviews = list(E.paths.incidents_dir.glob("review-target_suspect-*.json"))
+    assert reviews, "a suspect association must leave a non-blocking review note"
+    assert victim["id"] in json.loads(reviews[0].read_text())["item_ids"]
+
+
+def test_t13_benign_dev_artifacts_referencing_ids_and_paths_never_burn(tmp_path):
+    # the FP guard: a realistic dev blob that references items by id (sanctioned) and lists corpus paths,
+    # but is NOT an answer key, must yield zero CONFIRMED burns (the 0/200-ceiling discipline for this
+    # new auto-burn detector). SUSPECT is allowed (non-destructive); CONFIRMED is not.
+    E = _t11_build(tmp_path)
+    items = [{"id": i["id"], "pages": [t["page"] for t in i["targets"]]} for i in E.holdout if i["targets"]]
+    v = items[0]
+    blob = "\n".join([
+        "status: item %s regressed vs baseline (recall down)" % v["id"],           # id alone
+        "corpus manifest:", v["pages"][0], "wiki/other.md", "docs/readme.md",       # bare paths
+        "see item %s for the cross_project case" % v["id"],                         # id alone again
+        "the page %s is large" % v["pages"][0],                                     # bare path again
+        "run notes: %s failed; also reviewed %s separately" % (v["id"], v["pages"][0]),  # same line, no rel/arrow
+    ])
+    res = S.classify_target_associations(blob, items)
+    assert res["confirmed"] == []                                                   # zero false burns

@@ -22,6 +22,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import secrets
 import stat
 import traceback
@@ -29,7 +30,8 @@ from pathlib import Path
 
 from . import manifest as manifest_mod
 from .broker import (broker_dump_items, broker_file_sha256, broker_iso_now, broker_log_error,
-                     broker_parse_items, broker_record_incident, broker_today, broker_verified_manifest)
+                     broker_parse_items, broker_record_incident, broker_record_review, broker_today,
+                     broker_verified_manifest)
 from .codes import SealRefusal
 from .spec import coverage, load_spec
 
@@ -153,9 +155,77 @@ def _scan_window(data: bytes, canaries_b: dict, found: set, fp: dict, qbytes: li
                 pos = q.find(gram, pos + 1)
 
 
-def scan(targets: list, canaries: list, queries: dict) -> dict:
-    """-> {"hits": [item_id...], "canary_hits": n, "canary_found": [token...], "unreadable": n}.
-    Takes only sealed inputs (canary tokens, sealed queries) plus the filesystem it is pointed at."""
+# ---------------------------------------------------------------- #13: target-page (answer-key) leaks
+#
+# A holdout item's identity (its 32-hex id) and its target page (the answer) are each INNOCENT on their
+# own: the canonical programme sanctions referring to items by id/index in controlled outputs, and a target
+# path like "wiki/x.md" appears benignly in the corpus export, logs and ordinary work. Only an EXPLICIT
+# ASSOCIATION id<->page (an answer key) lets a candidate hill-climb. So this detector burns ONLY on a
+# deterministic association grammar (CONFIRMED); a mere ambiguous co-occurrence is SUSPECT and NEVER burns.
+# Raw "id and path somewhere in the same file" is explicitly NOT a leak (it would eventually barbecue a
+# healthy holdout). Verdicts: CONFIRMED_TARGET_LEAK -> fail+burn; SUSPECT_TARGET_ASSOCIATION -> report only.
+
+# relation words whose presence on a line that ALSO contains the id and a target path confirms the leak
+_REL_RE = re.compile(r"(?i)(?<![a-z])(answers?|targets?|expected|ground[_\- ]?truth|gold|correct|label)(?![a-z])")
+# a structured record key (quoted or bare), e.g. "item": "<id>"  /  target = <path>
+_ITEM_KEY = r'(?<![A-Za-z0-9_])["\']?(?:item|item_id|itemid|id|item_index|qid|query_id)["\']?\s*[:=]\s*["\']?%s(?![0-9a-f])'
+_TGT_KEY = r'(?<![A-Za-z0-9_])["\']?(?:targets?|expected|answers?|ground[_\- ]?truth|gold|correct|label)["\']?\s*[:=]\s*(?:\[\s*)?["\']?%s'
+_ASSOC_HINT = re.compile(r"(->|=>|<-|[:={])")          # an ambiguous-mapping punctuation hint (for SUSPECT)
+_STRUCT_WINDOW = 2000                                   # a structured record may span lines; stay within this
+
+
+def _arrow_link(line: str, i: str, p: str) -> bool:
+    """A bare mapping `i <sep> p` (or reversed) with only quotes/space between: -> => <- : = ."""
+    ei, ep = re.escape(i), re.escape(p)
+    sep = r'["\'\s]*(?:->|=>|=|:)["\'\s]*'
+    rsep = r'["\'\s]*<-["\'\s]*'
+    return bool(re.search(ei + sep + ep, line) or re.search(ep + sep + ei, line)
+                or re.search(ep + rsep + ei, line) or re.search(ei + rsep + ep, line))
+
+
+def classify_target_associations(text: str, items: list) -> dict:
+    """Pure detector. `items` = [{"id": hex32, "pages": [target_path, ...]}, ...] (abstain items omitted).
+    -> {"confirmed": [id...], "suspect": [id...]} (suspect excludes anything confirmed). Deterministic; a
+    span is confirmed only by the association grammar, so bare paths and bare ids can never burn."""
+    confirmed, suspect = set(), set()
+    lines = None
+    for it in items:
+        iid, pages = it["id"], [p for p in it.get("pages", []) if p]
+        if not pages or iid in confirmed or iid not in text:
+            continue
+        verdict = None
+        # (1) structured record, possibly across lines: an item-key == id with a target-key == a page nearby
+        for m in re.finditer(_ITEM_KEY % re.escape(iid), text):
+            win = text[max(0, m.start() - _STRUCT_WINDOW):m.end() + _STRUCT_WINDOW]
+            if any(re.search(_TGT_KEY % re.escape(p), win) for p in pages):
+                verdict = "confirmed"
+                break
+        # (2)/(3) single-line: an arrow mapping, or a relation word on a line carrying the id AND a page
+        if verdict != "confirmed":
+            if lines is None:
+                lines = text.split("\n")
+            for ln in lines:
+                if iid not in ln:
+                    continue
+                here = [p for p in pages if p in ln]
+                if not here:
+                    continue
+                if any(_arrow_link(ln, iid, p) for p in here) or _REL_RE.search(ln):
+                    verdict = "confirmed"
+                    break
+                if _ASSOC_HINT.search(ln):
+                    verdict = "suspect"
+        if verdict == "confirmed":
+            confirmed.add(iid)
+        elif verdict == "suspect":
+            suspect.add(iid)
+    return {"confirmed": sorted(confirmed), "suspect": sorted(suspect - confirmed)}
+
+
+def scan(targets: list, canaries: list, queries: dict, items: list = None) -> dict:
+    """-> {"hits": [item_id...], "canary_hits": n, "canary_found": [token...], "unreadable": n,
+    "target_confirmed": [id...], "target_suspect": [id...]}. Takes only sealed inputs (canary tokens,
+    sealed queries, and for #13 the sealed items' id+target-pages) plus the filesystem it is pointed at."""
     ids = sorted(queries)
     qtexts = [queries[i] for i in ids]
     qbytes = [t.encode("utf-8") for t in qtexts]
@@ -165,6 +235,10 @@ def scan(targets: list, canaries: list, queries: dict) -> dict:
     canaries_b = {c.encode("utf-8"): c for c in canaries if c}
     counters = {"unreadable": 0}
     hits, found = set(), set()
+    assoc_items = [{"id": it["id"], "pages": it.get("pages", [])}
+                   for it in (items or []) if it.get("pages")]
+    assoc_id_b = [it["id"].encode("ascii") for it in assoc_items]
+    t_conf, t_susp = set(), set()
     for target in targets:
         for path in _scan_files(Path(target), counters):
             try:
@@ -182,13 +256,20 @@ def scan(targets: list, canaries: list, queries: dict) -> dict:
                         break
                     data = tail + chunk
                     _scan_window(data, canaries_b, found, fp, qbytes, ids, hits, wholes)
+                    # #13: only decode + run the association grammar when an item id is present (rare),
+                    # so the cost on ordinary files is one substring scan each.
+                    if assoc_items and any(ib in data for ib in assoc_id_b):
+                        res = classify_target_associations(data.decode("utf-8", "replace"), assoc_items)
+                        t_conf.update(res["confirmed"])
+                        t_susp.update(res["suspect"])
                     tail = data[-SCAN_OVERLAP:]
             except OSError:
                 counters["unreadable"] += 1
             finally:
                 os.close(fd)
     return {"hits": sorted(hits), "canary_hits": len(found), "canary_found": sorted(found),
-            "unreadable": counters["unreadable"]}
+            "unreadable": counters["unreadable"],
+            "target_confirmed": sorted(t_conf), "target_suspect": sorted(t_susp - t_conf)}
 
 
 def burn(ledger, item_ids: list, reason: str, date: str) -> list:
@@ -272,7 +353,8 @@ def scan_run(paths, ctx, ledger) -> dict:
         live = [i for i in holdout + reserve if i["id"] not in burned]
         dev_home, repo = scan_load_config(paths)
         result = scan(scan_targets(paths, dev_home, repo), [r["token"] for r in canary_recs],
-                      {i["id"]: i["query"] for i in live})
+                      {i["id"]: i["query"] for i in live},
+                      [{"id": i["id"], "pages": [t["page"] for t in i["targets"]]} for i in live])
         live_ids = {i["id"] for i in live}
         by_token = {r["token"]: r["item_id"] for r in canary_recs}
         canary_ids = set()
@@ -284,9 +366,16 @@ def scan_run(paths, ctx, ledger) -> dict:
                 canary_ids = set(live_ids)  # cannot tell which items are exposed: assume all
             # else: the item bound to this canary is already burned; nothing new is exposed
         leak_ids = set(result["hits"]) - canary_ids
-        if canary_ids or leak_ids:
+        # #13: a CONFIRMED answer-key association burns like a query/canary leak; a SUSPECT (ambiguous)
+        # association is recorded for review and NEVER burns automatically.
+        target_leak_ids = (set(result.get("target_confirmed", [])) & live_ids) - canary_ids - leak_ids
+        target_suspect_ids = (set(result.get("target_suspect", [])) & live_ids) - canary_ids - leak_ids - target_leak_ids
+        if target_suspect_ids:
+            broker_record_review(paths, "target_suspect", sorted(target_suspect_ids), ctx.now())
+        if canary_ids or leak_ids or target_leak_ids:
             today = broker_today(ctx)
-            for kind, ids in (("canary_hit", sorted(canary_ids)), ("item_leak", sorted(leak_ids))):
+            for kind, ids in (("canary_hit", sorted(canary_ids)), ("item_leak", sorted(leak_ids)),
+                              ("target_leak", sorted(target_leak_ids))):
                 if ids:
                     burn(ledger, ids, kind, today)
                     broker_record_incident(paths, ledger, kind, ids, ctx.now())
@@ -297,7 +386,7 @@ def scan_run(paths, ctx, ledger) -> dict:
             raise SealRefusal("INTEGRITY_INCIDENT")
         if result["unreadable"]:
             raise SealRefusal("SCAN_INCOMPLETE")
-        return {"hits": [], "canary_hits": 0, "unreadable": 0}
+        return {"hits": [], "canary_hits": 0, "unreadable": 0, "target_suspect": sorted(target_suspect_ids)}
 
 
 def reseal_after_burn(paths, ctx, ledger) -> dict:

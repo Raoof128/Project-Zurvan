@@ -415,6 +415,26 @@ def broker_dump_items(items) -> bytes:
     return ("\n".join(lines) + ("\n" if lines else "")).encode("ascii")
 
 
+def broker_record_review(paths: SealPaths, kind: str, item_ids: list, now) -> None:
+    """A NON-blocking, non-destructive review note (e.g. a SUSPECT target association, #13): a file the
+    operator can read, but NOT a ledger incident, so it never burns an item and never blocks the next run.
+    Best-effort: a write failure is swallowed, since nothing depends on the note for correctness."""
+    try:
+        paths.incidents_dir.mkdir(parents=True, exist_ok=True)
+        stamp = now.strftime("%Y%m%dT%H%M%SZ")
+        body = json.dumps({"kind": kind, "verdict": "suspect", "n_items": len(item_ids),
+                           "item_ids": sorted(item_ids),
+                           "created": now.strftime("%Y-%m-%dT%H:%M:%SZ")}, sort_keys=True) + "\n"
+        fd = os.open(str(paths.incidents_dir / ("review-%s-%s.json" % (kind, stamp))),
+                     os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        try:
+            os.write(fd, body.encode("ascii"))
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
 def broker_record_incident(paths: SealPaths, ledger: Ledger, kind: str, item_ids: list, now) -> str:
     """Ledger incident + a private incidents/<id>.json the operator reads to acknowledge it."""
     incident_id = ledger.record_incident(kind, list(item_ids))

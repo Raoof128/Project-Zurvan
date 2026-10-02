@@ -37,7 +37,7 @@ from .codes import ALL_CODES, SealRefusal
 SCHEMA = "zurvan.z1b.ledger.v1"
 GENESIS = "0" * 64
 MAX_LINE_BYTES = 4 * 1024 * 1024
-BURN_REASONS = ("canary_hit", "item_leak", "sandbox_violation", "operator")
+BURN_REASONS = ("canary_hit", "item_leak", "target_leak", "sandbox_violation", "operator")
 SUITES = ("holdout", "reserve")
 
 _HEX16 = re.compile(r"[0-9a-f]{16}")

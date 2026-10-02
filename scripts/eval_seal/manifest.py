@@ -27,7 +27,7 @@ NAMESPACE = "zurvan-z1b-manifest"
 PRINCIPAL = "zurvaneval"
 SCHEMA = "zurvan.z1b.manifest.v1"
 MAX_MANIFEST_BYTES = 1024 * 1024
-BURN_REASONS = ("canary_hit", "item_leak", "sandbox_violation", "operator")
+BURN_REASONS = ("canary_hit", "item_leak", "target_leak", "sandbox_violation", "operator")
 
 DIGEST_KEYS = ("corpus_sha256", "holdout_age_sha256", "reserve_age_sha256", "dev_sha256", "prompt_sha256")
 _FIELDS = (
