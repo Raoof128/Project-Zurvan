@@ -63,7 +63,7 @@ RESULT_SCHEMA = {
     "evaluator_version": ("re", _SEMVER),
     "broker_sha": ("re", _HEX40),
     "candidate_commit": ("re", _HEX40),
-    "metrics": ("obj", dict(_metric_fields(), ci=("obj", {m: ("pair", 0.0, 1.0, 2) for m in METRICS}))),
+    "metrics": ("obj", dict(_metric_fields(), ci=("nullable", ("obj", {m: ("pair", 0.0, 1.0, 2) for m in METRICS})))),
     "per_stratum": ("nullable", ("map", STRATA, ("obj", dict(_metric_fields(), n=("int", 0, _BIG))))),
     "target_missing": ("int", 0, _BIG),
     "abstain": ("nullable", ("obj", {"passed": ("int", 0, _BIG), "n": ("int", 0, _BIG)})),
@@ -192,7 +192,7 @@ def _emit(value, spec):
 
 
 def _post_result(doc):
-    for lo, hi in doc["metrics"]["ci"].values():
+    for lo, hi in (doc["metrics"]["ci"] or {}).values():
         if lo > hi:
             raise _Bad()
     lat = doc["latency_ms"]
@@ -234,6 +234,47 @@ def _serialize(doc, schema, post) -> str:
 
 def serialize_result(result) -> str:
     return _serialize(result, RESULT_SCHEMA, _post_result)
+
+
+# G20 (decision 8, option (a)): what leaves the seal is a PROJECTION of the sealed result. The per-stratum
+# block and the bootstrap intervals stay in the sealed ledger (the verdict and the baseline logic use them);
+# latency and memory, which candidate code controls, are snapped UP to a coarse 1-2-5 ladder.
+LATENCY_LADDER_MS = (10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000,
+                     500000, 1000000, 2000000, 3600000)
+RSS_LADDER_MB = (64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288,
+                 1000000)
+
+
+def _snap_up(value, ladder):
+    for step in ladder:
+        if value <= step:
+            return step
+    return ladder[-1]
+
+
+def public_projection(result) -> dict:
+    """The only form of a run result that may be printed for the development side. Never mutates `result`."""
+    pub = dict(result)
+    pub["metrics"] = dict(result["metrics"], ci=None)
+    pub["per_stratum"] = None
+    lat = result["latency_ms"]
+    pub["latency_ms"] = {"p50": _snap_up(lat["p50"], LATENCY_LADDER_MS),
+                         "p95": _snap_up(lat["p95"], LATENCY_LADDER_MS)}
+    pub["peak_rss_mb"] = _snap_up(result["peak_rss_mb"], RSS_LADDER_MB)
+    return pub
+
+
+def serialize_public_result(result) -> str:
+    return serialize_result(public_projection(result))
+
+
+def assert_public_result(doc) -> None:
+    """Dev-side check: a result document that is not a projection is refused (ValueError)."""
+    if (doc.get("per_stratum") is not None or doc["metrics"].get("ci") is not None
+            or doc["latency_ms"]["p50"] not in LATENCY_LADDER_MS
+            or doc["latency_ms"]["p95"] not in LATENCY_LADDER_MS
+            or doc["peak_rss_mb"] not in RSS_LADDER_MB):
+        raise ValueError("not a public result")
 
 
 def serialize_status(status) -> str:

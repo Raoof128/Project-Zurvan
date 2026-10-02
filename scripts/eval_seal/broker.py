@@ -45,7 +45,7 @@ from .codes import SealRefusal
 from .corpus import corpus_pages, corpus_sha256
 from .ledger import Ledger, run_key
 from .output import (RESULT_SCHEMA_ID, SEALCHECK_SCHEMA_ID, STATUS_SCHEMA_ID, serialize_refusal,
-                     serialize_result, serialize_sealcheck, serialize_status)
+                     serialize_public_result, serialize_result, serialize_sealcheck, serialize_status)
 from .paths import CANDIDATE_USER, EVAL_USER, SealPaths
 from .spec import STRATA, load_spec, validate_item
 
@@ -1219,7 +1219,7 @@ def broker_main(argv=None, *, paths: SealPaths = None, ctx: BrokerContext = None
             cmd = args["cmd"]
             rc = 0
             if cmd == "run":
-                text = serialize_result(broker_run(args, paths, ctx))
+                text = serialize_public_result(broker_run(args, paths, ctx))  # G20: projection only
             elif cmd == "status":
                 text = serialize_status(broker_status(paths, ctx))
             elif cmd == "seal-check":

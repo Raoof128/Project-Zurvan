@@ -687,7 +687,12 @@ def test_t10_a_perfect_candidate_run_returns_a_valid_overall_only_result(tmp_pat
     assert doc["abstain"] == {"passed": 2, "n": 2}
     assert doc["per_stratum"] is None and doc["promotion"] is None
     assert doc["cached"] is False and doc["seal_valid"] is True and doc["budget_remaining"] == 7
-    assert doc["peak_rss_mb"] == 12 and doc["latency_ms"]["p50"] % 10 == 0
+    # G20: the printed result is the projection (memory and latency snapped up the ladder); the sealed
+    # ledger keeps the exact figures
+    assert doc["peak_rss_mb"] == 64 and doc["latency_ms"]["p50"] in output.LATENCY_LADDER_MS
+    assert doc["metrics"]["ci"] is None
+    sealed = [e for e in _t10_ledger(E).entries() if e["kind"] == "completed"][-1]["result"]
+    assert sealed["peak_rss_mb"] == 12 and sealed["metrics"]["ci"] is not None
     assert doc["suite_manifest_sha256"] == manifest_mod.suite_manifest_sha256(E.paths.manifest_file)
     assert doc["corpus_sha256"] == E.manifest["corpus_sha256"]
     assert E.launched and all(flag for _rid, flag in E.launched)   # the bundle was staged under the run id
@@ -897,7 +902,9 @@ def _t10_weak_baseline(E):
     commit, _p, name = _t10_declared(E, decl={"role": "baseline"}, path=_T10_DECL_BASE)
     rc, _t, doc = _t10_run(E, commit, declare=_T10_DECL_BASE, name=name)
     E.cand_cfg["oracle"] = saved
-    assert rc == 0 and doc["promotion"] is None and doc["per_stratum"] is not None
+    assert rc == 0 and doc["promotion"] is None and doc["per_stratum"] is None  # G20: never printed
+    sealed = [e for e in _t10_ledger(E).entries() if e["kind"] == "completed"][-1]["result"]
+    assert sealed["per_stratum"] is not None and sealed["promotion"] is None  # the ledger keeps it
     return commit
 
 def test_t10_a_declared_run_returns_per_stratum_and_a_promotion_verdict(tmp_path):
@@ -905,9 +912,10 @@ def test_t10_a_declared_run_returns_per_stratum_and_a_promotion_verdict(tmp_path
     _t10_weak_baseline(E)
     commit, _p, name = _t10_declared(E)
     rc, _t, doc = _t10_run(E, commit, declare=_T10_DECL_PATH, name=name)
-    assert rc == 0
-    assert set(doc["per_stratum"]) == {"exact_identifier", "path", "semantic", "multi_hop"}
-    assert doc["per_stratum"]["path"]["n"] == 2 and doc["per_stratum"]["path"]["mrr"] == 1.0
+    assert rc == 0 and doc["per_stratum"] is None  # G20: the per-stratum block never leaves the seal
+    sealed = [e for e in _t10_ledger(E).entries() if e["kind"] == "completed"][-1]["result"]
+    assert set(sealed["per_stratum"]) == {"exact_identifier", "path", "semantic", "multi_hop"}
+    assert sealed["per_stratum"]["path"]["n"] == 2 and sealed["per_stratum"]["path"]["mrr"] == 1.0
     assert doc["promotion"] == {"declared": True, "verdict": "PASS", "rules": {
         "non_inferiority_critical": True, "non_inferiority_overall": True, "improvement": True,
         "resource_budget": True}}

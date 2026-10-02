@@ -452,7 +452,7 @@ def _t13_ok_status(t13):
 
 def test_t13_run_success_builds_the_bundle_calls_the_broker_and_cleans_the_drop(t13):
     t13.fake.set({"status": _t13_ok_status(t13),
-                  "run": _t13_out(_t13_result(t13.c2), seal_output.serialize_result)})
+                  "run": _t13_out(_t13_result(t13.c2), seal_output.serialize_public_result)})
     doc = zc.run(t13.c2, "holdout", declare="eval/z1b/declarations/pre-1.json")
     assert doc["candidate_commit"] == t13.c2 and doc["suite"] == "holdout"
     argv = [c for c in t13.fake.calls() if c[0] == "run"][0]
@@ -500,7 +500,7 @@ def test_t13_run_argument_grammar_is_enforced_locally_before_any_call(t13):
 
 def test_t13_run_reserve_passes_final_acceptance_through(t13):
     t13.fake.set({"status": _t13_ok_status(t13),
-                  "run": _t13_out(_t13_result(t13.c2, "reserve"), seal_output.serialize_result)})
+                  "run": _t13_out(_t13_result(t13.c2, "reserve"), seal_output.serialize_public_result)})
     zc.run(t13.c2, "reserve", final_acceptance=True)
     argv = [c for c in t13.fake.calls() if c[0] == "run"][0]
     assert argv[-3:] == ["--suite", "reserve", "--final-acceptance"]
@@ -508,10 +508,10 @@ def test_t13_run_reserve_passes_final_acceptance_through(t13):
 
 def test_t13_run_result_for_a_different_commit_or_suite_is_not_believed(t13):
     t13.fake.set({"status": _t13_ok_status(t13),
-                  "run": _t13_out(_t13_result(t13.c1), seal_output.serialize_result)})
+                  "run": _t13_out(_t13_result(t13.c1), seal_output.serialize_public_result)})
     _t13_refused("INTERNAL", zc.run, t13.c2, "holdout")
     t13.fake.set({"status": _t13_ok_status(t13),
-                  "run": _t13_out(_t13_result(t13.c2, "reserve"), seal_output.serialize_result)})
+                  "run": _t13_out(_t13_result(t13.c2, "reserve"), seal_output.serialize_public_result)})
     _t13_refused("INTERNAL", zc.run, t13.c2, "holdout")
     assert list(t13.drop.iterdir()) == []
 

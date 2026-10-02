@@ -220,6 +220,11 @@ def call_broker(argv: list, *, runner=subprocess.run) -> dict:
         raise ClientRefusal("INTERNAL") from None
     if doc.get("ok") is False and "code" in doc:
         raise ClientRefusal(doc["code"])
+    if doc.get("schema") == _seal_output.RESULT_SCHEMA_ID:
+        try:
+            _seal_output.assert_public_result(doc)  # G20: only the projection may reach the dev side
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise ClientRefusal("INTERNAL") from None
     if getattr(proc, "returncode", None) not in ((0, 2) if doc.get("ok") is False else (0,)):
         raise ClientRefusal("INTERNAL")  # an ok document with a failing exit status is not believable
     return doc
