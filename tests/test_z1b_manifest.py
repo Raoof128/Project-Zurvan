@@ -364,12 +364,12 @@ def test_t7_install_derivation_matches_the_known_good_signers_format_and_verifie
     r = subprocess.run(["/bin/sh", "-c", inner], capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
     derived = (keys / "allowed_signers").read_text()
-    # byte-identical to the authoritative fixture format
-    expected = _t6_signers(tmp_path / "expected_signers", key).read_text()
-    assert derived == expected
-    # the pinned principal + namespace, not whatever happened to be in a file
+    # the pinned principal + BOTH sealed namespaces (manifest + promotion attestation, #16), not whatever
+    # happened to be in a file. The anchor lists both namespaces; ssh-keygen still enforces each signature's
+    # own namespace at verify time.
     pub = (keys / "signing_ed25519.pub").read_text().split()
-    assert derived == 'zurvaneval namespaces="zurvan-z1b-manifest" %s %s\n' % (pub[0], pub[1])
+    assert derived == ('zurvaneval namespaces="zurvan-z1b-manifest,zurvan-z1b-promotion" %s %s\n'
+                       % (pub[0], pub[1]))
     # end-to-end: a manifest signed by the key verifies against the DERIVED anchor; another key is refused
     mf = tmp_path / "manifest.json"
     M.write_manifest(mf, _t6_manifest())

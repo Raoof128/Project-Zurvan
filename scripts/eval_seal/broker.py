@@ -39,7 +39,7 @@ import traceback
 import warnings
 from pathlib import Path
 
-from . import grade, intake, protocol, sweep, sysenv
+from . import grade, intake, promotion, protocol, sweep, sysenv
 from . import manifest as manifest_mod
 from .codes import SealRefusal
 from .corpus import corpus_pages, corpus_sha256
@@ -821,6 +821,27 @@ def broker_reserve_budget_id(suite_id: str, commit: str) -> str:
     return hashlib.sha256(("reserve\0" + suite_id + "\0" + commit).encode("ascii")).hexdigest()[:16]
 
 
+def broker_write_promotion_attestation(paths: SealPaths, result: dict, m: dict, run_id: str, now) -> Path:
+    """#16: when a holdout run's promotion verdict is PASS, emit an EXPORTABLE broker-signed attestation
+    (the ledger stays the authoritative anchor, R22). Signed with the eval key under a DISTINCT namespace.
+    Returns the attestation path, or None when the run is not a PASS promotion."""
+    promo = result.get("promotion")
+    if not (isinstance(promo, dict) and promo.get("verdict") == "PASS"):
+        return None
+    folder = paths.runs_dir / "promotions"
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(folder), 0o700)
+    att = promotion.build_attestation(
+        candidate_commit=result["candidate_commit"], suite=result["suite"], suite_id=result["suite_id"],
+        suite_manifest_sha256=result["suite_manifest_sha256"], run_id=run_id,
+        result_sha256=promotion.result_sha256(result), evaluator_version=result["evaluator_version"],
+        sequence=m["sequence"], created=now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    dest = folder / (run_id + ".json")
+    promotion.write(dest, att)
+    promotion.sign(dest, paths.keys_dir / "signing_ed25519")
+    return dest
+
+
 def broker_write_rows(paths: SealPaths, run_id: str, rows: list) -> Path:
     """Opaque ids, ranks and flags only; NEVER query or target text. 0600, never overwritten."""
     folder = paths.runs_dir / "rows"
@@ -983,6 +1004,12 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
         serialize_result(result)  # validate BEFORE anything is committed to the ledger
         rows_path = broker_write_rows(paths, run_id, rows)
         led.complete_run(run_id, result, rows_path)
+        # #16: a PASS holdout promotion also gets an exportable broker-signed attestation (ledger stays
+        # authoritative). Best-effort: a signing failure must not undo a recorded, verified run.
+        try:
+            broker_write_promotion_attestation(paths, result, m, run_id, ctx.now())
+        except Exception:  # noqa: BLE001
+            broker_log_error(paths, traceback.format_exc())
         return result
     except SealRefusal:
         _broker_fail_unresolved(led, run_id, "INTERNAL")

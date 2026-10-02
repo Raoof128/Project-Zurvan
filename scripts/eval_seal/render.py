@@ -29,10 +29,16 @@ from string import Template
 try:
     from .paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from .manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
+    from .promotion import NAMESPACE as PROMOTION_NAMESPACE
 except ImportError:  # run as a script: scripts/eval_seal is not a package here
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from scripts.eval_seal.manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
+    from scripts.eval_seal.promotion import NAMESPACE as PROMOTION_NAMESPACE
+
+# the eval signing key verifies in BOTH sealed namespaces (manifest + promotion attestation, #16); the
+# anchor lists both, while ssh-keygen still enforces each signature's own namespace at verify time.
+ALLOWED_NAMESPACES = ",".join((MANIFEST_NAMESPACE, PROMOTION_NAMESPACE))
 
 _P = SealPaths.real()
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -589,7 +595,7 @@ def allowed_signers_derive_sh(pub_path: str, out_path: str) -> str:
     tmp = out_path + ".new"
     return ("umask 077; k=\"$(/usr/bin/cut -d' ' -f1,2 %s)\" && "
             "/usr/bin/printf '%%s namespaces=\\042%%s\\042 %%s\\n' '%s' '%s' \"$k\" > %s && "
-            "/bin/mv -f %s %s") % (pub_path, MANIFEST_PRINCIPAL, MANIFEST_NAMESPACE, tmp, tmp, out_path)
+            "/bin/mv -f %s %s") % (pub_path, MANIFEST_PRINCIPAL, ALLOWED_NAMESPACES, tmp, tmp, out_path)
 
 
 def allowed_signers_cmd(keys_dir: str, eval_user: str) -> str:

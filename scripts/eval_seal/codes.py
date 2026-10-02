@@ -20,6 +20,7 @@ ADDED_CODES = (
     "CANDIDATE_FAILED",    # candidate crashed/timed out/protocol violation (run charged to budget)
     "SANDBOX_VIOLATION",   # post-run sweep found candidate-owned files outside scratch or live processes
     "SEAL_COMPROMISED",    # seal-check found a writable/foreign-owned broker file, missing TM exclusion, etc.
+    "PROMOTION_INVALID",   # a broker-signed promotion attestation failed signature/schema verification (#16)
     "INTERNAL",            # any unexpected exception; detail goes ONLY to the sealed errors log
 )
 ALL_CODES = SPEC_CODES + ADDED_CODES
