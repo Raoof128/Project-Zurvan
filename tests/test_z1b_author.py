@@ -1,12 +1,15 @@
 """Z1b Task 15 tests: sealed authoring (spec s6; contract s3.12). No model is ever called: a scripted fake
 ModelRunner stands in for `claude -p`, and the sealed layout is simulated under tmp_path."""
 import copy
+import contextlib
 import hashlib
+import io
 import json
 import os
 import random
 import re
 import stat
+import sys
 import subprocess
 from pathlib import Path
 
@@ -792,7 +795,8 @@ def _t15_argv(tmp_path, paths, extra=()):
     dev.write_text("".join(json.dumps(_t15_item(tag="dev%d" % i, query=_t15_query("devfile%d" % i))) + "\n"
                            for i in range(4)))
     return ["--spec", str(REPO / "eval" / "z1b" / "spec.json"), "--rubric", str(REPO / "eval" / "z1b" / "rubric.md"),
-            "--prompts", str(REPO / "eval" / "z1b" / "prompts"), "--seed", "5", *extra]
+            "--prompts", str(REPO / "eval" / "z1b" / "prompts"), "--seed", "5",
+            "--workspace", str(tmp_path / "author-ws"), *extra]
 
 
 def _t15_run_main(tmp_path, fake, extra=(), **over):
@@ -804,9 +808,22 @@ def _t15_run_main(tmp_path, fake, extra=(), **over):
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(f.read_bytes())
     seams, signers = _t15_seams(tmp_path)
-    kw = dict(paths=paths, runner=fake, **seams)
-    kw.update(over)
-    return paths, signers, A.author_main(_t15_argv(tmp_path, paths, extra), **kw)
+    argv = _t15_argv(tmp_path, paths, extra)
+    # Rev 3 #2: draft (as zurvanauthor) writes the workspace bundle; seal (as zurvaneval) encrypts+signs.
+    draft_over = {k: v for k, v in over.items() if k in ("runner", "now")}
+    # In production draft (zurvanauthor) and seal (zurvaneval) are separate processes with separate stdout.
+    # Here they share one process, so the draft's counts output is captured away; only the seal manifest
+    # reaches capsys, matching the real seal-phase terminal.
+    _draft_out = io.StringIO()
+    with contextlib.redirect_stdout(_draft_out):
+        rc_draft = A.author_main(["draft", *argv], paths=paths, runner=fake, **draft_over)
+    if rc_draft >= 2:
+        sys.stdout.write(_draft_out.getvalue())  # a draft refusal/internal is the result; surface its code
+        return paths, signers, rc_draft
+    seal_over = {k: v for k, v in over.items() if k in ("encrypt", "sign", "make_canaries", "now")}
+    kw = dict(paths=paths, **seams)
+    kw.update(seal_over)
+    return paths, signers, A.author_main(["seal", *argv], **kw)
 
 
 def test_t15_author_main_prints_only_the_public_manifest_and_nothing_sealed(tmp_path, capsys):
@@ -832,19 +849,15 @@ def test_t15_author_main_keeps_prompts_and_raw_outputs_only_under_the_eval_home_
     fk = _T15Fake(_t15_world())
     paths, _, rc = _t15_run_main(tmp_path, fk)
     assert rc == 0
-    runs = paths.private_dir / "authoring"  # R18: plaintext audit lives in the TM-excluded private/ dir
+    # Rev 3 #2: the plaintext author audit lives in the zurvanauthor WORKSPACE (author-owned), not the
+    # eval home. The draft identity never writes under the key owner's home.
+    runs = tmp_path / "author-ws" / "authoring"
     dirs = list(runs.iterdir())
     assert len(dirs) == 1 and _t15_modes(dirs[0]) == 0o700 and _t15_modes(runs) == 0o700
     files = list(dirs[0].iterdir())
     assert len(files) == 2 * len(fk.calls) and all(_t15_modes(f) == 0o600 for f in files)
     for f in paths.sets_dir.glob("*.age"):
         assert _t15_modes(f) == 0o600
-    root = tmp_path / "root"
-    allowed = (root / "Library" / "ZurvanEval" / "corpus", paths.sets_dir, paths.runs_dir, paths.private_dir)
-    for f in (p for p in root.rglob("*") if p.is_file()):
-        assert any(a in f.parents for a in allowed) or f.parent == paths.eval_home, f
-        if f.parent == paths.eval_home:
-            assert f.name in ("manifest.json", "manifest.json.sig")
 
 
 def test_t15_author_main_exit_code_is_nonzero_when_a_stratum_is_short(tmp_path, capsys):

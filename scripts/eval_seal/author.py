@@ -652,7 +652,7 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
 
 # ------------------------------------------------------------------------------------------------ main
 
-_FLAGS = ("spec", "rubric", "prompts", "dev", "seed", "sequence", "author-model", "reviewer-model",
+_FLAGS = ("spec", "rubric", "prompts", "dev", "seed", "sequence", "workspace", "author-model", "reviewer-model",
           "resolver-model", "public-out")
 
 
@@ -670,7 +670,7 @@ def _author_parse(argv) -> dict:
         args[flag[2:]] = val
     if not all(k in args for k in ("spec", "rubric", "prompts")):
         raise SealRefusal("BAD_ARGS")
-    for k in ("spec", "rubric", "prompts", "dev", "public-out"):
+    for k in ("spec", "rubric", "prompts", "dev", "public-out", "workspace"):
         if k in args and not Path(args[k]).is_absolute():
             raise SealRefusal("BAD_ARGS")
     for k in ("seed", "sequence"):
@@ -744,13 +744,79 @@ def _author_emit_refusal(code: str) -> None:
     sys.stdout.flush()
 
 
-def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_canaries=None, now=None) -> int:
-    """Entry point for bin/zurvan-author. stdout: the public manifest, or {"ok":false,"code":...}.
-    stderr: never written. Exit: 0 sealed and complete, 1 sealed but a stratum is short, 2 refusal,
-    3 internal error (traceback to runs/errors.log)."""
+def _author_no_dups(pairs):
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise ValueError("duplicate key")
+        out[k] = v
+    return out
+
+
+def _author_no_const(_x):
+    raise ValueError("NaN/Infinity")
+
+
+_BUNDLE_KEYS = frozenset(("holdout", "reserve", "short", "rejected", "accepted", "coverage", "models",
+                         "prompt_sha256", "corpus_sha256", "dev_sha256", "strata_counts"))
+
+
+def author_write_bundle(bundle, workspace):
+    """Rev 3 #2: the draft phase (as zurvanauthor) writes the selected PLAINTEXT bundle here. The workspace
+    is zurvanauthor-owned and zurvaneval-readable; the seal phase reads it. 0600, never overwritten."""
+    ws = Path(workspace)
+    ws.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(ws), 0o700)
+    dest = ws / "bundle.json"
+    data = json.dumps(bundle, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+                      allow_nan=False).encode("utf-8")
+    fd = os.open(str(dest), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return dest
+
+
+def author_read_bundle(workspace):
+    """The seal phase reads the draft bundle. A missing, oversized, symlinked or malformed bundle is
+    BAD_ARGS; the holdout/reserve pools must be lists of dicts. Takes no model, touches no key."""
+    path = Path(workspace) / "bundle.json"
+    try:
+        fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise SealRefusal("BAD_ARGS") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 64 * 1024 * 1024:
+            raise SealRefusal("BAD_ARGS")
+        data = os.read(fd, 64 * 1024 * 1024 + 1)
+    finally:
+        os.close(fd)
+    try:
+        bundle = json.loads(data.decode("utf-8"), object_pairs_hook=_author_no_dups,
+                            parse_constant=_author_no_const)
+    except (ValueError, UnicodeDecodeError):
+        raise SealRefusal("BAD_ARGS") from None
+    if type(bundle) is not dict or set(bundle) != _BUNDLE_KEYS:
+        raise SealRefusal("BAD_ARGS")
+    for pool in ("holdout", "reserve"):
+        if type(bundle[pool]) is not list or any(type(i) is not dict for i in bundle[pool]):
+            raise SealRefusal("BAD_ARGS")
+    return bundle
+
+
+def author_draft_main(argv, *, paths=None, runner=None, now=None):
+    """Rev 3 #2: the DRAFTING phase. Runs as zurvanauthor. Reads only the corpus and the public
+    rubric/prompts, runs the models, writes the selected bundle to --workspace. Touches NO key and does NOT
+    encrypt or sign; a corpus prompt-injection that tells it to read keys/ hits EACCES (OS-enforced).
+    stdout: aggregate counts only. Exit 0 full / 1 short / 2 refusal / 3 internal."""
     paths = paths if paths is not None else SealPaths.real()
     try:
         args = _author_parse(list(argv))
+        if "workspace" not in args:
+            raise SealRefusal("BAD_ARGS")
         models = {role: args.get(role + "-model", AUTHOR_DEFAULT_MODELS[role]) for role in AUTHOR_ROLES}
         if models["reviewer"] == models["author"]:
             raise SealRefusal("BAD_ARGS")
@@ -761,7 +827,34 @@ def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_
         dev_items, dev_sha = _author_load_dev(dev_path)
         seed = int(args["seed"]) if "seed" in args else secrets.randbits(31)
         if runner is None:
-            runner = claude_runner(author_default_claude(paths), Path(paths.eval_home))
+            runner = claude_runner(author_default_claude(paths), Path(paths.author_home))
+        audit = Path(args["workspace"]) / "authoring" / secrets.token_hex(8)  # plaintext, author-owned
+        bundle = author_suite(spec, rubric, dev_items, Path(paths.corpus_dir), runner, models, seed=seed,
+                              templates=templates, dev_sha256=dev_sha, audit_dir=audit)
+        author_write_bundle(bundle, args["workspace"])
+        sys.stdout.write(json.dumps({"coverage": bundle["coverage"], "rejected": bundle["rejected"],
+                                     "accepted": bundle["accepted"]}, sort_keys=True) + "\n")
+        sys.stdout.flush()
+        return 0 if bundle["coverage"]["ok"] else 1
+    except SealRefusal as exc:
+        _author_emit_refusal(exc.code)
+        return 2
+    except Exception:  # noqa: BLE001
+        _author_errors_log(paths, traceback.format_exc())
+        _author_emit_refusal("INTERNAL")
+        return 3
+
+
+def author_seal_main(argv, *, paths=None, encrypt=None, sign=None, make_canaries=None, now=None):
+    """Rev 3 #2: the SEAL phase. Runs as zurvaneval (the key owner). Reads the draft bundle from
+    --workspace, encrypts the pools, signs the manifest. Runs NO model and reads no corpus.
+    stdout: the public manifest. Exit 0 full / 1 short / 2 refusal / 3 internal."""
+    paths = paths if paths is not None else SealPaths.real()
+    try:
+        args = _author_parse(list(argv))
+        if "workspace" not in args:
+            raise SealRefusal("BAD_ARGS")
+        bundle = author_read_bundle(args["workspace"])
         if encrypt is None:
             encrypt = author_age_encrypt(paths)
         if sign is None:
@@ -770,9 +863,6 @@ def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_
         if make_canaries is None:
             from . import scan as author_scan
             make_canaries = author_scan.make_canaries
-        audit = Path(paths.private_dir) / "authoring" / secrets.token_hex(8)  # R18: plaintext, never backed up
-        bundle = author_suite(spec, rubric, dev_items, Path(paths.corpus_dir), runner, models, seed=seed,
-                              templates=templates, dev_sha256=dev_sha, audit_dir=audit)
         public = seal_suite(bundle, paths, encrypt=encrypt, sign=sign, make_canaries=make_canaries,
                             sequence=int(args.get("sequence", "1")), now=now)
         if "public-out" in args:
@@ -788,7 +878,20 @@ def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_
     except SealRefusal as exc:
         _author_emit_refusal(exc.code)
         return 2
-    except Exception:  # noqa: BLE001 - detail goes ONLY to the sealed errors log
+    except Exception:  # noqa: BLE001
         _author_errors_log(paths, traceback.format_exc())
         _author_emit_refusal("INTERNAL")
         return 3
+
+
+def author_main(argv, *, paths=None, runner=None, encrypt=None, sign=None, make_canaries=None, now=None):
+    """Dispatcher for bin/zurvan-author. Rev 3 #2 splits authoring across two identities:
+    `draft` runs as zurvanauthor (corpus + models, no key), `seal` runs as zurvaneval (key, no model)."""
+    argv = list(argv)
+    if argv[:1] == ["draft"]:
+        return author_draft_main(argv[1:], paths=paths, runner=runner, now=now)
+    if argv[:1] == ["seal"]:
+        return author_seal_main(argv[1:], paths=paths, encrypt=encrypt, sign=sign,
+                                make_canaries=make_canaries, now=now)
+    _author_emit_refusal("BAD_ARGS")
+    return 2

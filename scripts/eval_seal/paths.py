@@ -13,6 +13,7 @@ from pathlib import Path
 EVAL_USER = "zurvaneval"
 CANDIDATE_USER = "zurvancandidate"
 CORPUS_GROUP = "zurvancorpus"
+AUTHOR_USER = "zurvanauthor"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,14 @@ class SealPaths:
     @property
     def private_dir(self) -> Path:  # 0700, TM-excluded: plaintext authoring audit files, claude session state
         return self.eval_home / "private"
+
+    @property
+    def author_home(self) -> Path:  # 0700 zurvanauthor: the drafting identity; cannot read keys/sets/runs
+        return self._r("Users", AUTHOR_USER)
+
+    @property
+    def author_workspace(self) -> Path:  # zurvanauthor-owned, zurvaneval-readable, dev-unreadable, TM-excluded
+        return self.author_home / "workspace"
 
     @property
     def sets_dir(self) -> Path:  # holdout.age reserve.age dev-ref.jsonl canaries.age
