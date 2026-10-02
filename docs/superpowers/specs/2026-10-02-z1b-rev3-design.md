@@ -317,7 +317,7 @@ poisoning it. Re-running the gate on a dev host requires reaping orphans first
 > **Z1b Rev 3 implementation complete. P1 queue closed. #1 developer closure complete. Operator
 > installation and installed-broker live closure remain. Branch intentionally unmerged.**
 
-SHAs at this point: `main` = `c86bada` (docs/status only), `z1b-rev3` = `713cba9` (all Rev 3 code). Both
+SHAs at this point: `main` = `c86bada` (docs/status only), `z1b-rev3` = `11d5847` (all Rev 3 code; tip advanced by two setup-robustness fixes — see §7i). Both
 clean. The branch is **intentionally unmerged**: if the operator gate fails, the failure belongs to
 `z1b-rev3` and `main` stays the known-good control.
 
@@ -342,6 +342,36 @@ and the merge — all require the installed environment.
 9. Then merge `z1b-rev3` into `main`.
 10. On the exact merged tree, re-run the full test suite, `public_repo_guard`, the Boundary gate, and
     `git diff --check`. No remote push as part of closure unless Raouf explicitly asks for that push.
+
+## 7i. REAL install VERIFIED on the operator machine (2026-10-03), then rolled back to pristine
+
+The privileged install was actually run on Raouf's machine (he supplied the password; done from the
+real repo at the Rev 3 tip, not a worktree). Findings and result:
+
+- **Two real operator-install defects, found by running it and fixed on `z1b-rev3`:** setup.sh runs
+  under `bash -euo pipefail`, and (1) its dev-side ACL **chmods** and (2) its ACL-target **preflight**
+  (`/bin/test -d`/`/bin/ls -d`) both hard-required OPTIONAL paths (`REPO/logs`, `~/.zurvan/reports`, an
+  empty `*Zurvan*` glob). `REPO/logs` was absent, so `test -d .../logs` exited 1 and aborted the whole
+  install SILENTLY before any identity was created. Fixed (`e3889d4` guard the chmods; `11d5847` the
+  preflight now requires only the ancestor traversal paths). Traced via `bash -euo pipefail -x`.
+- **After the fixes: `setup.sh` exit 0, `install.sh <sha> ...` exit 0** — identities created, age key +
+  signer generated, the #7/#16 `allowed_signers` derived (both namespaces), sudoers + pf anchor +
+  launchd scan daemon installed.
+- **`zurvan eval z1b seal-check` through the PUBLIC CLI on the installed broker = 20+ invariants GREEN:**
+  `broker_sha_matches`, `*_root_owned`, `broker_not_writable`, `candidate_cannot_read_sealed`,
+  `dev_cannot_read_sealed`, `keys_private`, `sets_private`, `runs_private`, `stage_private`,
+  `pinned_binaries_match`, `interpreter_root_owned`, `local_deny_rules_present`, `pf_anchor_present`,
+  `sudoers_valid`, `scan_agent_present`, `tm_excluded_keys`, `tm_excluded_private` (#2 author ws),
+  `ledger_valid`. `zurvan eval z1b status` round-trips (`broker_sha` = installed sha). The ONLY `false`
+  are `corpus_read_only` and `manifest_valid` — i.e. exactly the operator steps still outstanding.
+- **Rolled back to PRISTINE** (`uninstall --purge-sealed`): identities/groups/broker/sudoers/launchd
+  removed, `/etc/pf.conf` anchor + backup gone. The machine is exactly as before; the install is proven
+  reproducible from the scripts.
+
+**Remaining for `#1 CLOSED` -> `Z1b CLOSED` (unchanged, all operator-side):** build the golden glibc
+aarch64 guest image (§7f a.1) and place it at `broker_dir/images/guest.qcow2`; install a read-only
+corpus (`install_corpus`); author + seal a suite (model spend, as `zurvanauthor`); then the full
+installed-broker live gate through `zurvan eval z1b run` incl. a real VM candidate run.
 
 ## 8. Build order for the Rev 3 plan
 
