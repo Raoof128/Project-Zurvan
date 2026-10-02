@@ -59,13 +59,13 @@ def test_t18_every_wrapper_entry_is_a_module_level_function_of_its_module():
 
 @pytest.mark.parametrize("module,entry", [("broker;import os", "main"), ("Broker", "main"), ("broker", "a b"),
                                           ("broker", "main\nimport os"), ("", "main")])
-def test_t18_wrapper_text_refuses_names_that_could_inject_code(module, entry):
+def test_t18_wrapper_source_refuses_names_that_could_inject_code(module, entry):
     with pytest.raises(R.OperatorRefusal):
-        R.wrapper_text(module, entry)
+        R.wrapper_source(module, entry)
 
 
-def test_t18_wrapper_text_imports_the_named_entry_and_nothing_else():
-    text = R.wrapper_text("broker", "broker_main")
+def test_t18_wrapper_source_imports_the_named_entry_and_nothing_else():
+    text = R.wrapper_source("broker", "broker_main")
     assert "from scripts.eval_seal.broker import broker_main as _entry\n" in text
     assert text.endswith("sys.exit(_entry(sys.argv[1:]))\n")
 

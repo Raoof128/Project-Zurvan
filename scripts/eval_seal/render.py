@@ -274,7 +274,7 @@ def export_sources(repo, sha, git_user):
 
 # ------------------------------------------------------------------ wrappers, sudoers
 
-def wrapper_text(module, entry):
+def wrapper_source(module, entry):
     if re.fullmatch(r"[a-z_][a-z0-9_]*", module) is None or re.fullmatch(r"[a-z_][a-z0-9_]*", entry) is None:
         raise OperatorRefusal("internal: bad wrapper module or entry name")
     return (
@@ -611,7 +611,7 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
 
     wrappers = {}
     for name, mod, entry in WRAPPERS:
-        data = wrapper_text(mod, entry).encode()
+        data = wrapper_source(mod, entry).encode()
         wrappers[BROKER_BIN + "/" + name] = data
         plan.install_file(BROKER_BIN + "/" + name, data, "root", "wheel", "0555")
 

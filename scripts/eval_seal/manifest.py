@@ -50,7 +50,7 @@ def _bad():
     raise SealRefusal("MANIFEST_INVALID")
 
 
-def _is_int(v) -> bool:
+def _manifest_is_int(v) -> bool:
     return type(v) is int and v >= 0
 
 
@@ -97,7 +97,7 @@ def _validate(m) -> None:
         _bad()
     if type(m["suite_id"]) is not str or not _HEX16.fullmatch(m["suite_id"]):
         _bad()
-    if not _is_int(m["sequence"]) or not _is_int(m["accepted"]):
+    if not _manifest_is_int(m["sequence"]) or not _manifest_is_int(m["accepted"]):
         _bad()
     if type(m["created"]) is not str or not _CREATED.fullmatch(m["created"]):
         _bad()
@@ -116,13 +116,13 @@ def _validate(m) -> None:
         if not isinstance(pool, str) or not _NAME.fullmatch(pool) or not isinstance(per, dict):
             _bad()
         for stratum, n in per.items():
-            if not isinstance(stratum, str) or not _NAME.fullmatch(stratum) or not _is_int(n):
+            if not isinstance(stratum, str) or not _NAME.fullmatch(stratum) or not _manifest_is_int(n):
                 _bad()
     rej = m["rejected"]
     if not isinstance(rej, dict):
         _bad()
     for reason, n in rej.items():
-        if not isinstance(reason, str) or not _NAME.fullmatch(reason) or not _is_int(n):
+        if not isinstance(reason, str) or not _NAME.fullmatch(reason) or not _manifest_is_int(n):
             _bad()
     short = m["short"]
     if not isinstance(short, list):
@@ -133,7 +133,7 @@ def _validate(m) -> None:
         for k in ("pool", "stratum"):
             if type(row[k]) is not str or not _NAME.fullmatch(row[k]):
                 _bad()
-        if not _is_int(row["have"]) or not _is_int(row["need"]):
+        if not _manifest_is_int(row["have"]) or not _manifest_is_int(row["need"]):
             _bad()
     ledger = m["burn_ledger"]
     if not isinstance(ledger, list):
@@ -269,7 +269,7 @@ def verify(manifest_path: Path, sig_path: Path, allowed_signers: Path) -> dict:
 
 
 def check_sequence(manifest: dict, last_seen: int) -> None:
-    if not isinstance(manifest, dict) or not _is_int(manifest.get("sequence")) or not _is_int(last_seen):
+    if not isinstance(manifest, dict) or not _manifest_is_int(manifest.get("sequence")) or not _manifest_is_int(last_seen):
         _bad()
     if manifest["sequence"] < last_seen:
         _bad()
