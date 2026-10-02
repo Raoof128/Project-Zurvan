@@ -26,6 +26,9 @@
   - Full suite, replay vs clean `main` worktree: the same 10 failures and the same 6 live-store-guard teardown errors in both. The 3 tests that differed pass serially in both trees.
   - `test_plan_integrity` passed, the Boundary scan of the plan is clean, `public_repo_guard` passed, and `git diff --check` is clean.
 - **Found on `main` (not fixed, out of scope):** `tests/test_check_gate_index_rebuild.py` fails 7 of 10 tests on the current checkout. Its `_stub_gitignore` stub rejects the `timeout=` keyword that `rebuild_index.py` passes.
+- **Status update (10:58):** Raouf tried `sudo scripts/eval_seal/setup.sh` and got `command not found`. That is expected: the script exists only on the throwaway `z1b-gauntlet` branch until Tasks 1–18 are executed and merged. Nothing ran.
+  - Order from here: accept the plan or answer its decisions; execute Tasks 1–18 inline on a branch; merge locally; then run the operator steps from the repo root at the reviewed SHA (`setup.sh`, then `install.sh <SHA>`).
+  - Never run the operator steps from a gauntlet worktree.
 - **Follow-ups:**
   1. Raouf accepts or revises the plan and answers its 7 decisions (recommended: move untrusted git pack parsing to `zurvancandidate`).
   2. Execute Tasks 1–19 Step 3 on a branch.

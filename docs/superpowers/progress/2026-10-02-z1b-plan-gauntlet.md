@@ -7,6 +7,15 @@
 - Nothing was pushed from those branches.
 - No `sudo`, no identity creation, no broker install, no DEV or sealed authoring, and no model spend.
 
+## Next step (10:58)
+
+`sudo scripts/eval_seal/setup.sh` returned `command not found`. That is expected: the operator scripts exist only on the throwaway `z1b-gauntlet` branch until the plan is executed.
+
+Order from here:
+1. Raouf accepts the plan or answers its decisions.
+2. Execute Tasks 1–18 inline on a branch, then merge locally.
+3. Run the operator steps from the repo root at the reviewed SHA.
+
 ## What the gauntlet established
 
 - **Writers:** seven Sonnet writers, each in its own worktree. Each wrote the real code test-first (red, then green), mutation-checked every security guard, checked Python 3.9 compatibility for the sealed package, and emitted task text byte-identical to the code it ran.
