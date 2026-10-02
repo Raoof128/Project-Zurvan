@@ -33,6 +33,7 @@ from . import manifest as author_manifest
 from . import spec as author_spec
 from . import sysenv
 from .codes import SealRefusal
+from . import sealed_store
 from .corpus import corpus_pages as author_corpus_pages
 from .corpus import corpus_sha256 as author_corpus_sha256
 from .paths import SealPaths
@@ -600,23 +601,23 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
     dev_sha = bundle.get("dev_sha256")
     if type(dev_sha) is not str or not _HEX64.fullmatch(dev_sha):
         raise SealRefusal("BAD_ARGS")
-    targets = [Path(paths.sets_dir) / n for n in ("holdout.age", "reserve.age", "canaries.age")]
-    targets.append(Path(paths.manifest_file))
-    if any(os.path.lexists(str(t)) for t in targets + [Path(str(paths.manifest_file) + ".sig")]):
+    targets = [sealed_store.holdout_age(paths), sealed_store.reserve_age(paths),
+               sealed_store.canaries_age(paths), sealed_store.manifest(paths), sealed_store.manifest_sig(paths)]
+    if any(os.path.lexists(str(t)) for t in targets):
         raise SealRefusal("BAD_ARGS")
     canaries = make_canaries(AUTHOR_CANARIES)
     if (type(canaries) is not list or len(canaries) != AUTHOR_CANARIES or len(set(canaries)) != len(canaries)
             or any(type(c) is not str or not c or "\n" in c for c in canaries)):
         raise SealRefusal("BAD_ARGS")
-    sets = Path(paths.sets_dir)
-    sets.mkdir(parents=True, exist_ok=True)
+    Path(paths.sets_dir).mkdir(parents=True, exist_ok=True)
+    Path(sealed_store.manifest(paths)).parent.mkdir(parents=True, exist_ok=True)
     written = []
     try:
         digests = {}
-        for name, data in (("holdout.age", _author_jsonl(bundle["holdout"])),
-                           ("reserve.age", _author_jsonl(bundle["reserve"])),
-                           ("canaries.age", author_canary_records(canaries))):
-            out = sets / name
+        for name, out, data in (("holdout", sealed_store.holdout_age(paths), _author_jsonl(bundle["holdout"])),
+                                ("reserve", sealed_store.reserve_age(paths), _author_jsonl(bundle["reserve"])),
+                                ("canaries", sealed_store.canaries_age(paths), author_canary_records(canaries))):
+            out = Path(out)
             encrypt(data, out)
             if not out.is_file():
                 raise SealRefusal("INTERNAL")
@@ -626,11 +627,11 @@ def seal_suite(bundle, paths, *, encrypt, sign, make_canaries, sequence: int = 1
         manifest = author_manifest.build_manifest(
             suite_id=secrets.token_hex(8), sequence=sequence, created=(now or _author_utc_now)(),
             models=bundle["models"], prompt_sha256=bundle["prompt_sha256"], corpus_sha256=bundle["corpus_sha256"],
-            holdout_age_sha256=digests["holdout.age"], reserve_age_sha256=digests["reserve.age"],
+            holdout_age_sha256=digests["holdout"], reserve_age_sha256=digests["reserve"],
             dev_sha256=dev_sha, strata_counts=bundle["strata_counts"], accepted=bundle["accepted"],
             rejected=bundle["rejected"], short=bundle["short"],
             evaluator_version=author_grade.EVALUATOR_VERSION, burn_ledger=[])
-        mf = Path(paths.manifest_file)
+        mf = Path(sealed_store.manifest(paths))
         author_manifest.write_manifest(mf, manifest)
         written.append(mf)
         os.chmod(str(mf), 0o600)
@@ -823,7 +824,7 @@ def author_draft_main(argv, *, paths=None, runner=None, now=None):
         spec = author_spec.load_spec(args["spec"])
         rubric = _author_read_text(args["rubric"], _MAX_PROMPT_FILE).decode("utf-8", "replace")
         templates = author_load_templates(args["prompts"])
-        dev_path = Path(args["dev"]) if "dev" in args else Path(paths.sets_dir) / "dev-ref.jsonl"
+        dev_path = Path(args["dev"]) if "dev" in args else sealed_store.dev_ref(paths)
         dev_items, dev_sha = _author_load_dev(dev_path)
         seed = int(args["seed"]) if "seed" in args else secrets.randbits(31)
         if runner is None:
@@ -868,7 +869,7 @@ def author_seal_main(argv, *, paths=None, encrypt=None, sign=None, make_canaries
         if "public-out" in args:
             out = Path(args["public-out"])
             out.mkdir(parents=True, exist_ok=True)
-            for src in (Path(paths.manifest_file), Path(str(paths.manifest_file) + ".sig")):
+            for src in (sealed_store.manifest(paths), sealed_store.manifest_sig(paths)):
                 dst = out / src.name
                 dst.write_bytes(src.read_bytes())
                 os.chmod(str(dst), 0o644)

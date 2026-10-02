@@ -99,7 +99,7 @@ class SealPaths:
         return self.author_home / "workspace"
 
     @property
-    def sets_dir(self) -> Path:  # holdout.age reserve.age dev-ref.jsonl canaries.age
+    def sets_dir(self) -> Path:  # container: canaries + dev-ref + generations/ + active (see sealed_store)
         return self.eval_home / "sets"
 
     @property

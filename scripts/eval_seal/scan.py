@@ -34,6 +34,7 @@ from .broker import (broker_dump_items, broker_file_sha256, broker_iso_now, brok
                      broker_verified_manifest)
 from .codes import SealRefusal
 from .spec import coverage, load_spec
+from . import sealed_store
 
 K = 32
 W = 33
@@ -319,7 +320,7 @@ def scan_load_canaries(paths, ctx) -> list:
     that matches no live item) burns every live item when it hits."""
     try:
         records = []
-        for line in ctx.decrypt(paths.sets_dir / "canaries.age").decode("utf-8").split("\n"):
+        for line in ctx.decrypt(sealed_store.canaries_age(paths)).decode("utf-8").split("\n"):
             if not line:
                 continue
             rec = json.loads(line)
@@ -338,8 +339,8 @@ def scan_load_canaries(paths, ctx) -> list:
 
 
 def scan_load_pools(paths, ctx, spec):
-    return (broker_parse_items(ctx.decrypt(paths.sets_dir / "holdout.age"), spec),
-            broker_parse_items(ctx.decrypt(paths.sets_dir / "reserve.age"), spec))
+    return (broker_parse_items(ctx.decrypt(sealed_store.holdout_age(paths)), spec),
+            broker_parse_items(ctx.decrypt(sealed_store.reserve_age(paths)), spec))
 
 
 def scan_run(paths, ctx, ledger) -> dict:
@@ -397,7 +398,7 @@ def reseal_after_burn(paths, ctx, ledger) -> dict:
     with ledger.lock():
         m, _sha = broker_verified_manifest(paths, ledger, record=False)
         for pool in ("holdout", "reserve"):
-            if broker_file_sha256(paths.sets_dir / (pool + ".age")) != m[pool + "_age_sha256"]:
+            if broker_file_sha256(sealed_store.age_path(paths, pool)) != m[pool + "_age_sha256"]:
                 raise SealRefusal("MANIFEST_INVALID")
         holdout, reserve = scan_load_pools(paths, ctx, spec)
         burned = ledger.burned_ids()
@@ -405,8 +406,8 @@ def reseal_after_burn(paths, ctx, ledger) -> dict:
             return {"resealed": False}
         new_h, new_r, _retired = replace_burned(holdout, reserve, burned)
         for pool, items in (("holdout", new_h), ("reserve", new_r)):
-            ctx.encrypt(broker_dump_items(items), paths.sets_dir / (pool + ".age.new"))
-        digests = {p: broker_file_sha256(paths.sets_dir / (p + ".age.new")) for p in ("holdout", "reserve")}
+            ctx.encrypt(broker_dump_items(items), Path(str(sealed_store.age_path(paths, pool)) + ".new"))
+        digests = {p: broker_file_sha256(Path(str(sealed_store.age_path(paths, p)) + ".new")) for p in ("holdout", "reserve")}
         counts = {"holdout": {}, "reserve": {}}
         for pool, items in (("holdout", new_h), ("reserve", new_r)):
             for item in items:
@@ -424,13 +425,14 @@ def reseal_after_burn(paths, ctx, ledger) -> dict:
             rejected=m["rejected"],
             short=coverage({"holdout": new_h, "reserve": new_r}, spec)["short"],
             evaluator_version=m["evaluator_version"], burn_ledger=sorted(ledger_burns, key=lambda e: e["id"]))
-        staged = Path(str(paths.manifest_file) + ".new")
+        staged = Path(str(sealed_store.manifest(paths)) + ".new")
         manifest_mod.write_manifest(staged, new_m)
         sig = manifest_mod.sign(staged, paths.keys_dir / "signing_ed25519")
         for pool in ("holdout", "reserve"):
-            os.replace(str(paths.sets_dir / (pool + ".age.new")), str(paths.sets_dir / (pool + ".age")))
-        os.replace(str(sig), str(paths.manifest_file) + ".sig")
-        os.replace(str(staged), str(paths.manifest_file))
+            tgt = sealed_store.age_path(paths, pool)
+            os.replace(str(tgt) + ".new", str(tgt))
+        os.replace(str(sig), str(sealed_store.manifest_sig(paths)))
+        os.replace(str(staged), str(sealed_store.manifest(paths)))
         ledger.append({"kind": "manifest_seen", "sequence": new_m["sequence"],
-                       "manifest_sha256": manifest_mod.suite_manifest_sha256(paths.manifest_file)})
+                       "manifest_sha256": manifest_mod.suite_manifest_sha256(sealed_store.manifest(paths))})
         return {"resealed": True, "sequence": new_m["sequence"]}

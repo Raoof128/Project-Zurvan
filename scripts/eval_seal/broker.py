@@ -39,7 +39,7 @@ import traceback
 import warnings
 from pathlib import Path
 
-from . import grade, intake, promotion, protocol, sweep, sysenv
+from . import grade, intake, promotion, protocol, sealed_store, sweep, sysenv
 from . import manifest as manifest_mod
 from .codes import SealRefusal
 from .corpus import corpus_pages, corpus_sha256
@@ -459,10 +459,11 @@ def broker_verified_manifest(paths: SealPaths, ledger: Ledger, *, record: bool =
     """Verify the SEALED manifest (signature, closed schema, rollback, same-sequence replay).
     Returns (manifest, whole_file_sha256). Records manifest_seen when the sequence is new."""
     signers = paths.keys_dir / "allowed_signers"
-    sig = Path(str(paths.manifest_file) + ".sig")
-    before = manifest_mod.suite_manifest_sha256(paths.manifest_file)
-    m = manifest_mod.verify(paths.manifest_file, sig, signers)
-    if manifest_mod.suite_manifest_sha256(paths.manifest_file) != before:  # changed during verification
+    mf = sealed_store.manifest(paths)
+    sig = sealed_store.manifest_sig(paths)
+    before = manifest_mod.suite_manifest_sha256(mf)
+    m = manifest_mod.verify(mf, sig, signers)
+    if manifest_mod.suite_manifest_sha256(mf) != before:  # changed during verification
         raise SealRefusal("MANIFEST_INVALID")
     manifest_mod.check_sequence(m, ledger.last_manifest_sequence())
     last = None
@@ -897,8 +898,8 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
             corpus_sha = corpus_sha256(paths.corpus_dir)
             if corpus_sha != m["corpus_sha256"]:
                 raise SealRefusal("CORPUS_MISMATCH")
-            set_name = suite + ".age"
-            if broker_file_sha256(paths.sets_dir / set_name) != m[suite + "_age_sha256"]:
+            set_path = sealed_store.age_path(paths, suite)
+            if broker_file_sha256(set_path) != m[suite + "_age_sha256"]:
                 raise SealRefusal("MANIFEST_INVALID")
             # 7. bundle: staged through one validated fd, then verified (provisional id; renamed once reserved)
             provisional = os.urandom(8).hex()
@@ -928,7 +929,7 @@ def broker_run(args: dict, paths: SealPaths, ctx: BrokerContext) -> dict:
             if cached is not None:
                 return dict(cached, cached=True, budget_remaining=led.budget_remaining(budget_id, budget_n))
             # 11. decrypt in memory; a burned item sitting in a set is refused BEFORE any charge
-            items = broker_parse_items(ctx.decrypt(paths.sets_dir / set_name), spec)
+            items = broker_parse_items(ctx.decrypt(set_path), spec)
             burned = led.burned_ids()
             if not items or any(i["id"] in burned for i in items):
                 raise SealRefusal("MANIFEST_INVALID")
@@ -1030,7 +1031,7 @@ def broker_status(paths: SealPaths, ctx: BrokerContext, led: Ledger = None) -> d
            "installed_sha": sha, "installed_tree": tree, "stale": False, "manifest_valid": False,
            "corpus_match": False, "budget_remaining": 0, "open_incidents": 0, "holdout_n": 0,
            "reserve_n": 0, "suite_id": None}
-    if sha is None or not paths.manifest_file.exists():
+    if sha is None or not sealed_store.manifest(paths).exists():
         return doc
     doc["configured"] = True
     spec = load_spec(ctx.spec_path)
