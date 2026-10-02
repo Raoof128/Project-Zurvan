@@ -356,3 +356,59 @@ def test_t5_export_refuses_when_a_copy_turns_out_to_be_a_hardlink(tmp_path, monk
         z1b_corpus.prepare_corpus_export(tmp_path / "out", root=tmp_path / "live", capture=fake)
     assert ei.value.code == "CORPUS_MISMATCH"
     assert snap.released is True
+
+
+# ---------------------------------------------------------------- Rev 3 #11: full indexed corpus
+
+def _t5_full_snap(tmp_path, calls):
+    """A snapshot laid out like the real one: wiki/, docs/, bare root .md files, the two stores, and the
+    volatile snapshot metadata (lease.json/manifest.json/build.json) that must NOT enter the corpus."""
+    snapdir = _t5_tree(tmp_path / "snap", files={
+        "wiki/decisions/a.md": b"alpha\n",
+        "docs/evaluation/retrieval/r.md": b"doc page\n",
+        "docs/guide.md": b"guide\n",
+        "README.md": b"readme\n",
+        "AGENTS.md": b"agents\n",
+        "CLAUDE.md": b"claude\n",
+        "CHANGELOG.md": b"changelog\n",
+        "search.sqlite": b"\x00idx",
+        "graph.sqlite": b"graph",
+    })
+    (snapdir / "wiki/traces").mkdir(parents=True)
+    (snapdir / "wiki/traces/t.json").write_bytes(b"derived")
+    snap = _T5Snap(snapdir)
+
+    def fake(*a, **k):
+        calls.append((a, k))
+        return build_snapshot.BuildSnapshot(snap, 42, "ATOMIC", "m" * 8, "z1b-corpus",
+                                            ("graph", "search", "wiki"))
+    return fake, snapdir
+
+
+def test_t5_export_includes_every_indexed_root_not_only_wiki(tmp_path):
+    # R6 / Rev 3 #11: 2,417 indexed chunks live outside wiki/ (docs/ + root .md). The export must carry
+    # them, or the frozen index returns a page the grader's corpus cannot resolve.
+    out = tmp_path / "out"
+    fake, _ = _t5_full_snap(tmp_path, [])
+    (snapdir_lease := tmp_path / "snap" / "lease.json").write_text('{"pid": 111}')
+    z1b_corpus.prepare_corpus_export(out, root=tmp_path / "live", capture=fake)
+    from scripts.eval_seal.corpus import corpus_pages
+    pages = corpus_pages(out)
+    assert "docs/guide.md" in pages and "docs/evaluation/retrieval/r.md" in pages
+    assert {"README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md"} <= pages
+    assert "wiki/decisions/a.md" in pages
+    # snapshot metadata and derived traces are NOT part of the corpus
+    assert not (out / "lease.json").exists() and not (out / "manifest.json").exists()
+    assert not (out / "wiki" / "traces").exists()
+
+
+def test_t5_corpus_digest_excludes_volatile_snapshot_metadata(tmp_path):
+    # the lease file carries a pid/timestamp; if it leaked into the export the digest would not reproduce
+    d = []
+    f1, _ = _t5_full_snap(tmp_path / "a", [])
+    (tmp_path / "a" / "snap" / "lease.json").write_text('{"pid": 1}')
+    i1 = z1b_corpus.prepare_corpus_export(tmp_path / "a" / "out", root=tmp_path / "a" / "live", capture=f1)
+    f2, _ = _t5_full_snap(tmp_path / "b", [])
+    (tmp_path / "b" / "snap" / "lease.json").write_text('{"pid": 99999}')
+    i2 = z1b_corpus.prepare_corpus_export(tmp_path / "b" / "out", root=tmp_path / "b" / "live", capture=f2)
+    assert i1["corpus_sha256"] == i2["corpus_sha256"]

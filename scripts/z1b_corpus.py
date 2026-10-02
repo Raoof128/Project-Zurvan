@@ -19,6 +19,11 @@ from scripts.eval_seal.corpus import corpus_sha256
 
 _STORES = ("search.sqlite", "graph.sqlite")
 _SKIP_TOP = ("traces",)
+# Rev 3 #11: the search index spans every git-tracked indexed root, not just wiki/. The snapshot lays
+# docs/ under its root and the root markdown files bare at top level (matching chunks.source_path:
+# "docs/x.md", "README.md"). The corpus export must carry all of them, and must NOT carry the snapshot's
+# own volatile metadata (lease.json/manifest.json/build.json), which would make the digest irreproducible.
+_ROOT_FILES = ("README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md")
 
 
 def _copy_tree(src: Path, dst: Path) -> None:
@@ -61,6 +66,13 @@ def prepare_corpus_export(dest: Path, *, root: Path = None, capture=None) -> dic
                 shutil.copyfile(e.path, dest / "wiki" / e.name)
             else:
                 raise SealRefusal("CORPUS_MISMATCH")
+        docs = src / "docs"
+        if docs.is_dir():
+            _copy_tree(docs, dest / "docs")
+        for name in _ROOT_FILES:
+            rf = src / name
+            if rf.is_file():
+                shutil.copyfile(rf, dest / name)
         for name in _STORES:
             shutil.copyfile(src / name, dest / name)
         digest = corpus_sha256(dest)
