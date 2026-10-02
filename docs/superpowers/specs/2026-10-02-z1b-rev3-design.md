@@ -188,7 +188,7 @@ Executed inline, test-first, each commit mutation-checked. Full z1b suite on the
 | #9 | `declaration_sha256` bound into the run key (v3) — two declarations in one commit never share a cached result | DONE | `0b84b43` |
 | #11 | corpus export carries every indexed root (docs/ + root .md), digest excludes volatile snapshot metadata | DONE | `b8b526f` |
 | #2 (P0) | `zurvanauthor` identity split | DONE `c77504b` (draft/seal phase split) + `b41df1a` (OS identity, ACLs, read-denial live gate). WAS: — redesign of Task 15: authoring must split into a draft phase (as `zurvanauthor`, corpus-read only) and a seal/sign phase (as `zurvaneval`), or the new ACL breaks signing. Its own focused pass. |
-| #1 (P0) | VM-per-run candidate isolation | BOUNDARY DONE: `vm_runner.py` (`15edd86`), VM-ISO live gate `c3ddb28` (2 passed, real VZ boots: in-guest candidate, no host crossover, teardown after success+kill), opt-in/serial `26f8cd1`. 12 unit tests + 2 live. REMAINING for full closure: wire the broker production launch to vm_launch, and golden-image + read-only corpus-disk provisioning in install (the workload, not the boundary). |
+| #1 (P0) | VM-per-run candidate isolation | BOUNDARY + WIRING DONE, not yet CLOSED. `vm_runner.py` (`15edd86`), VM-ISO live gate `c3ddb28` (real VZ boots), opt-in/serial `26f8cd1`, broker->VM wiring + no-host-path `1adeb18`. REMAINING (operator-install, §7f): golden image + read-only corpus disk, and the installed-broker closure gate. |
 | #12 | resource-only promotion route (canonical §9.5 second limb) | NOT STARTED — predeclaration schema change across 4 files |
 | #13 | scanner covers target-page leaks (gate-9 oracle match) | NOT STARTED — needs a `scan()` needle-set refactor or a precise definitional narrowing (bare public page paths excluded to avoid false positives); definition still to settle |
 | #14 | atomic sealed generations | NOT STARTED |
@@ -242,6 +242,31 @@ Building `vm_runner.py` against the proven mechanism surfaced two more measured 
 Per-run isolation is therefore the unique instance name + `limactl delete -f` after the run, not a
 per-run home; the image download is cached once in the shared home. `vm_leftover_instances` lists the
 shared home and reports any instance a teardown left behind (the sweep's VM arm, burns the run's items).
+## 7f. #1 remaining: golden image + read-only corpus, and the broker-path closure gate (spec)
+
+Broker->VM wiring is DONE (`1adeb18`): production `launch_candidate` is the ONLY candidate executor
+(`broker_vm_launch`), the host `run` subcommand is refused so the privileged wrapper cannot execute
+candidate code, a VM failure fails closed (never host execution), the sweep sees VM leftovers, and the run
+identity binds the guest-image digest + VM config. Two things remain before #1 is stamped CLOSED, and both
+are operator-install construction (they need `sudo setup.sh`/`install.sh`, so their gate is a live gate
+that SKIPS NOT CONFIGURED in a dev session, like the seal live gate):
+
+**(a) Golden guest image + read-only corpus (install.sh).** Build/pin, from reviewed inputs, a guest image
+carrying the retrieval runtime (python + torch + sentence-transformers + sqlite-vec + the MiniLM model)
+under `/opt/z1b/runtime`, with the candidate entry at `/opt/z1b/candidate/z1b_candidate.py`. The frozen
+corpus is attached to each run as a READ-ONLY virtio disk (`additionalDisks`, readonly) mounted at
+`/opt/z1b/corpus` — never a host-home mount, never a dynamic package fetch during evaluation. The image
+digest + the corpus-disk digest are recorded in the run identity (the image digest already is). Properties
+the closure gate must prove: the candidate can READ the corpus, the candidate CANNOT write the corpus (the
+mount is read-only), and a second run starts from a clean guest (fresh instance; no state carries over).
+
+**(b) Full #1 closure gate, through the installed broker (`tests/test_z1b_seal_live.py`, operator step).**
+Not a direct vm_runner call: `zurvan eval z1b run --commit <sha> --suite holdout --declare ...` driving the
+INSTALLED broker, pinned Lima asset tree, golden image, real corpus provisioning. Assert success, failure,
+timeout and kill all behave, and the post-run sweep leaves no instance. Only when this gate is green on the
+real identities is #1 stamped CLOSED. Until then #1 is: boundary PROVEN, broker-wired, no host path;
+provisioning + the installed-broker closure gate pending the operator steps.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
