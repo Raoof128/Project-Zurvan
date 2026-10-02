@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import scripts.z1b_client as zc
-from scripts.eval_seal.paths import CANDIDATE_USER, EVAL_USER, SealPaths
+from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, EVAL_USER, SealPaths
 
 
 def _t17_not_configured_reason():
@@ -66,6 +66,28 @@ def test_t17_live_gate1_candidate_with_the_sandbox_disabled_still_gets_eacces():
     the sandbox is defence in depth, the filesystem permission is the vault door."""
     doc = zc.client_seal_check()
     assert doc["checks"]["candidate_cannot_read_sealed"] is True, doc["checks"]
+
+
+def test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets():
+    """Rev 3 #2: the authoring identity (zurvanauthor) runs the models over the untrusted corpus. It must
+    not be able to read the key owner's secrets, so a corpus prompt-injection that tells the author to read
+    them hits EACCES. Checked by opening each sealed path AS zurvanauthor via a tiny stdlib probe."""
+    probe = ("import os,sys,errno,json\n"
+             "r={}\n"
+             "for p in sys.argv[1:]:\n"
+             "    try:\n"
+             "        fd=os.open(p, os.O_RDONLY|os.O_NONBLOCK); os.close(fd); r[p]='READABLE'\n"
+             "    except OSError as e:\n"
+             "        r[p]='EACCES' if e.errno in (errno.EACCES,errno.EPERM) else 'ENOENT' if e.errno in (errno.ENOENT,errno.ENOTDIR) else 'ERR%d'%e.errno\n"
+             "print(json.dumps(r))\n")
+    sealed = [str(REAL.keys_dir), str(REAL.keys_dir / "age.key"), str(REAL.sets_dir),
+              str(REAL.sets_dir / "holdout.age"), str(REAL.runs_dir), str(REAL.incidents_dir)]
+    rc, out = _t17_sudo_n(AUTHOR_USER, "/usr/bin/python3", "-c", probe, *sealed)
+    assert rc == 0, out
+    import json as _j
+    seen = _j.loads(out.decode())
+    bad = {p: v for p, v in seen.items() if v == "READABLE"}
+    assert bad == {}, bad  # EACCES or ENOENT only; never READABLE
 
 
 # ------------------------------------------------------------------ gate 1b

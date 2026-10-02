@@ -181,6 +181,7 @@ def _t12_files(lines):
 def _t12_expected_dirs():
     p = SealPaths.real()
     ev, cand = ("zurvaneval", "zurvaneval", "0700"), ("zurvancandidate", "zurvancandidate", "0700")
+    au = ("zurvanauthor", "zurvanauthor", "0700")
     return {
         "/Library/ZurvanEval": ("root", "wheel", "0755"),
         str(p.runtime_dir): ("root", "wheel", "0755"),
@@ -189,6 +190,7 @@ def _t12_expected_dirs():
         str(p.eval_home): ev, str(p.keys_dir): ev, str(p.private_dir): ev, str(p.sets_dir): ev, str(p.runs_dir): ev,
         str(p.incidents_dir): ev,
         str(p.candidate_home): cand, str(p.scratch_dir): cand,
+        str(p.author_home): au, str(p.author_workspace): au, str(p.author_home) + "/private": au,
         str(p.drop_dir): ("root", "wheel", "1733"),
     }
 
@@ -296,12 +298,12 @@ def test_t12_setup_directory_modes_are_never_looser_than_spec(t12_world):
 @needs_clt
 def test_t12_setup_users_groups_and_login_hiding(t12_world):
     text = "\n".join(_t12_lines(t12_world["setup"]))
-    for user in ("zurvaneval", "zurvancandidate"):
+    for user in ("zurvaneval", "zurvancandidate", "zurvanauthor"):
         assert f"/usr/bin/dscl . -create /Users/{user} IsHidden 1" in text
         assert f"/usr/bin/dscl . -create /Users/{user} UserShell /usr/bin/false" in text
         assert re.search(rf"/usr/bin/dscl \. -create /Users/{user} Password '?\*'?$", text, re.M)
         assert f"NFSHomeDirectory /Users/{user}" in text
-    assert "/usr/bin/dscl . -append /Groups/zurvancorpus GroupMembership zurvaneval zurvancandidate" in text
+    assert "/usr/bin/dscl . -append /Groups/zurvancorpus GroupMembership zurvaneval zurvancandidate zurvanauthor" in text
     assert "-create /Groups/zurvancorpus" in text and "-create /Groups/zurvancandidate" in text
     # non-admin: neither user is ever appended to the admin group
     assert "/Groups/admin" not in text
@@ -309,6 +311,7 @@ def test_t12_setup_users_groups_and_login_hiding(t12_world):
     # refuses to clobber existing identities
     assert "/usr/bin/dscl . -read /Users/zurvaneval" in text
     assert "/usr/bin/dscl . -read /Users/zurvancandidate" in text
+    assert "/usr/bin/dscl . -read /Users/zurvanauthor" in text
 
 
 @needs_clt
@@ -316,6 +319,8 @@ def test_t12_setup_time_machine_exclusion_for_keys(t12_world):
     lines = _t12_lines(t12_world["setup"])
     assert "/usr/bin/tmutil addexclusion -p /Users/zurvaneval/keys" in lines
     assert "/usr/bin/tmutil addexclusion -p /Users/zurvaneval/private" in lines  # R18
+    assert "/usr/bin/tmutil addexclusion -p /Users/zurvanauthor/workspace" in lines  # Rev 3 #2
+    assert "/usr/bin/tmutil addexclusion -p /Users/zurvanauthor/private" in lines
     # exclusion is applied after the directory exists
     assert lines.index("/usr/bin/tmutil addexclusion -p /Users/zurvaneval/keys") > next(
         i for i, ln in enumerate(lines) if ln.endswith(" /Users/zurvaneval/keys") and ln.startswith("/usr/bin/install -d"))
@@ -384,9 +389,12 @@ def test_t12_setup_acl_targets_cover_the_scan_set(t12_world):
     for p in (DEV_HOME, f"{DEV_HOME}/Desktop", f"{DEV_HOME}/Desktop/Raouf", REPO_PATH, f"{REPO_PATH}/data",
               f"{REPO_PATH}/wiki", f"{DEV_HOME}/.claude", f"{DEV_HOME}/.claude/projects", f"{DEV_HOME}/.zurvan"):
         assert by_path[p] == {"search"}, p
-    # nothing outside the dev home / repo gets an ACL
+    # Rev 3 #2: the eval identity also gets a READ ACL on the author workspace, so the seal phase can read
+    # the draft bundle. That is the only ACL target outside the dev home / repo.
+    assert by_path["/Users/zurvanauthor/workspace"] == full
     for p in by_path:
-        assert p.startswith(DEV_HOME) or p.startswith(REPO_PATH)
+        assert (p.startswith(DEV_HOME) or p.startswith(REPO_PATH)
+                or p == "/Users/zurvanauthor/workspace")
 
 
 @needs_clt
@@ -937,6 +945,7 @@ def test_t12_uninstall_keeps_sealed_data_by_default(t12_world):
 def test_t12_uninstall_purge_removes_identities_and_everything(t12_world):
     text = "\n".join(_t12_lines(t12_world["purge"]))
     for needle in ("/usr/bin/dscl . -delete /Users/zurvaneval", "/usr/bin/dscl . -delete /Users/zurvancandidate",
+                   "/usr/bin/dscl . -delete /Users/zurvanauthor",
                    "/usr/bin/dscl . -delete /Groups/zurvancorpus", "/usr/bin/tmutil removeexclusion -p /Users/zurvaneval/keys",
                    "/usr/bin/tmutil removeexclusion -p /Users/zurvaneval/private",
                    "rm -rf /Users/zurvaneval", "rm -rf /Users/zurvancandidate"):

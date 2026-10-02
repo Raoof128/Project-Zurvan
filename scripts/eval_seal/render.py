@@ -27,10 +27,10 @@ from pathlib import Path
 from string import Template
 
 try:
-    from .paths import CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
+    from .paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
 except ImportError:  # run as a script: scripts/eval_seal is not a package here
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from scripts.eval_seal.paths import CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
+    from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
 
 _P = SealPaths.real()
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -51,6 +51,9 @@ RUNS_DIR = str(_P.runs_dir)
 INCIDENTS_DIR = str(_P.incidents_dir)
 CANDIDATE_HOME = str(_P.candidate_home)
 SCRATCH_DIR = str(_P.scratch_dir)
+AUTHOR_HOME = str(_P.author_home)
+AUTHOR_WS = str(_P.author_workspace)
+AUTHOR_PRIVATE = AUTHOR_HOME + "/private"
 DROP_DIR = str(_P.drop_dir)
 SUDOERS_FILE = str(_P.sudoers_file)
 PF_ANCHOR_FILE = str(_P.pf_anchor)
@@ -74,7 +77,7 @@ CANDIDATE_WRAPPER = BROKER_BIN + "/zurvan-candidate-run"
 EXPORT_PATHS = ("scripts/eval_seal", "scripts/boundary/d1.py", "eval/z1b/spec.json")
 USER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
-RESERVED_USERS = frozenset(["root", "ALL", EVAL_USER, CANDIDATE_USER])
+RESERVED_USERS = frozenset(["root", "ALL", EVAL_USER, CANDIDATE_USER, AUTHOR_USER])
 FORBIDDEN_STAGE_PREFIXES = ("/etc", "/private/etc", "/Library", "/System", "/usr", "/bin", "/sbin",
                             "/Applications", "/var/at", "/private/var/at", "/private/var/db")
 
@@ -439,22 +442,25 @@ def plan_setup(plan, dev_home, repo):
         else:
             plan.cmd("/bin/test", "-d", p)
     plan.comment("refuse to clobber existing identities")
-    for kind, name in (("Users", EVAL_USER), ("Users", CANDIDATE_USER), ("Groups", EVAL_USER),
-                       ("Groups", CANDIDATE_USER), ("Groups", CORPUS_GROUP)):
+    for kind, name in (("Users", EVAL_USER), ("Users", CANDIDATE_USER), ("Users", AUTHOR_USER),
+                       ("Groups", EVAL_USER), ("Groups", CANDIDATE_USER), ("Groups", AUTHOR_USER),
+                       ("Groups", CORPUS_GROUP)):
         plan.raw('if /usr/bin/dscl . -read /%s/%s >/dev/null 2>&1; then %s; fi' % (kind, name, _fail_line("%s %s already exists" % (kind[:-1].lower(), name))))
-    plan.comment("ids 600-699: next free block of three (user, user, corpus group)")
+    plan.comment("ids 600-699: next free block of four (eval user, candidate user, author user, corpus group)")
     plan.raw("ZV_BASE=$({ /usr/bin/dscl . -list /Users UniqueID; /usr/bin/dscl . -list /Groups PrimaryGroupID; } | "
              "/usr/bin/awk 'BEGIN { m = 599 } $2 + 0 >= 600 && $2 + 0 < 700 && $2 + 0 > m { m = $2 + 0 } END { print m + 1 }')")
-    plan.raw('[ "$ZV_BASE" -lt 697 ] || { echo "refusing: no free id block in 600-699" >&2; exit 1; }')
+    plan.raw('[ "$ZV_BASE" -lt 696 ] || { echo "refusing: no free id block in 600-699" >&2; exit 1; }')
     plan.raw("ZV_EVAL_ID=$ZV_BASE")
     plan.raw("ZV_CAND_ID=$((ZV_BASE + 1))")
-    plan.raw("ZV_CORPUS_GID=$((ZV_BASE + 2))")
+    plan.raw("ZV_AUTHOR_ID=$((ZV_BASE + 2))")
+    plan.raw("ZV_CORPUS_GID=$((ZV_BASE + 3))")
     dscl = "/usr/bin/dscl"
-    for grp, var in ((EVAL_USER, "$ZV_EVAL_ID"), (CANDIDATE_USER, "$ZV_CAND_ID"), (CORPUS_GROUP, "$ZV_CORPUS_GID")):
+    for grp, var in ((EVAL_USER, "$ZV_EVAL_ID"), (CANDIDATE_USER, "$ZV_CAND_ID"), (AUTHOR_USER, "$ZV_AUTHOR_ID"), (CORPUS_GROUP, "$ZV_CORPUS_GID")):
         plan.cmd(dscl, ".", "-create", "/Groups/" + grp)
         plan.cmd(dscl, ".", "-create", "/Groups/" + grp, "PrimaryGroupID", _Raw('"%s"' % var))
     for user, var, real in ((EVAL_USER, "$ZV_EVAL_ID", "Zurvan sealed evaluator"),
-                            (CANDIDATE_USER, "$ZV_CAND_ID", "Zurvan sealed candidate runner")):
+                            (CANDIDATE_USER, "$ZV_CAND_ID", "Zurvan sealed candidate runner"),
+                            (AUTHOR_USER, "$ZV_AUTHOR_ID", "Zurvan sealed author")):
         u = "/Users/" + user
         plan.cmd(dscl, ".", "-create", u)
         plan.cmd(dscl, ".", "-create", u, "UserShell", "/usr/bin/false")
@@ -464,10 +470,11 @@ def plan_setup(plan, dev_home, repo):
         plan.cmd(dscl, ".", "-create", u, "NFSHomeDirectory", u)
         plan.cmd(dscl, ".", "-create", u, "IsHidden", "1")
         plan.cmd(dscl, ".", "-create", u, "Password", "*")
-    plan.cmd(dscl, ".", "-append", "/Groups/" + CORPUS_GROUP, "GroupMembership", EVAL_USER, CANDIDATE_USER)
+    plan.cmd(dscl, ".", "-append", "/Groups/" + CORPUS_GROUP, "GroupMembership", EVAL_USER, CANDIDATE_USER, AUTHOR_USER)
     plan.comment("directories: owner, group and mode are set in one step by install -d")
     ev = (EVAL_USER, EVAL_USER, "0700")
     cd = (CANDIDATE_USER, CANDIDATE_USER, "0700")
+    au = (AUTHOR_USER, AUTHOR_USER, "0700")
     table = (
         (ZE_ROOT, ("root", "wheel", "0755")),
         (RUNTIME_DIR, ("root", "wheel", "0755")),
@@ -475,6 +482,7 @@ def plan_setup(plan, dev_home, repo):
         (STAGE_DIR, (EVAL_USER, CANDIDATE_USER, "0750")),
         (EVAL_HOME, ev), (KEYS_DIR, ev), (PRIVATE_DIR, ev), (SETS_DIR, ev), (RUNS_DIR, ev), (INCIDENTS_DIR, ev),
         (CANDIDATE_HOME, cd), (SCRATCH_DIR, cd),
+        (AUTHOR_HOME, au), (AUTHOR_WS, au), (AUTHOR_PRIVATE, au),
         (DROP_DIR, ("root", "wheel", "1733")),
     )
     for path, (o, g, m) in table:
@@ -484,6 +492,11 @@ def plan_setup(plan, dev_home, repo):
     plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", KEYS_DIR)
     plan.comment("R18: private/ holds the plaintext authoring audit files and the claude session state: never backed up either")
     plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", PRIVATE_DIR)
+    plan.comment("Rev 3 #2: the author workspace and the author's claude config hold plaintext items: TM-excluded,")
+    plan.comment("and the eval identity gets a READ ACL on the workspace so the seal phase can read the draft bundle.")
+    plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", AUTHOR_WS)
+    plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", AUTHOR_PRIVATE)
+    plan.cmd("/bin/chmod", "+a", _acl("read,list,search,readattr,file_inherit,directory_inherit"), AUTHOR_WS)
     plan.comment("T3: the candidate identity has no outbound network (pf matches user for TCP/UDP only: defence in depth)")
     plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
                       "root", "wheel", "0644")
@@ -510,6 +523,7 @@ def plan_setup(plan, dev_home, repo):
                                               _quote_target(p)))
     plan.cmd("/usr/bin/id", EVAL_USER)
     plan.cmd("/usr/bin/id", CANDIDATE_USER)
+    plan.cmd("/usr/bin/id", AUTHOR_USER)
 
 
 def _read_regular(path, what):
@@ -799,11 +813,14 @@ def plan_uninstall(plan, dev_home, repo, purge):
     if purge:
         plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", KEYS_DIR)
         plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", PRIVATE_DIR)
+        plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", AUTHOR_WS)
+        plan.cmd("/usr/bin/tmutil", "removeexclusion", "-p", AUTHOR_PRIVATE)
         plan.cmd("/bin/rm", "-rf", EVAL_HOME)
         plan.cmd("/bin/rm", "-rf", CANDIDATE_HOME)
-        for user in (EVAL_USER, CANDIDATE_USER):
+        plan.cmd("/bin/rm", "-rf", AUTHOR_HOME)
+        for user in (EVAL_USER, CANDIDATE_USER, AUTHOR_USER):
             plan.cmd("/usr/bin/dscl", ".", "-delete", "/Users/" + user)
-        for grp in (EVAL_USER, CANDIDATE_USER, CORPUS_GROUP):
+        for grp in (EVAL_USER, CANDIDATE_USER, AUTHOR_USER, CORPUS_GROUP):
             plan.cmd("/usr/bin/dscl", ".", "-delete", "/Groups/" + grp)
 
 
