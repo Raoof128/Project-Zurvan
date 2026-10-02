@@ -163,3 +163,66 @@ def vm_leftover_instances(paths, *, runner=None) -> list:
         return ["<limactl-list-failed>"]
     out = getattr(done, "stdout", b"") or b""
     return [n for n in out.decode("ascii", "replace").split() if n]
+
+
+# ------------------------------------------------------------------ read-only corpus provisioning
+
+def corpus_image_sha256(image_path) -> str:
+    """Whole-file sha256 of a corpus disk image, through one O_NOFOLLOW descriptor. The run identity binds
+    this, so a read-only disk that is simply the WRONG disk (right permissions, wrong bytes) is rejected."""
+    try:
+        fd = os.open(str(image_path), os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        raise SealRefusal("CORPUS_MISMATCH") from None
+    try:
+        import hashlib
+        h = hashlib.sha256()
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+    finally:
+        os.close(fd)
+    return h.hexdigest()
+
+
+def verify_corpus_image(image_path, expected_sha256: str) -> None:
+    """Fail closed (CORPUS_MISMATCH) unless the corpus image is a read-only squashfs whose whole-file digest
+    equals the declared identity. 'Immutable' and 'correct identity' are separate requirements: a genuine
+    read-only disk that is the wrong disk must still be refused."""
+    import re
+    if type(expected_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise SealRefusal("CORPUS_MISMATCH")
+    p = Path(image_path)
+    try:
+        if p.is_symlink() or not p.is_file():
+            raise SealRefusal("CORPUS_MISMATCH")
+        with open(str(p), "rb") as fh:
+            magic = fh.read(4)
+    except OSError:
+        raise SealRefusal("CORPUS_MISMATCH") from None
+    # squashfs little-endian magic "hsqs"; it is a read-only filesystem by construction (no write path).
+    if magic != b"hsqs":
+        raise SealRefusal("CORPUS_MISMATCH")
+    if corpus_image_sha256(p) != expected_sha256:
+        raise SealRefusal("CORPUS_MISMATCH")
+
+
+GUEST_CORPUS_SQUASHFS = "/tmp/z1b-corpus.squashfs"
+GUEST_CORPUS_MOUNT = "/opt/z1b/corpus"
+
+
+def vm_copy_into_guest(run_id: str, paths, src, dst: str, *, runner=None) -> None:
+    """Copy a host file into the running guest via `limactl copy` (scp over lima's ssh; NOT a host mount).
+    Used to stage the read-only corpus squashfs. Raises CANDIDATE_FAILED on failure."""
+    runner = runner or subprocess.run
+    name = vm_instance_name(run_id)
+    argv = [_vm_limactl(paths), "copy", str(src), "%s:%s" % (name, dst)]
+    try:
+        done = runner(argv, env=_vm_env(paths, _vm_lima_home(paths)), stdin=subprocess.DEVNULL,
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        raise SealRefusal("CANDIDATE_FAILED") from None
+    if getattr(done, "returncode", 1) != 0:
+        raise SealRefusal("CANDIDATE_FAILED")

@@ -146,3 +146,56 @@ def test_t1vm_config_uses_a_pinned_image_location_override_when_given():
     # production pins the image FILE (guest has no network); the default stays the pinned URL
     assert 'location: "file:///pinned/alpine.qcow2"' in V.vm_config_text("file:///pinned/alpine.qcow2")
     assert V.GUEST_IMAGE_URL in V.vm_config_text()
+
+
+# ---------------------------------------------------------------- read-only corpus provisioning (unit)
+
+def _t1vm_squashfs(tmp_path, body=b"hsqs" + b"\x00" * 60):
+    f = tmp_path / "corpus.squashfs"
+    f.write_bytes(body)
+    return f
+
+
+def test_t1vm_verify_corpus_image_accepts_a_squashfs_matching_the_declared_digest(tmp_path):
+    import hashlib
+    img = _t1vm_squashfs(tmp_path)
+    digest = hashlib.sha256(img.read_bytes()).hexdigest()
+    V.verify_corpus_image(img, digest)  # no raise
+
+
+def test_t1vm_verify_corpus_image_rejects_the_wrong_disk_even_if_read_only(tmp_path):
+    import hashlib
+    img = _t1vm_squashfs(tmp_path)
+    wrong = hashlib.sha256(b"a different corpus").hexdigest()
+    with pytest.raises(SealRefusal) as ei:
+        V.verify_corpus_image(img, wrong)       # right magic, wrong bytes
+    assert ei.value.code == "CORPUS_MISMATCH"
+
+
+def test_t1vm_verify_corpus_image_rejects_a_non_squashfs_or_symlink(tmp_path):
+    import hashlib
+    notsq = tmp_path / "ext4.img"
+    notsq.write_bytes(b"\x53\xef" + b"\x00" * 62)  # not the squashfs magic
+    with pytest.raises(SealRefusal):
+        V.verify_corpus_image(notsq, hashlib.sha256(notsq.read_bytes()).hexdigest())
+    link = tmp_path / "link.squashfs"
+    link.symlink_to(_t1vm_squashfs(tmp_path))
+    with pytest.raises(SealRefusal):
+        V.verify_corpus_image(link, "0" * 64)
+    with pytest.raises(SealRefusal):
+        V.verify_corpus_image(tmp_path / "missing", "0" * 64)
+
+
+def test_t1vm_copy_into_guest_uses_limactl_copy_not_a_host_mount(tmp_path):
+    p = _vm_paths(tmp_path)
+    r = _vm_recorder()
+    V.vm_copy_into_guest(RID, p, tmp_path / "c.squashfs", "/tmp/z1b-corpus.squashfs", runner=r)
+    argv = r.calls[0][0]
+    assert argv[1] == "copy" and argv[-1] == "z" + RID + ":/tmp/z1b-corpus.squashfs"
+
+
+def test_t1vm_copy_into_guest_failure_is_candidate_failed(tmp_path):
+    p = _vm_paths(tmp_path)
+    with pytest.raises(SealRefusal) as ei:
+        V.vm_copy_into_guest(RID, p, tmp_path / "c", "/tmp/x", runner=_vm_recorder(returncode=1))
+    assert ei.value.code == "CANDIDATE_FAILED"
