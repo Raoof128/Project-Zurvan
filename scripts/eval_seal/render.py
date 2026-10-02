@@ -524,11 +524,22 @@ def plan_setup(plan, dev_home, repo):
                  % (CANDIDATE_USER, f, CANDIDATE_USER, f))
     plan.comment("T8: read-only ACLs so the eval identity can scan development transcripts and traces (spec s5.6)")
     plan.comment("search = traverse only (ancestors); full = read, list, search, readattr + inheritance. Never write/delete.")
+    # Apply each ACL only if the target exists. A dev-side path can legitimately be absent on a fresh
+    # machine (e.g. the repo has no logs/ yet, or no transcript dir matches *Zurvan*); chmod on a missing
+    # target would fail and -- because every operator plan runs under `bash -euo pipefail` -- abort the whole
+    # install. A missing target simply gets no ACL now (refresh_acl re-grants late-created transcript dirs,
+    # and the scan fails closed if it later cannot read a target). A chmod that FAILS on an EXISTING path
+    # still aborts, so real errors are never swallowed.
+    search_acl = shlex.quote(_acl("search"))
+    full_acl = shlex.quote(_acl("read,list,search,readattr,file_inherit,directory_inherit"))
     for p in search:
-        plan.cmd("/bin/chmod", "+a", _acl("search"), p)
+        plan.raw("if [ -e %s ]; then /bin/chmod +a %s %s; fi" % (shlex.quote(p), search_acl, shlex.quote(p)))
     for p in full:
-        plan.raw("/bin/chmod -R +a %s %s" % (shlex.quote(_acl("read,list,search,readattr,file_inherit,directory_inherit")),
-                                              _quote_target(p)))
+        if "*" in p:
+            plan.raw('for d in %s; do if [ -e "$d" ]; then /bin/chmod -R +a %s "$d"; fi; done'
+                     % (_quote_target(p), full_acl))
+        else:
+            plan.raw("if [ -e %s ]; then /bin/chmod -R +a %s %s; fi" % (shlex.quote(p), full_acl, shlex.quote(p)))
     plan.cmd("/usr/bin/id", EVAL_USER)
     plan.cmd("/usr/bin/id", CANDIDATE_USER)
     plan.cmd("/usr/bin/id", AUTHOR_USER)

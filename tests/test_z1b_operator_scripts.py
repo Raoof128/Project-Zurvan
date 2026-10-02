@@ -349,13 +349,23 @@ def test_t12_setup_cron_and_at_deny_for_candidate(t12_world):
     assert text.count("zurvancandidate >> /usr/lib/cron/") == 2 or text.count(">> /usr/lib/cron/") == 2
 
 
-_ACL_RE = re.compile(r"^/bin/chmod (?:-R )?\+a '?user:zurvaneval allow ([a-z_,]+)'? (\S+)$")
+# setup grants each ACL only if the target exists (so a missing optional dev path never aborts the
+# -euo pipefail install); the chmod is therefore wrapped in `if [ -e T ]; then ...; fi`, or, for the
+# transcript glob, a `for d in <glob>; do if [ -e "$d" ]; then ... "$d"; fi; done` loop.
+_ACL_CHMOD = re.compile(r"/bin/chmod (?:-R )?\+a '?user:zurvaneval allow ([a-z_,]+)'? (\S+?)(?:;|$)")
 
 
 def _t12_acls(lines):
     out = []
     for ln in lines:
-        m = _ACL_RE.match(ln)
+        s = ln.strip()
+        if s.startswith("for d in "):                       # glob loop: the target is the glob, not "$d"
+            glob = s[len("for d in "):].split(";", 1)[0].strip()
+            m = _ACL_CHMOD.search(s)
+            if m:
+                out.append((set(m.group(1).split(",")), glob))
+            continue
+        m = _ACL_CHMOD.search(s)                             # `if [ -e T ]; then chmod ... T; fi`, or a bare chmod
         if m:
             out.append((set(m.group(1).split(",")), m.group(2)))
     return out
@@ -1073,3 +1083,24 @@ def test_t12_render_py_refuses_an_uppercase_sha_even_without_the_shell_guard(tmp
                         "--claude", str(tools["claude"]), "--hf-dir", str(tools["hf"])], capture_output=True, text=True)
     assert r.returncode == 2 and "40 lowercase hex" in r.stderr
     assert not (tmp_path / "o" / "commands.txt").exists()
+
+
+@needs_clt
+def test_t12_setup_acls_are_guarded_so_a_missing_dev_path_never_aborts(t12_world):
+    # regression: setup runs under `bash -euo pipefail`; a bare `chmod` on a dev path that does not exist
+    # yet (e.g. REPO/logs, or no *Zurvan* transcript dir) would abort the whole install. Every dev-side
+    # ACL grant must therefore be guarded by an existence test (or the glob loop), never a bare chmod.
+    lines = _t12_lines(t12_world["setup"])
+    # dev-side grants only: the sealed-identity homes (zurvan{eval,candidate,author}) are dirs setup itself
+    # creates, so their ACLs are unconditional by design; the fragile ones are the pre-existing dev paths.
+    sealed = ("/Users/zurvaneval", "/Users/zurvancandidate", "/Users/zurvanauthor")
+    dev_acl_lines = [ln.strip() for ln in lines
+                     if "chmod" in ln and "+a" in ln and "allow" in ln
+                     and not any(h in ln for h in sealed)]
+    assert dev_acl_lines
+    for ln in dev_acl_lines:
+        assert ln.startswith("if [ -e ") or ln.startswith("for d in "), ln
+    # the known-optional targets are present AND guarded
+    text = "\n".join(lines)
+    assert ("for d in %s/.claude/projects/*Zurvan*;" % DEV_HOME) in text
+    assert ("if [ -e %s/logs ]; then" % REPO_PATH) in text
