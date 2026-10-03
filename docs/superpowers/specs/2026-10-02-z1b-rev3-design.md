@@ -429,6 +429,28 @@ which #1 made unreachable. So a golden image alone cannot run a candidate end-to
 Hardest unknowns are now retired: VM isolation (proven), read-only corpus (proven), runtime on glibc
 aarch64 (proven §7j). What remains is this orchestration wiring + the image bake + the live gates.
 
+## 7k.1. CORRECTION (2026-10-03): the read-only corpus image is built IN-GUEST, not on the host
+
+Attempting to have `install_corpus` build the corpus squashfs on the operator Mac surfaced a design
+flaw, caught before it was committed:
+- macOS ships NO system tool that produces a Linux-mountable read-only filesystem (`mksquashfs` is
+  brew-only; `hdiutil` makes Mac-only images). A brew binary also violates the standing invariant that
+  no privileged plan command may name a user-owned / `/opt` binary (test
+  `test_t12_no_command_line_names_a_user_owned_binary`), and bundling `mksquashfs` + its dylibs into
+  the root-owned broker tree is fragile.
+- Putting the image inside `corpus/` is also wrong independently: `corpus_sha256` walks every file in
+  `corpus/` and must equal the sealed manifest, so a packaging artifact cannot live there.
+
+Correct design: the host only STAGES the corpus CONTENT into the guest (the content is already
+installed root-owned in `corpus/`; copy it in via `limactl copy`, e.g. a tar). The read-only image is
+built INSIDE the Linux guest, whose golden image carries `squashfs-tools` (a clean `apt` package), then
+loop-mounted `-o ro`. The digest bound to the run is `corpus_sha256` (content), already in the run key;
+the broker verifies the staged content against the sealed manifest before building the image in-guest.
+So `install_corpus` stays CONTENT-ONLY (no host squashfs), and the §7k-step-1 `broker_provision_corpus`
+(committed `70046e5`, which stages a HOST `corpus.squashfs`) must be REWORKED to stage content + build
+the image in-guest. The read-only-corpus MECHANISM itself (squashfs `-o ro`, physical unwritability,
+digest identity) remains proven; only WHERE the image is built changes (guest, not host).
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
