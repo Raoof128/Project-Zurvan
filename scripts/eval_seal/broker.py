@@ -193,7 +193,7 @@ def broker_runtime_material(paths: SealPaths) -> str:
                 raise SealRefusal("SEAL_NOT_CONFIGURED")
             lines.append("%s\0%s\n" % (rel, detail))
     lines.append("interpreter:" + broker_file_sha256(Path(os.path.realpath(str(py)))) + "\n")
-    lines.append("guest-image:" + vmr.GUEST_IMAGE_DIGEST + "\n")
+    lines.append("guest-image:" + vmr.GOLDEN_IMAGE_DIGEST + "\n")   # the image the broker actually boots
     lines.append("guest-cmd:" + "\0".join(GUEST_CANDIDATE_CMD) + "\n")
     lines.append("vm-config:" + hashlib.sha256(vmr.vm_config_text().encode()).hexdigest() + "\n")
     return "".join(lines)

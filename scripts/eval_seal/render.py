@@ -30,11 +30,13 @@ try:
     from .paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from .manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
     from .promotion import NAMESPACE as PROMOTION_NAMESPACE
+    from .vm_runner import GOLDEN_IMAGE_DIGEST
 except ImportError:  # run as a script: scripts/eval_seal is not a package here
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from scripts.eval_seal.manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
     from scripts.eval_seal.promotion import NAMESPACE as PROMOTION_NAMESPACE
+    from scripts.eval_seal.vm_runner import GOLDEN_IMAGE_DIGEST
 
 # the eval signing key verifies in BOTH sealed namespaces (manifest + promotion attestation, #16); the
 # anchor lists both, while ssh-keygen still enforces each signature's own namespace at verify time.
@@ -616,7 +618,8 @@ def allowed_signers_cmd(keys_dir: str, eval_user: str) -> str:
     return "/usr/bin/sudo -u %s -H /bin/sh -c %s" % (eval_user, shlex.quote(inner))
 
 
-def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keygen, claude, hf_dir, real):
+def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keygen, claude, hf_dir, real,
+                 guest_image=None):
     validate_sha(sha)
     validate_user(dev_user)
     git_user = dev_user if os.geteuid() == 0 else None
@@ -683,6 +686,20 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
                       (json.dumps({"dev_home": dev_home, "repo": repo}, sort_keys=True) + "\n").encode(),
                       "root", "wheel", "0444")
     plan.install_file(BROKER_DIR + "/empty-mcp.json", (TEMPLATES / "empty-mcp.json").read_bytes(), "root", "wheel", "0444")
+
+    # The GOLDEN guest image the broker boots. Placed 0444 under the root-owned broker tree ONLY when its
+    # sha512 matches the pinned digest (design §7m); a mismatch refuses the install. The digest is also bound
+    # into the run identity (broker_runtime_material), so a swapped image can never serve a cached result.
+    if guest_image:
+        gi = _read_regular(guest_image, "guest-image")
+        want = GOLDEN_IMAGE_DIGEST.split(":", 1)[1]
+        plan.comment("golden guest image: install only if its sha512 matches the pinned digest, else refuse")
+        plan.install_dir(BROKER_DIR + "/images", "root", "wheel", "0555")
+        plan.raw('[ "$(/usr/bin/shasum -a 512 %s | /usr/bin/awk \'{print $1}\')" = %s ] || '
+                 '{ echo "refusing: golden guest image digest mismatch" >&2; exit 1; }' % (shlex.quote(gi), want))
+        plan.cmd("/usr/bin/install", "-o", "root", "-g", "wheel", "-m", "0444", gi, BROKER_DIR + "/images/guest.qcow2")
+        plan.raw('[ "$(/usr/bin/shasum -a 512 %s/images/guest.qcow2 | /usr/bin/awk \'{print $1}\')" = %s ] || '
+                 '{ echo "refusing: installed golden image digest mismatch" >&2; exit 1; }' % (BROKER_DIR, want))
 
     hf_base = RUNTIME_DIR + "/hf/hub/" + hf_name
     for d in (RUNTIME_DIR + "/hf", RUNTIME_DIR + "/hf/hub", hf_base):
@@ -892,6 +909,7 @@ def build_parser():
     p.add_argument("--sha", required=True)
     for opt in ("age", "age-keygen", "claude", "hf-dir"):
         p.add_argument("--" + opt, default=None)
+    p.add_argument("--guest-image", default=None)
     p = sub.add_parser("install-corpus")
     common(p)
     p.add_argument("--export-dir", required=True)
@@ -910,7 +928,7 @@ def render_main(argv=None):
             plan_setup(plan, dev_home, repo)
         elif args.kind == "install":
             plan_install(plan, repo, args.sha, dev_user, dev_home, args.search_path, args.age, args.age_keygen,
-                         args.claude, args.hf_dir, args.real)
+                         args.claude, args.hf_dir, args.real, args.guest_image)
         elif args.kind == "install-corpus":
             plan_install_corpus(plan, args.export_dir)
         elif args.kind == "tamper-drill":

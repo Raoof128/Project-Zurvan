@@ -142,4 +142,4 @@ def test_t1wire_run_identity_binds_the_guest_image_digest(tmp_path):
     (p.runtime_dir / "bin").mkdir(parents=True, exist_ok=True)
     (p.runtime_dir / "bin" / "python3").write_text("#!/bin/sh\n")
     base = B.broker_runtime_sha256(p)
-    assert V.GUEST_IMAGE_DIGEST[-16:] in B.broker_runtime_material(p)  # the digest is in the identity material
+    assert V.GOLDEN_IMAGE_DIGEST[-16:] in B.broker_runtime_material(p)  # the digest is in the identity material

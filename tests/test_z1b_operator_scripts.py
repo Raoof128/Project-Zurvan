@@ -1104,3 +1104,29 @@ def test_t12_setup_acls_are_guarded_so_a_missing_dev_path_never_aborts(t12_world
     text = "\n".join(lines)
     assert ("for d in %s/.claude/projects/*Zurvan*;" % DEV_HOME) in text
     assert ("if [ -e %s/logs ]; then" % REPO_PATH) in text
+
+
+@needs_clt
+def test_t12_install_places_the_golden_image_only_on_a_digest_match(t12_world, tmp_path):
+    from scripts.eval_seal import vm_runner as V
+    want = V.GOLDEN_IMAGE_DIGEST.split(":", 1)[1]
+    img = tmp_path / "guest.qcow2"
+    img.write_bytes(b"fake-qcow2-bytes")
+    stage = tmp_path / "inst_gi"
+    r = _t12_sh("install.sh", *(_t12_install_args(t12_world["repo"], t12_world["sha"], t12_world["tools"], stage)
+                                + ["--guest-image", str(img)]))
+    assert r.returncode == 0, r.stderr
+    text = "\n".join(_t12_lines(stage))
+    # places under the root-owned broker tree, verifies BOTH source and installed against the PINNED digest
+    assert "/Library/ZurvanEval/broker/images/guest.qcow2" in text
+    assert ("shasum -a 512 %s" % str(img)) in text and want in text
+    assert "refusing: golden guest image digest mismatch" in text
+    assert "refusing: installed golden image digest mismatch" in text
+    assert "/usr/bin/install -o root -g wheel -m 0444" in text
+
+
+@needs_clt
+def test_t12_install_without_guest_image_omits_the_image_steps(t12_world):
+    # the base install (no --guest-image) must not reference the golden image at all
+    text = "\n".join(_t12_lines(t12_world["install"]))
+    assert "images/guest.qcow2" not in text

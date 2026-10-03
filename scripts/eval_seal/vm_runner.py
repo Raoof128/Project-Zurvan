@@ -32,6 +32,12 @@ GUEST_IMAGE_URL = ("https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/"
 GUEST_IMAGE_ARCH = "aarch64"
 GUEST_IMAGE_DIGEST = ("sha512:737b0eb365944ffcf6da477c059c105bbde222942fd5a8380c07db088365b18db"
                       "c60a0f2824ea9a3904d57e194e0d05a7074302c3ebc104d0aecb6ddc6ffd91c")
+# The GOLDEN image the broker actually boots (Debian 12 aarch64 + /opt/z1b runtime/candidate/model, baked
+# and validated end-to-end 2026-10-03, design §7m). Its sha512 is computed AFTER flattening; install.sh
+# places broker_dir/images/guest.qcow2 only when it matches this, and it is bound into the run identity so
+# a changed image is never served from cache. A rebake (e.g. CPU-only torch) re-pins this.
+GOLDEN_IMAGE_DIGEST = ("sha512:41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e717b44deb2b17ac43ecfb"
+                       "ea709a3f4fabf5528e9e9b301dd3a7d7826fd0f969baf4aecf39c121728")
 START_TIMEOUT = 300
 TEARDOWN_TIMEOUT = 120
 
