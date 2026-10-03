@@ -31,8 +31,9 @@ def test_t1wire_candidate_executes_only_through_vm_launch(tmp_path, monkeypatch)
         seen["started"] = run_id
         seen["image"] = image_location
 
-    def fake_provision(run_id, paths, **kw):
+    def fake_provision(run_id, paths, corpus_sha, **kw):
         seen["provisioned"] = run_id
+        seen["corpus_sha"] = corpus_sha
 
     def fake_vm_launch(run_id, paths, guest_cmd, *, boot=True, guest_env=None, image_location=None, **kw):
         seen["run_id"] = run_id
@@ -43,10 +44,11 @@ def test_t1wire_candidate_executes_only_through_vm_launch(tmp_path, monkeypatch)
     monkeypatch.setattr(V, "vm_start", fake_vm_start)
     monkeypatch.setattr(B, "broker_provision_corpus", fake_provision)
     monkeypatch.setattr(V, "vm_launch", fake_vm_launch)
-    proc = B.broker_vm_launch("0123456789abcdef", p)
+    proc = B.broker_vm_launch("0123456789abcdef", p, "a" * 64)
     assert proc.pid == 99 and seen["run_id"] == "0123456789abcdef"
-    # boot happens once (vm_start), the corpus is provisioned, then the candidate launches on the booted VM
+    # boot happens once (vm_start), the corpus is provisioned (bound to the run's corpus_sha), then launch
     assert seen["started"] == "0123456789abcdef" and seen["provisioned"] == "0123456789abcdef"
+    assert seen["corpus_sha"] == "a" * 64
     assert seen["boot"] is False                                   # vm_launch must NOT boot a second time
     assert seen["image"].startswith("file://") and "images/guest" in seen["image"]
     # the candidate entry is the fixed in-guest path, not a host clone, and runs with the sealed env
@@ -70,31 +72,133 @@ def test_t1wire_guest_env_is_forced_with_env_minus_i(tmp_path):
     assert argv[i + 1:] == ["/usr/bin/env", "-i", "A=1", "B=2", "/opt/z1b/x"]
 
 
-def test_t1wire_provision_corpus_verifies_then_stages_then_mounts_read_only(tmp_path, monkeypatch):
+def _write_corpus(p):
+    """A small frozen corpus CONTENT tree on the host (no squashfs, no packaging artifact) + its digest."""
+    import shutil
+    from scripts.eval_seal.corpus import corpus_sha256
+    shutil.rmtree(str(p.corpus_dir), ignore_errors=True)
+    p.corpus_dir.mkdir(parents=True, exist_ok=True)
+    (p.corpus_dir / "search.sqlite").write_bytes(b"SQLite format 3\x00frozen-index")
+    (p.corpus_dir / "graph.sqlite").write_bytes(b"SQLite format 3\x00frozen-graph")
+    sub = p.corpus_dir / "pages"
+    sub.mkdir()
+    (sub / "a.md").write_text("# A\nalpha\n")
+    (sub / "b.md").write_text("# B\nbeta\n")
+    return corpus_sha256(Path(p.corpus_dir))
+
+
+def test_t1wire_provision_stages_content_then_builds_and_mounts_ro_in_guest(tmp_path, monkeypatch):
+    # The host supplies CONTENT only: it tars corpus/ and copies the tar in; the GUEST extracts, re-derives
+    # the digest, builds the squashfs and loop-mounts it read-only. The host never makes a mountable image.
+    p = _bvm_paths(tmp_path)
+    sha = _write_corpus(p)
+    calls = []
+    staged = {}
+    def fake_copy(rid, paths, src, dst, **kw):
+        staged["bytes"] = Path(src).read_bytes()                  # capture what crossed the boundary
+        calls.append(("copy", Path(src).name, dst))
+    monkeypatch.setattr(V, "vm_copy_into_guest", fake_copy)
+    monkeypatch.setattr(V, "vm_run", lambda rid, paths, argv, **kw: calls.append(("run", argv[-1])))
+    B.broker_provision_corpus("0123456789abcdef", p, sha)
+    # (a) exactly one host-side copy of a TAR to the tar path, then one in-guest build script -- nothing else
+    assert [c[0] for c in calls] == ["copy", "run"]
+    assert calls[0][2] == V.GUEST_CORPUS_TAR                       # a tar, never a host-built squashfs
+    script = calls[1][1]
+    assert "tar xf %s" % V.GUEST_CORPUS_TAR in script              # guest extracts
+    assert "mksquashfs %s %s" % (V.GUEST_CORPUS_CONTENT, V.GUEST_CORPUS_SQUASHFS) in script  # guest builds
+    assert "mount -o loop,ro %s %s" % (V.GUEST_CORPUS_SQUASHFS, V.GUEST_CORPUS_MOUNT) in script  # guest mounts ro
+    assert sha in script and "exit 3" in script                   # digest bound + fail-closed on mismatch
+    assert "rm -rf %s %s %s" % (V.GUEST_CORPUS_CONTENT, V.GUEST_CORPUS_TAR, V.GUEST_CORPUS_SQUASHFS) in script
+    # (b) the staged tar carries EXACTLY the frozen corpus content for that digest
+    import io, tarfile, tempfile
+    from scripts.eval_seal.corpus import corpus_sha256
+    dd = Path(tempfile.mkdtemp())
+    tarfile.open(fileobj=io.BytesIO(staged["bytes"])).extractall(str(dd))
+    assert corpus_sha256(dd) == sha
+
+
+def test_t1wire_provision_stages_a_tar_not_a_host_squashfs_and_leaves_corpus_untouched(tmp_path, monkeypatch):
+    # The host NEVER runs mksquashfs and NEVER writes a packaging artifact into the corpus tree; the source
+    # corpus is byte-identical afterwards, and the staged tar lands in the eval runs dir, not in corpus/.
     import hashlib
     p = _bvm_paths(tmp_path)
-    p.corpus_dir.mkdir(parents=True, exist_ok=True)
-    img = p.corpus_dir / "corpus.squashfs"
-    img.write_bytes(b"hsqs" + b"\x00" * 32)                       # squashfs magic + bytes
-    digest = hashlib.sha256(img.read_bytes()).hexdigest()
-    (p.corpus_dir / "corpus.squashfs.sha256").write_text(digest + "\n")
-    calls = []
-    monkeypatch.setattr(V, "vm_copy_into_guest", lambda rid, paths, src, dst, **kw: calls.append(("copy", str(src), dst)))
-    monkeypatch.setattr(V, "vm_run", lambda rid, paths, argv, **kw: calls.append(("run", " ".join(argv))))
-    B.broker_provision_corpus("0123456789abcdef", p)
-    assert calls[0] == ("copy", str(img), V.GUEST_CORPUS_SQUASHFS)  # staged (not a host mount)
-    assert calls[1][0] == "run" and "mount -o loop,ro" in calls[1][1] and V.GUEST_CORPUS_MOUNT in calls[1][1]
+    sha = _write_corpus(p)
+    before = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
+              for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
+    import tarfile
+    seen = {}
+    def grab(rid, paths, src, dst, **kw):
+        seen["src"] = Path(src)
+        seen["is_tar"] = tarfile.is_tarfile(str(src))             # inspect it WHILE it exists, before transport
+        seen["dst"] = dst
+    monkeypatch.setattr(V, "vm_copy_into_guest", grab)
+    monkeypatch.setattr(V, "vm_run", lambda rid, paths, argv, **kw: None)
+    B.broker_provision_corpus("0123456789abcdef", p, sha)
+    after = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
+             for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
+    assert after == before                                        # source corpus unchanged, nothing added
+    assert not list(Path(p.corpus_dir).glob("*.squashfs"))        # no packaging artifact inside corpus/
+    assert seen["is_tar"] and seen["dst"] == V.GUEST_CORPUS_TAR    # host stages a TAR, never a built image
+    assert not seen["src"].exists()                               # staged tar removed after transport
+    assert Path(p.runs_dir) in seen["src"].parents                # it lived in the eval runs dir, not corpus/
 
 
-def test_t1wire_provision_corpus_refuses_a_wrong_corpus_digest(tmp_path):
+def test_t1wire_provision_refuses_a_malformed_corpus_sha_before_touching_the_guest(tmp_path, monkeypatch):
     from scripts.eval_seal.codes import SealRefusal
     p = _bvm_paths(tmp_path)
-    p.corpus_dir.mkdir(parents=True, exist_ok=True)
-    (p.corpus_dir / "corpus.squashfs").write_bytes(b"hsqs" + b"\x00" * 32)
-    (p.corpus_dir / "corpus.squashfs.sha256").write_text("0" * 64 + "\n")   # does not match the file
+    _write_corpus(p)
+    touched = []
+    monkeypatch.setattr(V, "vm_copy_into_guest", lambda *a, **k: touched.append("copy"))
+    monkeypatch.setattr(V, "vm_run", lambda *a, **k: touched.append("run"))
+    for bad in ("not-hex", "0" * 63, "ABCDEF" + "0" * 58):
+        with pytest.raises(SealRefusal) as ei:
+            B.broker_provision_corpus("0123456789abcdef", p, bad)
+        assert ei.value.code == "CORPUS_MISMATCH"
+    assert touched == []                                          # fail-closed before anything is staged
+
+
+def test_t1wire_provision_refuses_a_byte_tampered_after_the_digest_was_established(tmp_path, monkeypatch):
+    # THE tamper gate. The run's corpus_sha256 is declared from corpus/. An attacker then flips one byte in
+    # corpus/ before the VM is provisioned. The guest re-derives the digest of the bytes it actually received
+    # and REFUSES: the real provisioning path (vm_run) surfaces the guest's nonzero exit as CANDIDATE_FAILED.
+    # We run the broker's ACTUAL guest script on the host, rewriting only guest-only tokens (python path,
+    # /opt/z1b import root, the fixed /tmp paths) and stubbing mksquashfs/mount -- the digest comparison,
+    # the embedded declared sha and the exit code are the broker's own.
+    import subprocess
+    from scripts.eval_seal.codes import SealRefusal
+    p = _bvm_paths(tmp_path)
+    declared = _write_corpus(p)                                   # digest established HERE
+    (Path(p.corpus_dir) / "pages" / "a.md").write_text("# A\nTAMPERED\n")  # ...then one byte changes
+
+    host = {"content": str(tmp_path / "guest-content"),
+            "sq": str(tmp_path / "guest.squashfs"), "mount": str(tmp_path / "guest-mount")}
+    captured = {}
+    def fake_copy(rid, paths, src, dst, **kw):
+        captured["tar"] = Path(src).read_bytes()                  # the bytes that "reach the VM"
+    def run_guest_on_host(rid, paths, argv, *, runner=None, timeout=None):
+        tarf = tmp_path / "reached.tar"
+        tarf.write_bytes(captured["tar"])
+        script = argv[-1]
+        script = (script
+                  .replace(B.GUEST_CANDIDATE_CMD[0], sys.executable)
+                  .replace('"/opt/z1b"', '"%s"' % ROOT)          # keep it double-quoted inside the -c
+                  .replace(V.GUEST_CORPUS_CONTENT, host["content"])
+                  .replace(V.GUEST_CORPUS_TAR, str(tarf))
+                  .replace(V.GUEST_CORPUS_SQUASHFS, host["sq"])
+                  .replace(V.GUEST_CORPUS_MOUNT, host["mount"])
+                  .replace("mksquashfs ", ": mksquashfs ").replace("mount -o", ": mount -o"))
+        done = subprocess.run(["/bin/sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if done.returncode != 0:
+            raise SealRefusal("CANDIDATE_FAILED")
+    monkeypatch.setattr(V, "vm_copy_into_guest", fake_copy)
+    monkeypatch.setattr(V, "vm_run", run_guest_on_host)
     with pytest.raises(SealRefusal) as ei:
-        B.broker_provision_corpus("0123456789abcdef", p)
-    assert ei.value.code == "CORPUS_MISMATCH"
+        B.broker_provision_corpus("0123456789abcdef", p, declared)
+    assert ei.value.code == "CANDIDATE_FAILED"                    # the tampered corpus cannot be mounted
+
+    # control: the SAME harness accepts the untampered corpus (proves the gate is the digest, not the harness)
+    declared2 = _write_corpus(p)                                  # rewrite clean content + its true digest
+    B.broker_provision_corpus("0123456789abcdef", p, declared2)   # no raise
 
 
 def test_t1wire_vm_run_fails_closed_on_a_nonzero_guest_command(tmp_path):
@@ -130,8 +234,9 @@ def test_t1wire_a_failed_vm_launch_is_a_hard_failure_not_a_host_fallback(tmp_pat
     def boom(run_id, paths, guest_cmd, *, image_location=None, **kw):
         raise SealRefusal("CANDIDATE_FAILED")
     monkeypatch.setattr(V, "vm_launch", boom)
+    monkeypatch.setattr(B, "broker_provision_corpus", lambda *a, **k: None)
     with pytest.raises(SealRefusal) as ei:
-        B.broker_vm_launch("0123456789abcdef", p)
+        B.broker_vm_launch("0123456789abcdef", p, "a" * 64)
     assert ei.value.code == "CANDIDATE_FAILED"  # charged by the broker; no other path is tried
 
 

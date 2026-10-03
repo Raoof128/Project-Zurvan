@@ -222,7 +222,7 @@ def _t10_drop(E, commit, *, data=None):
 
 
 def _t10_launcher(E):
-    def launch(run_id):
+    def launch(run_id, corpus_sha=None):
         E.launched.append((run_id, (E.paths.stage_dir / (run_id + ".bundle")).is_file()))
         with open(str(E.trace), "a") as fh:
             fh.write(json.dumps({"ev": "launch", "run": run_id, "t": time.time()}) + "\n")

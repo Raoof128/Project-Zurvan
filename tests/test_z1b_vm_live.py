@@ -22,7 +22,10 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from scripts.eval_seal import broker as B  # noqa: E402
 from scripts.eval_seal import vm_runner as V  # noqa: E402
+from scripts.eval_seal.codes import SealRefusal  # noqa: E402
+from scripts.eval_seal.corpus import corpus_sha256  # noqa: E402
 from scripts.eval_seal.paths import SealPaths  # noqa: E402
 
 _LIMACTL = shutil.which("limactl")
@@ -128,82 +131,105 @@ def test_t1_vm_iso_gate_a_killed_run_leaves_no_reusable_guest(tmp_path):
     shutil.rmtree(str(root), ignore_errors=True)
 
 
-_MKSQUASHFS = shutil.which("mksquashfs")
+_GOLDEN = Path(os.environ.get("ZURVAN_Z1B_GOLDEN", str(Path.home() / ".zurvan" / "z1b" / "guest.qcow2")))
 
 
-def _build_corpus(tmp_path):
-    """A small synthetic corpus as a squashfs (a read-only filesystem by construction)."""
-    if _MKSQUASHFS is None:
-        pytest.skip("Z1b: NOT CONFIGURED - mksquashfs absent; read-only corpus gate UNVERIFIED "
-                    "(brew install squashfs)")
-    src = tmp_path / "corpussrc"
-    src.mkdir()
-    (src / "doc1.md").write_text("known-corpus-content-v1\n")
-    (src / "doc2.md").write_text("second doc\n")
-    img = tmp_path / "corpus.squashfs"
-    r = subprocess.run([_MKSQUASHFS, str(src), str(img), "-noappend", "-quiet"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    assert r.returncode == 0 and img.exists()
+def _golden_image():
+    """The pinned GOLDEN guest image (squashfs-tools + /opt/z1b python runtime baked in) -- the in-guest
+    corpus build needs it, the Alpine isolation base does not have it. Absent or wrong digest => the in-guest
+    corpus gate is NOT CONFIGURED here (UNVERIFIED), never a false pass."""
+    if not _GOLDEN.is_file():
+        pytest.skip("Z1b: NOT CONFIGURED - golden guest image not present at %s; the in-guest read-only "
+                    "corpus gate is UNVERIFIED here" % _GOLDEN)
     import hashlib
-    return img, hashlib.sha256(img.read_bytes()).hexdigest()
+    h = hashlib.sha512()
+    with open(str(_GOLDEN), "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    if "sha512:" + h.hexdigest() != V.GOLDEN_IMAGE_DIGEST:
+        pytest.skip("Z1b: NOT CONFIGURED - golden image digest does not match the pinned "
+                    "GOLDEN_IMAGE_DIGEST; the in-guest corpus gate is UNVERIFIED here")
+    return "file://" + str(_GOLDEN)
 
 
-def _mount_corpus(p, run_id):
-    V.vm_copy_into_guest(run_id, p, _CORPUS_IMG, V.GUEST_CORPUS_SQUASHFS)
-    m = _shell(p, run_id, "sudo mkdir -p %s && sudo mount -o loop,ro %s %s; echo rc=$?"
-               % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_SQUASHFS, V.GUEST_CORPUS_MOUNT))
-    assert b"rc=0" in m.stdout, m.stdout
-
-
-_CORPUS_IMG = None
-_CORPUS_SHA = None
+def _write_live_corpus(p):
+    """A small frozen corpus CONTENT tree (no squashfs on the host); returns its corpus_sha256."""
+    c = Path(p.corpus_dir)
+    shutil.rmtree(str(c), ignore_errors=True)
+    (c / "pages").mkdir(parents=True)
+    (c / "search.sqlite").write_bytes(b"SQLite format 3\x00frozen-index-bytes")
+    (c / "pages" / "doc1.md").write_text("known-corpus-content-v1\n")
+    (c / "pages" / "doc2.md").write_text("second doc\n")
+    return corpus_sha256(c)
 
 
 def test_t1_vm_iso_gate_read_only_corpus_boundary(tmp_path):
-    global _CORPUS_IMG, _CORPUS_SHA
-    _CORPUS_IMG, _CORPUS_SHA = _build_corpus(tmp_path)
-    # identity: a read-only disk that is the WRONG disk is refused; the right one passes.
-    V.verify_corpus_image(_CORPUS_IMG, _CORPUS_SHA)
-    with pytest.raises(Exception):
-        V.verify_corpus_image(_CORPUS_IMG, "0" * 64)
-    before = _CORPUS_SHA
+    # The HOST supplies corpus CONTENT only; the GUEST builds the immutable read-only filesystem. This drives
+    # the REAL broker_provision_corpus (content tar -> in-guest digest-verify -> mksquashfs -> loop ro mount)
+    # against the golden image, then proves the closure properties the reviewer required.
+    image = _golden_image()
     p, root = _live_paths(tmp_path)
+    declared = _write_live_corpus(p)
+    import hashlib
+    before = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
+              for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
     run_id = "cccccccc" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        V.vm_start(run_id, p, image_location=_ensure_image())
-        _mount_corpus(p, run_id)
-        # the candidate can READ the known file
-        got = _shell(p, run_id, "cat %s/doc1.md" % V.GUEST_CORPUS_MOUNT)
+        V.vm_start(run_id, p, image_location=image)
+        B.broker_provision_corpus(run_id, p, declared)            # the real content->guest->ro-mount path
+        # the candidate can READ the known content on the mount
+        got = _shell(p, run_id, "cat %s/pages/doc1.md" % V.GUEST_CORPUS_MOUNT)
         assert b"known-corpus-content-v1" in got.stdout
         # write / create / delete / rename all FAIL (squashfs is physically read-only, even under sudo)
-        for script in ("echo x > %s/doc1.md" % V.GUEST_CORPUS_MOUNT,
+        for script in ("echo x > %s/pages/doc1.md" % V.GUEST_CORPUS_MOUNT,
                        "touch %s/new" % V.GUEST_CORPUS_MOUNT,
-                       "rm %s/doc2.md" % V.GUEST_CORPUS_MOUNT,
-                       "mv %s/doc1.md %s/renamed" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT)):
+                       "rm %s/pages/doc2.md" % V.GUEST_CORPUS_MOUNT,
+                       "mv %s/pages/doc1.md %s/renamed" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT)):
             r = _shell(p, run_id, "sudo sh -c '%s' 2>&1; echo rc=$?" % script)
             assert b"rc=0" not in r.stdout, (script, r.stdout)
+        # cleanup: the staged plaintext, the tar and the squashfs FILE are gone; only the ro mount remains
+        for gone in (V.GUEST_CORPUS_CONTENT, V.GUEST_CORPUS_TAR, V.GUEST_CORPUS_SQUASHFS):
+            g = _shell(p, run_id, "test -e %s; echo rc=$?" % gone)
+            assert b"rc=1" in g.stdout, (gone, g.stdout)
         # no host mount leaked in
         assert b"rc=0" not in _shell(p, run_id, "ls /Users 2>&1; echo rc=$?").stdout
-        # MUTATION / positive control: the read-only guarantee is squashfs being physically unwritable, so
-        # flipping the mount flag to rw cannot make writes succeed (the kernel never writes squashfs). What
-        # WOULD flip this gate red is provisioning the corpus on a WRITABLE backing. Prove the write-probe
-        # is load-bearing (not vacuously failing) by running the SAME probe against a writable tmpfs: it
-        # must SUCCEED. A corpus wired to a writable fs would therefore turn every assertion above red.
+        # MUTATION / positive control: the read-only guarantee is squashfs being physically unwritable. Prove
+        # the write-probe is load-bearing (not vacuously failing) by running the SAME probe against a writable
+        # tmpfs: it must SUCCEED. A corpus wired to a writable fs would therefore turn every write assertion
+        # above red -- which is exactly the "no fallback to a writable dir" guarantee.
         ctrl = _shell(p, run_id, "sudo sh -c 'mkdir -p /tmp/rwctl && mount -t tmpfs none /tmp/rwctl && "
                                  "echo x > /tmp/rwctl/probe' 2>&1; echo rc=$?")
         assert b"rc=0" in ctrl.stdout, ctrl.stdout
     finally:
         V.vm_teardown(run_id, p)
-    # the host corpus image is byte-for-byte unchanged, and teardown left nothing
-    import hashlib
-    assert hashlib.sha256(_CORPUS_IMG.read_bytes()).hexdigest() == before
+    # the host source corpus is byte-for-byte unchanged (the host only read it), and teardown left nothing
+    after = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
+             for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
+    assert after == before and not list(Path(p.corpus_dir).glob("*.squashfs"))
     assert V.vm_leftover_instances(p) == []
-    # a second guest starts from the PRISTINE corpus (no state carried over from the first run)
+
+    # THE tamper gate: the digest is declared, then one corpus byte changes before provisioning. The guest
+    # re-derives corpus_sha256 of the bytes it received and REFUSES -> provisioning raises CANDIDATE_FAILED.
+    (Path(p.corpus_dir) / "pages" / "doc1.md").write_text("TAMPERED-after-digest\n")
+    run_t = "eeeeeeee" + ("%08x" % (os.getpid() & 0xffffffff))
+    try:
+        V.vm_start(run_t, p, image_location=image)
+        with pytest.raises(SealRefusal) as ei:
+            B.broker_provision_corpus(run_t, p, declared)         # declared != bytes now reaching the guest
+        assert ei.value.code == "CANDIDATE_FAILED"
+        # and nothing got mounted (fail-closed, no writable fallback)
+        assert b"rc=0" not in _shell(p, run_t, "test -e %s/pages; echo rc=$?" % V.GUEST_CORPUS_MOUNT).stdout
+    finally:
+        V.vm_teardown(run_t, p)
+    assert V.vm_leftover_instances(p) == []
+
+    # a second clean guest starts from the PRISTINE corpus (no state carried over from any prior run)
+    declared2 = _write_live_corpus(p)
     run2 = "dddddddd" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        V.vm_start(run2, p, image_location=_ensure_image())
-        _mount_corpus(p, run2)
-        g2 = _shell(p, run2, "cat %s/doc1.md; ls %s" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT))
+        V.vm_start(run2, p, image_location=image)
+        B.broker_provision_corpus(run2, p, declared2)
+        g2 = _shell(p, run2, "cat %s/pages/doc1.md; ls %s/pages" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT))
         assert b"known-corpus-content-v1" in g2.stdout and b"doc2.md" in g2.stdout and b"new" not in g2.stdout
     finally:
         V.vm_teardown(run2, p)

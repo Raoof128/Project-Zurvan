@@ -33,6 +33,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import traceback
@@ -137,7 +138,7 @@ class BrokerContext:
     spec_path: object
     decrypt: object            # (Path) -> bytes
     encrypt: object            # (bytes, Path) -> None
-    launch_candidate: object   # (run_id) -> Popen-like (stdin, stdout, kill, wait, poll)
+    launch_candidate: object   # (run_id, corpus_sha) -> Popen-like (stdin, stdout, kill, wait, poll)
     wipe: object               # (run_id) -> None
     probe: object              # () -> dict path_id -> "EACCES" | "ENOENT" | "READABLE"
     tmutil_isexcluded: object  # (Path) -> bool
@@ -223,45 +224,90 @@ def broker_candidate_env() -> dict:
     }
 
 
-def broker_corpus_image(paths: SealPaths) -> Path:
-    """The read-only corpus squashfs the operator install produced from the sealed corpus export."""
-    return Path(paths.corpus_dir) / "corpus.squashfs"
-
-
-def broker_corpus_expected_digest(paths: SealPaths) -> str:
-    """The squashfs digest recorded beside it at install time (the tamper anchor the staged image is checked
-    against). Missing/malformed => the corpus is not installed as a squashfs: SEAL_NOT_CONFIGURED."""
+def broker_stage_corpus_tar(paths: SealPaths) -> Path:
+    """Tar the frozen corpus CONTENT for transport into the guest. The HOST supplies content only -- it NEVER
+    runs mksquashfs and never builds a mountable filesystem. Members are emitted in sorted order with a fixed
+    (root-owned, mtime 0) header so the staged bytes are reproducible and carry no host identity. The tar is
+    written to the eval-owned runs dir (0700 zurvaneval) as a 0600 file the caller removes after transport."""
+    runs = Path(paths.runs_dir)
+    runs.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="corpus-stage.", suffix=".tar", dir=str(runs))
+    os.close(fd)
+    tar_path = Path(name)
+    base = str(paths.corpus_dir)
+    rels = sorted(os.path.relpath(os.path.join(dp, f), base)
+                  for dp, _dn, fns in os.walk(base) for f in fns)
     try:
-        txt = (Path(paths.corpus_dir) / "corpus.squashfs.sha256").read_text(encoding="ascii").strip()
+        with tarfile.open(str(tar_path), "w") as tf:
+            for rel in rels:
+                full = os.path.join(base, rel)
+                ti = tf.gettarinfo(full, arcname=rel)
+                ti.uid = ti.gid = 0
+                ti.uname = ti.gname = ""
+                ti.mtime = 0
+                with open(full, "rb") as fh:
+                    tf.addfile(ti, fh)
+        os.chmod(str(tar_path), 0o600)
     except OSError:
-        raise SealRefusal("SEAL_NOT_CONFIGURED") from None
-    if not re.fullmatch(r"[0-9a-f]{64}", txt):
-        raise SealRefusal("SEAL_NOT_CONFIGURED")
-    return txt
+        try:
+            tar_path.unlink()
+        except OSError:
+            pass
+        raise SealRefusal("INTERNAL") from None
+    return tar_path
 
 
-def broker_provision_corpus(run_id: str, paths: SealPaths, *, runner=None) -> None:
-    """Verify the corpus squashfs against its recorded digest (CORPUS_MISMATCH on any mismatch or a non-
-    squashfs), copy it into the running guest (scp over lima, never a host mount), and loop-mount it
-    READ-ONLY at the fixed mount point. The guest never gets a writable view of the corpus."""
+def broker_provision_corpus(run_id: str, paths: SealPaths, corpus_sha: str, *, runner=None) -> None:
+    """Invariant: the HOST supplies corpus CONTENT only; the GUEST constructs the immutable read-only
+    filesystem. Tar the corpus content, copy it into the running guest (scp over lima, never a host mount,
+    never a host-built image), then IN THE GUEST, under one sudo /bin/sh: extract it, re-derive
+    corpus_sha256 of the extracted bytes and REFUSE (exit 3 -> CANDIDATE_FAILED) unless it equals the declared
+    run-identity digest -- so the identity is bound to the exact bytes that reach the VM, not merely declared,
+    and a byte tampered after the digest was established cannot be mounted -- then build the squashfs, loop-
+    mount it READ-ONLY, and WIPE the staged plaintext, the tar, and the squashfs FILE (the loop mount keeps
+    the data live; the guest is disposable). Any step failing is fail-closed; there is never a fallback to a
+    writable corpus dir."""
     from . import vm_runner as vmr
-    img = broker_corpus_image(paths)
-    vmr.verify_corpus_image(img, broker_corpus_expected_digest(paths))
-    vmr.vm_copy_into_guest(run_id, paths, img, vmr.GUEST_CORPUS_SQUASHFS, runner=runner)
-    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c",
-                               "mkdir -p %s && mount -o loop,ro %s %s"
-                               % (vmr.GUEST_CORPUS_MOUNT, vmr.GUEST_CORPUS_SQUASHFS, vmr.GUEST_CORPUS_MOUNT)],
-               runner=runner)
+    if type(corpus_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", corpus_sha) is None:
+        raise SealRefusal("CORPUS_MISMATCH")
+    tar_path = broker_stage_corpus_tar(paths)
+    try:
+        vmr.vm_copy_into_guest(run_id, paths, tar_path, vmr.GUEST_CORPUS_TAR, runner=runner)
+    finally:
+        try:
+            tar_path.unlink()
+        except OSError:
+            pass
+    py = GUEST_CANDIDATE_CMD[0]
+    # Re-derive the digest in-guest with the SAME corpus_sha256 the manifest used, importing from /opt/z1b.
+    # The python one-liner is single-quoted for the shell, so every string literal inside it uses DOUBLE
+    # quotes (the fixed /opt/z1b path and the content dir carry no shell-special characters).
+    verify = ('%s -E -s -c '
+              "'import sys; sys.path.insert(0, \"/opt/z1b\"); from pathlib import Path; "
+              'from scripts.eval_seal.corpus import corpus_sha256; print(corpus_sha256(Path(\"%s\")))\''
+              % (py, vmr.GUEST_CORPUS_CONTENT))
+    script = (
+        "set -e; "
+        "rm -rf {content} {sq}; mkdir -p {content}; "
+        "tar xf {tar} -C {content}; "
+        'd="$({verify})"; '
+        '[ "$d" = "{sha}" ] || {{ echo CORPUS_DIGEST_MISMATCH >&2; exit 3; }}; '
+        "mksquashfs {content} {sq} -noappend -no-xattrs -all-root -quiet -no-progress; "
+        "mkdir -p {mount}; mount -o loop,ro {sq} {mount}; "
+        "rm -rf {content} {tar} {sq}"   # plaintext + tar + squashfs file gone; the ro loop mount persists
+    ).format(content=vmr.GUEST_CORPUS_CONTENT, sq=vmr.GUEST_CORPUS_SQUASHFS,
+             tar=vmr.GUEST_CORPUS_TAR, mount=vmr.GUEST_CORPUS_MOUNT, verify=verify, sha=corpus_sha)
+    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner)
 
 
-def broker_vm_launch(run_id: str, paths: SealPaths):
-    """The ONE candidate-execution path: boot this run's disposable VM, stage + mount the read-only corpus,
-    then return a shell Popen running the candidate on the protocol channel with the sealed env. There is no
-    host-side execution fallback; a boot/provision/protocol failure propagates as a SealRefusal the broker
-    charges and fails closed on."""
+def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str):
+    """The ONE candidate-execution path: boot this run's disposable VM, stage the corpus CONTENT and build +
+    mount the read-only corpus IN-GUEST (bound to corpus_sha), then return a shell Popen running the candidate
+    on the protocol channel with the sealed env. There is no host-side execution fallback; a boot/provision/
+    protocol failure propagates as a SealRefusal the broker charges and fails closed on."""
     from . import vm_runner as vmr
     vmr.vm_start(run_id, paths, image_location=broker_guest_image(paths))
-    broker_provision_corpus(run_id, paths)
+    broker_provision_corpus(run_id, paths, corpus_sha)
     return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env())
 
 
@@ -329,8 +375,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
             raise SealRefusal("INTERNAL")
         os.chmod(str(dest), 0o600)
 
-    def launch(run_id):
-        return broker_vm_launch(run_id, paths)   # the ONLY candidate executor: a disposable VM
+    def launch(run_id, corpus_sha):
+        return broker_vm_launch(run_id, paths, corpus_sha)   # the ONLY candidate executor: a disposable VM
 
     def wipe(run_id):
         broker_vm_wipe(run_id, paths)            # destroy the guest; never raises (sweep then checks)
@@ -1043,7 +1089,7 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
     try:
         sent, proc, failure, results, latencies = [], None, None, None, None
         try:
-            proc = ctx.launch_candidate(run_id)
+            proc = ctx.launch_candidate(run_id, corpus_sha)
             results, latencies = broker_drive(proc, items, spec, sent)
         except Exception:  # noqa: BLE001 - any candidate-side failure, however it surfaces
             failure = "CANDIDATE_FAILED"
