@@ -404,7 +404,15 @@ but are NOT wired into the broker launch path. And `z1b_candidate.py` hard-exits
 which #1 made unreachable. So a golden image alone cannot run a candidate end-to-end yet.
 
 **Ordered remaining build for a runnable candidate (each part TDD, no sudo except the final install):**
-1. **Orchestration in the broker launch path** (code): stage the corpus squashfs into the guest
+1. **[DONE `70046e5`]** **Orchestration in the broker launch path** (code): `broker_vm_launch` now
+   does vm_start(golden) -> `broker_provision_corpus` (verify corpus digest, stage via `limactl copy`,
+   loop-mount `-o ro`) -> `vm_launch(boot=False, guest_env=...)`. KEY SIMPLIFICATION: the corpus export
+   is a coherent snapshot that ALREADY contains `search.sqlite`, so there is NO in-guest index build -
+   the candidate reads its frozen index off the read-only corpus mount; the sealed env is
+   `ZURVAN_SEARCH_DB=<mount>/search.sqlite, ZURVAN_CORPUS=<mount>, HF_HUB_OFFLINE=1, HF_HOME, TMPDIR`
+   forced with `env -i`. Unit-tested (fake runner); no-host-fallback kept. REMAINING sub-piece:
+   `install_corpus` must produce `corpus.squashfs` + `corpus.squashfs.sha256` from the export.
+1. ~~**Orchestration in the broker launch path** (code): stage the corpus squashfs into the guest
    (`vm_copy_into_guest` + `verify_corpus_image` against the run-identity digest), mount it read-only,
    run the candidate commit's index build over the mounted corpus to produce `search.sqlite` in the
    guest, and launch `z1b_candidate.py` with `ZURVAN_SEARCH_DB`/`ZURVAN_CORPUS`/`HF_HUB_OFFLINE=1`/
