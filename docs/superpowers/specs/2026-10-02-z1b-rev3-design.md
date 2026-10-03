@@ -487,10 +487,18 @@ from the FLATTENED image (not the provisioning guest -- no provisioning residue 
   AFTER flattening: `41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e717b44deb2b17ac43ecfbea709a3f4fabf5528e9e9b301dd3a7d7826fd0f969baf4aecf39c121728`.
 
 **Size follow-up (not a blocker):** torch pulled the CUDA build -> 10 GiB; a CPU-only wheel would cut
-it to ~1-2 GiB (rebake re-pins the digest). **Remaining (code, in-lane):** pin the digest + wire
-`install.sh` to place+verify `broker_dir/images/guest.qcow2` and refuse a mismatch; bind the
-golden-image digest into the run identity; mutation-test the gate. Then live E2E + installed-broker
-gate (operator). The read-only corpus is built in-guest from staged content (§7k.1); the gate proves it.
+it to ~1-2 GiB (rebake re-pins the digest).
+
+**DONE (`16927d1`, z1b-rev3):** `vm_runner.GOLDEN_IMAGE_DIGEST` pins the baked sha512; `render.plan_install
+--guest-image` installs `broker_dir/images/guest.qcow2` 0444 only on a digest match (source AND installed
+copy double-verified, refuses mismatch); `broker_runtime_material` binds the GOLDEN digest into the run
+identity (a swapped image → different run key → never a cached result).
+
+**REMAINING for #1 CLOSED:** (a) rework `broker_provision_corpus` (committed `70046e5` stages a HOST
+squashfs; §7k.1) to stage corpus CONTENT (tar via `limactl copy`) and build the read-only image IN-GUEST
+(proven by the §7m gate), with `corpus_sha256` (already checked host-side vs the sealed manifest) as the
+content binding; (b) the live E2E + installed-broker gate via `zurvan eval z1b run` (operator: sudo +
+model-spend authoring). Both golden-image mechanics + the candidate-serve are proven (§7j/§7l/§7m).
 
 ## 8. Build order for the Rev 3 plan
 
