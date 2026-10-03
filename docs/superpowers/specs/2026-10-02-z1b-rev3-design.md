@@ -494,11 +494,43 @@ it to ~1-2 GiB (rebake re-pins the digest).
 copy double-verified, refuses mismatch); `broker_runtime_material` binds the GOLDEN digest into the run
 identity (a swapped image → different run key → never a cached result).
 
-**REMAINING for #1 CLOSED:** (a) rework `broker_provision_corpus` (committed `70046e5` stages a HOST
-squashfs; §7k.1) to stage corpus CONTENT (tar via `limactl copy`) and build the read-only image IN-GUEST
-(proven by the §7m gate), with `corpus_sha256` (already checked host-side vs the sealed manifest) as the
-content binding; (b) the live E2E + installed-broker gate via `zurvan eval z1b run` (operator: sudo +
-model-spend authoring). Both golden-image mechanics + the candidate-serve are proven (§7j/§7l/§7m).
+**REMAINING for #1 CLOSED:** (a) ~~rework `broker_provision_corpus`~~ **DONE (`762790a`, z1b-rev3; §7n);**
+(b) the live E2E + installed-broker gate via `zurvan eval z1b run` (operator: sudo + model-spend authoring).
+Both golden-image mechanics + the candidate-serve are proven (§7j/§7l/§7m).
+
+## 7n. Corpus provisioning reworked to IN-GUEST build — DONE (`762790a`, z1b-rev3, 2026-10-03)
+
+§7k.1's correction is now in code. The invariant: **the HOST supplies corpus CONTENT only; the GUEST
+constructs the immutable read-only filesystem.** The committed-`70046e5` host-squashfs path (and the
+host-side `verify_corpus_image`/`corpus_image_sha256`) are removed.
+
+`broker_provision_corpus(run_id, paths, corpus_sha)` now:
+1. **host** — `broker_stage_corpus_tar` tars the frozen corpus CONTENT deterministically (sorted members,
+   root-owned, mtime 0) to a 0600 file in the eval runs dir. The host never runs mksquashfs and never
+   writes a packaging artifact into `corpus/`, so `corpus_sha256(corpus_dir)` stays equal to the sealed
+   manifest's.
+2. **transport** — `limactl copy` stages the TAR into the running guest (scp over lima's ssh; never a host
+   mount, never a host-built image), then the host removes its tar.
+3. **guest** — one `sudo /bin/sh -c`: extract → **re-derive `corpus_sha256` of the bytes that actually
+   arrived (importing `scripts.eval_seal.corpus` from `/opt/z1b`) and `exit 3` unless it equals the declared
+   `corpus_sha`** → `mksquashfs` → `mount -o loop,ro` at `/opt/z1b/corpus` → wipe the plaintext, the tar and
+   the squashfs FILE (the loop mount keeps the data; the guest is disposable). `vm_run` surfaces a non-zero
+   guest exit as `CANDIDATE_FAILED`. Fail-closed throughout; no writable-dir fallback.
+
+`corpus_sha` is threaded through `launch_candidate`/`broker_vm_launch`. The run identity was already bound to
+`corpus_sha` host-side (vs the sealed manifest); step 3 re-binds it to the bytes that reach the VM, so a byte
+**tampered after the digest was established and before image construction cannot be mounted** — this is the
+decisive tamper gate. A `-c` shell-quoting bug in the in-guest verify one-liner (a `%r` content path emitted
+single quotes inside the single-quoted `-c`) was fixed to double-quoted literals (it would have broken in the
+real guest too).
+
+Tests (`762790a`): unit (fake runner) assert content-only staging (a TAR, not a built image), source corpus
+byte-identical afterwards with no artifact added, malformed-sha refusal before staging, and the KEY
+tamper-after-digest refusal by executing the broker's OWN guest script on the host (guest-path tokens
+rewritten; mksquashfs/mount stubbed) with a passing untampered control. The live gate
+(`ZURVAN_Z1B_VM_LIVE=1`) drives the real path against the GOLDEN image (it bakes `squashfs-tools`; §7m G2/G8
+already PASS): read-only under candidate sudo, staged plaintext+tar+image wiped, host corpus unchanged,
+tamper refused, second guest pristine. `-k z1b` **1638 passed / 2 skipped**.
 
 ## 8. Build order for the Rev 3 plan
 

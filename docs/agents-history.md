@@ -3,6 +3,16 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 P1 queue CLOSED (#7, #13, #16, #14, #12)
+**Raouf:**
+- **Scope:** the five remaining P1s, inline on branch `z1b-rev3`, test-first + mutation-checked; status on `main` (Rev 3 design §7b + CHANGELOG). No production code on `main`; no sudo/identity/authoring/model spend.
+- **#7 (`f4d2005`):** the manifest trust anchor `allowed_signers` is DERIVED from the generated signing key on every install (idempotent, atomic); principal+namespace from manifest.py.
+- **#13 (`59d79a6`):** the leak scanner now catches a leaked TARGET PAGE, but only an EXPLICIT answer-key association (Raouf's ruling) — CONFIRMED burns via a new `target_leak`; ambiguous co-occurrence is a non-blocking SUSPECT review note, never an auto-burn; bare path/id never burns (0/200-ceiling discipline).
+- **#16 (`932653b`):** a holdout PASS emits an EXPORTABLE broker-signed promotion attestation (`promotion.py`, distinct namespace `zurvan-z1b-promotion`, domain-separated from the manifest signature); the eval-owned ledger stays the authoritative anchor (R22).
+- **#14 (`081a9c2`+`e9fc7b1`):** the reseal is crash-ATOMIC — the four sealed files live in `generations/<seq>/` and one `active` symlink is promoted by a single os.replace (was 4 replaces → torn/wedged on crash). `sealed_store.py` is the sole path authority (grep-guarded). Fault-injection gate (os.fork at every durable boundary) proves only VALID gen N or N+1 is observable; gc keeps the live + previous healthy generation.
+- **#12 (`713cba9`):** the resource-only promotion route (canonical §9.5): equivalent quality + a materially-improved predeclared resource metric promotes. New `resource_improvement` predeclaration field; broker_verdict PASSes on non-inferiority + budget + (quality improvement OR resource improvement).
+- **Verification:** `-k z1b` **1631 passed / 2 skipped** on `z1b-rev3`; py3.9 parse clean; `public_repo_guard` + `boundary scan-diff` + `git diff --check` clean. **#1 remains Developer-closed only** — Operator closure (golden retrieval image + the installed-broker live gate, needs `sudo setup.sh`/`install.sh`) is Raouf-only and still pending. The branch is NOT merged to `main`.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b Rev 3 #1: read-only corpus provisioning PROVEN on real VZ (developer closure of #1 complete)
 **Raouf:**
 - **Scope:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` on branch `z1b-rev3` (`18612aa`). Status on `main`: Rev 3 design §7b/§7f/§7g + progress doc, this CHANGELOG. No production code on `main`; no sudo, identity creation, authoring or model spend.
