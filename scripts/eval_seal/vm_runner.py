@@ -17,6 +17,7 @@ below are the measured-necessary ones; see design s7c/s7d.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -111,20 +112,53 @@ def vm_start(run_id: str, paths, *, runner=None, image_location: str = None) -> 
         raise SealRefusal("CANDIDATE_FAILED")
 
 
-def vm_shell_argv(run_id: str, paths, guest_cmd) -> list:
+def _guest_env_prefix(guest_env) -> list:
+    """`/usr/bin/env -i K=V ...` so the candidate runs with EXACTLY the sealed env (nothing inherited from
+    the guest login): keys sorted for determinism. Empty/None -> no prefix. Keys/values are restricted to a
+    safe charset so nothing can break out of the argv (the broker is the only caller and passes fixed keys)."""
+    if not guest_env:
+        return []
+    for k, v in guest_env.items():
+        if not re.fullmatch(r"[A-Z0-9_]+", k) or "\x00" in str(v) or "\n" in str(v):
+            raise SealRefusal("CANDIDATE_FAILED")
+    return ["/usr/bin/env", "-i"] + ["%s=%s" % (k, guest_env[k]) for k in sorted(guest_env)]
+
+
+def vm_shell_argv(run_id: str, paths, guest_cmd, guest_env=None) -> list:
     """The argv that runs the candidate INSIDE the guest and connects its stdin/stdout to the broker's
-    protocol loop. guest_cmd is the candidate entry already inside the guest image."""
-    return [_vm_limactl(paths), "shell", vm_instance_name(run_id), "--"] + list(guest_cmd)
+    protocol loop. guest_cmd is the candidate entry already inside the guest image; guest_env (optional) is
+    forced with `env -i` so the candidate sees only the sealed variables (ZURVAN_SEARCH_DB, ZURVAN_CORPUS,
+    HF_HUB_OFFLINE, HF_HOME)."""
+    return ([_vm_limactl(paths), "shell", vm_instance_name(run_id), "--"]
+            + _guest_env_prefix(guest_env) + list(guest_cmd))
 
 
-def vm_launch(run_id: str, paths, guest_cmd, *, runner=None, popen=None, image_location: str = None):
-    """Boot the instance, then return a started Popen of `limactl shell` whose stdin/stdout are the
-    candidate protocol channel. The caller (broker) drives the existing one-query-at-a-time loop and must
-    call vm_teardown(run_id, paths) in a finally."""
+def vm_run(run_id: str, paths, guest_cmd, *, runner=None, timeout: int = TEARDOWN_TIMEOUT):
+    """Run a SYNCHRONOUS command inside the guest (corpus mount, index build) and return the completed
+    process. CANDIDATE_FAILED on a non-zero exit or spawn error -- a failed setup step is a failed run, never
+    a host fallback."""
+    runner = runner or subprocess.run
+    try:
+        done = runner(vm_shell_argv(run_id, paths, guest_cmd), env=_vm_env(paths, _vm_lima_home(paths)),
+                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        raise SealRefusal("CANDIDATE_FAILED") from None
+    if getattr(done, "returncode", 1) != 0:
+        raise SealRefusal("CANDIDATE_FAILED")
+    return done
+
+
+def vm_launch(run_id: str, paths, guest_cmd, *, runner=None, popen=None, image_location: str = None,
+              guest_env=None, boot: bool = True):
+    """Return a started Popen of `limactl shell` whose stdin/stdout are the candidate protocol channel. Boots
+    the instance first unless boot=False (the broker boots + provisions the corpus/index, then launches the
+    candidate on the already-running guest). The caller drives the one-query-at-a-time loop and must call
+    vm_teardown(run_id, paths) in a finally."""
     popen = popen or subprocess.Popen
-    vm_start(run_id, paths, runner=runner, image_location=image_location)
+    if boot:
+        vm_start(run_id, paths, runner=runner, image_location=image_location)
     lima_home = _vm_lima_home(paths)
-    return popen(vm_shell_argv(run_id, paths, guest_cmd), env=_vm_env(paths, lima_home),
+    return popen(vm_shell_argv(run_id, paths, guest_cmd, guest_env=guest_env), env=_vm_env(paths, lima_home),
                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, close_fds=True,
                  start_new_session=True)
 

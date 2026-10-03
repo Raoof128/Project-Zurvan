@@ -203,12 +203,66 @@ def broker_runtime_sha256(paths: SealPaths) -> str:
     return hashlib.sha256(broker_runtime_material(paths).encode("utf-8", "surrogateescape")).hexdigest()
 
 
-def broker_vm_launch(run_id: str, paths: SealPaths):
-    """The ONE candidate-execution path: boot this run's disposable VM and return a shell Popen on the
-    protocol channel. There is no host-side execution fallback; a boot/protocol failure propagates as a
-    SealRefusal the broker charges and fails closed on."""
+# The candidate reads its frozen search index straight from the READ-ONLY corpus (the corpus export is a
+# coherent snapshot that already contains search.sqlite + graph.sqlite), so there is NO in-guest index
+# build: the broker stages+mounts the corpus read-only and hands the candidate exactly these variables.
+GUEST_HF_HOME = "/opt/z1b/runtime/hf"
+
+
+def broker_candidate_env() -> dict:
+    """The EXACT environment the in-guest candidate runs with (`env -i`): the frozen index + corpus on the
+    read-only mount, the offline model cache baked into the golden image, and a writable TMPDIR for sqlite
+    scratch. Nothing is inherited from the guest login."""
     from . import vm_runner as vmr
-    return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, image_location=broker_guest_image(paths))
+    return {
+        "ZURVAN_SEARCH_DB": vmr.GUEST_CORPUS_MOUNT + "/search.sqlite",
+        "ZURVAN_CORPUS": vmr.GUEST_CORPUS_MOUNT,
+        "HF_HUB_OFFLINE": "1",
+        "HF_HOME": GUEST_HF_HOME,
+        "TMPDIR": "/tmp",
+    }
+
+
+def broker_corpus_image(paths: SealPaths) -> Path:
+    """The read-only corpus squashfs the operator install produced from the sealed corpus export."""
+    return Path(paths.corpus_dir) / "corpus.squashfs"
+
+
+def broker_corpus_expected_digest(paths: SealPaths) -> str:
+    """The squashfs digest recorded beside it at install time (the tamper anchor the staged image is checked
+    against). Missing/malformed => the corpus is not installed as a squashfs: SEAL_NOT_CONFIGURED."""
+    try:
+        txt = (Path(paths.corpus_dir) / "corpus.squashfs.sha256").read_text(encoding="ascii").strip()
+    except OSError:
+        raise SealRefusal("SEAL_NOT_CONFIGURED") from None
+    if not re.fullmatch(r"[0-9a-f]{64}", txt):
+        raise SealRefusal("SEAL_NOT_CONFIGURED")
+    return txt
+
+
+def broker_provision_corpus(run_id: str, paths: SealPaths, *, runner=None) -> None:
+    """Verify the corpus squashfs against its recorded digest (CORPUS_MISMATCH on any mismatch or a non-
+    squashfs), copy it into the running guest (scp over lima, never a host mount), and loop-mount it
+    READ-ONLY at the fixed mount point. The guest never gets a writable view of the corpus."""
+    from . import vm_runner as vmr
+    img = broker_corpus_image(paths)
+    vmr.verify_corpus_image(img, broker_corpus_expected_digest(paths))
+    vmr.vm_copy_into_guest(run_id, paths, img, vmr.GUEST_CORPUS_SQUASHFS, runner=runner)
+    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c",
+                               "mkdir -p %s && mount -o loop,ro %s %s"
+                               % (vmr.GUEST_CORPUS_MOUNT, vmr.GUEST_CORPUS_SQUASHFS, vmr.GUEST_CORPUS_MOUNT)],
+               runner=runner)
+
+
+def broker_vm_launch(run_id: str, paths: SealPaths):
+    """The ONE candidate-execution path: boot this run's disposable VM, stage + mount the read-only corpus,
+    then return a shell Popen running the candidate on the protocol channel with the sealed env. There is no
+    host-side execution fallback; a boot/provision/protocol failure propagates as a SealRefusal the broker
+    charges and fails closed on."""
+    from . import vm_runner as vmr
+    vmr.vm_start(run_id, paths, image_location=broker_guest_image(paths))
+    broker_provision_corpus(run_id, paths)
+    return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env())
 
 
 def broker_vm_wipe(run_id: str, paths: SealPaths) -> None:
