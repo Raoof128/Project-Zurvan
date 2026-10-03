@@ -532,6 +532,31 @@ rewritten; mksquashfs/mount stubbed) with a passing untampered control. The live
 already PASS): read-only under candidate sudo, staged plaintext+tar+image wiped, host corpus unchanged,
 tamper refused, second guest pristine. `-k z1b` **1638 passed / 2 skipped**.
 
+## 7o. Operator closure install EXECUTED and LIVE (2026-10-03)
+
+The privileged install was run on the real machine (operator-authorised) from the `z1b-rev3` worktree at the
+frozen tip `762790a`, and **left installed** (the machine is no longer pristine — distinct from the earlier
+verify-then-rollback run). No code changed.
+
+- Checkpoint: `main=690e22f`, `z1b-rev3=762790a`, trees clean; `guest.qcow2` rehashed → SHA-512 matches the
+  pinned `GOLDEN_IMAGE_DIGEST` and the sidecar.
+- `sudo setup.sh` (exit 0): identities `zurvaneval`/`zurvancandidate`/`zurvanauthor` (uid 600/601/602),
+  corpus gid 603, sealed dirs, TM exclusions, pf candidate-block + launchd pf daemon, cron/at denial, scan
+  ACLs, age key.
+- `sudo install.sh 762790a --guest-image ~/.zurvan/z1b/guest.qcow2` (exit 0): broker sources at the SHA,
+  pinned `age`/`age-keygen`/`claude` (`PINNED.sha256` verified), MiniLM runtime, **golden image placed 0444
+  only on sha512 match with the installed copy re-verified**, two-rule sudoers (`visudo` OK, installed last),
+  scan daemon.
+- `zurvan eval z1b seal-check` (public CLI) = **22/24 green**; only `corpus_read_only` and `manifest_valid`
+  false — the two outstanding operator steps.
+
+**Remaining (operator/Raouf):** (3) freeze the corpus from the REAL knowledge base — the main checkout, whose
+search+graph are 1 revision stale at rev 423 and must be rebuilt to current, then `prepare_corpus_export` +
+`sudo install_corpus.sh` (flips `corpus_read_only`); (4) DEV set (model spend); (5) `claude login` as
+`zurvaneval` (interactive OAuth — cannot be automated); (6) sealed authoring ~320 items + review + re-solve
+(model spend; flips `manifest_valid`); (7) `zurvan eval z1b run` through the installed broker + the full live
+oracle. Then `git merge --ff-only z1b-rev3` into `main` and re-verify the merged tree. No automatic push.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.

@@ -3,6 +3,16 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 #1: operator install VERIFIED on the real machine; 2 setup defects fixed; candidate orchestration wired
+**Raouf:**
+- **Scope:** ran the privileged install on the real machine (password supplied, from the real repo at the Rev 3 tip), fixed what it exposed, wired the VM candidate orchestration. Code on `z1b-rev3` (`e3889d4`, `11d5847`, `70046e5`); design/status on `main` §7h–§7k. Branch unmerged, nothing pushed, machine rolled back to pristine.
+- **Two operator-install defects, found by RUNNING it (not reading), fixed + re-verified:** `setup.sh` under `-euo pipefail` hard-required OPTIONAL ACL paths (its chmods AND a `/bin/test -d` preflight); `REPO/logs` was absent, so it aborted the whole install SILENTLY before any identity was created. `e3889d4` guards the chmods; `11d5847` the preflight requires only ancestor traversal paths.
+- **Real-install verification (then pristine rollback):** after the fixes `sudo setup.sh` + `sudo install.sh` both exit 0; `zurvan eval z1b seal-check` via the PUBLIC CLI on the installed broker = 20+ invariants green (isolation ACLs, key/sets privacy, root-ownership, pinned binaries, pf/sudoers/launchd, TM exclusions incl. #2 author ws, ledger); only `corpus_read_only`+`manifest_valid` false (the outstanding operator steps). `uninstall --purge-sealed` restored pristine.
+- **Golden-image feasibility PROVEN (§7j):** Debian 12 aarch64 guest runs the retrieval stack — `pip install torch sentence-transformers sqlite-vec` + MiniLM 384-dim embed → `SPIKE_OK`. Debian 12 aarch64 is the golden-image base.
+- **Real #1 critical path (§7k) + step 1 DONE (`70046e5`):** `broker_vm_launch` now boots the golden image → `broker_provision_corpus` (verify corpus digest, stage via `limactl copy`, loop-mount `-o ro`) → launch candidate with the sealed env (`env -i`), no host fallback. Finding: the corpus export already contains `search.sqlite` (coherent snapshot), so NO in-guest index build. `vm_runner` gained `guest_env`/`boot`/`vm_run`. Unit-tested.
+- **Verification:** `-k z1b` **1637 passed / 2 skipped**; broker_vm+vm+broker 231; operator-scripts 132; py3.9 clean; `public_repo_guard` + `boundary scan-diff` + `git diff --check` clean.
+- **Remaining for #1 CLOSED → Z1b CLOSED (§7k):** `install_corpus` emits `corpus.squashfs`+`.sha256`; bake+digest-pin the golden `guest.qcow2` + wire `install.sh`; end-to-end live gate; then installed-broker closure via `zurvan eval z1b run` (sudo + model-spend authoring, Raouf-only). Hard unknowns retired (VM isolation, read-only corpus, runtime-on-glibc-aarch64).
+
 ### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 P1 queue CLOSED (#7, #13, #16, #14, #12)
 **Raouf:**
 - **Scope:** the five remaining P1s, inline on branch `z1b-rev3`, test-first + mutation-checked; status on `main` (Rev 3 design §7b + CHANGELOG). No production code on `main`; no sudo/identity/authoring/model spend.
