@@ -451,6 +451,25 @@ So `install_corpus` stays CONTENT-ONLY (no host squashfs), and the §7k-step-1 `
 the image in-guest. The read-only-corpus MECHANISM itself (squashfs `-o ro`, physical unwritability,
 digest identity) remains proven; only WHERE the image is built changes (guest, not host).
 
+## 7l. Golden-image FLATTEN mechanic PROVEN (2026-10-03)
+
+The second golden-image unknown (can a provisioned guest be frozen into a portable base image lima
+boots fresh?) is now settled. Spike: booted Debian 12 aarch64 (vz), wrote a marker in-guest, stopped
+it, flattened the instance disk and booted a NEW instance from the result:
+- The vz instance disk is `<LIMA_HOME>/<inst>/disk` — a sparse RAW file (100 GiB virtual, ~1.1 GiB
+  used for a fresh Debian), NOT a `diffdisk` overlay. `qemu-img convert -O qcow2 disk golden.qcow2`
+  produces a compact standalone qcow2 (~1.2 GiB used).
+- A fresh instance booted with `.images=[{location:"file://…/golden.qcow2", arch:"aarch64"}]` still
+  had the marker (`GOLDEN-MARKER-v1`) — provisioned state persists through the flatten into a clean
+  boot. (cloud-init re-runs harmlessly per new instance-id; `/opt` content persists.)
+
+So the golden-image build is: boot Debian 12 aarch64 → provision in-guest (apt python3/venv +
+`squashfs-tools`; `/opt/z1b/runtime` venv with torch/sentence-transformers/sqlite-vec/numpy; the
+candidate commit's `scripts/` at `/opt/z1b/candidate`; the MiniLM cache at `/opt/z1b/runtime/hf`,
+offline) → stop → `qemu-img convert -O qcow2 <inst>/disk guest.qcow2` → sha512-pin `GUEST_IMAGE_DIGEST`
+→ `install.sh` places + verifies `broker_dir/images/guest.qcow2`. Both hard unknowns (runtime §7j,
+flatten §7l) are retired; the bake is heavy (torch download) but mechanically de-risked.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
