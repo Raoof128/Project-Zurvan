@@ -470,6 +470,28 @@ offline) → stop → `qemu-img convert -O qcow2 <inst>/disk guest.qcow2` → sh
 → `install.sh` places + verifies `broker_dir/images/guest.qcow2`. Both hard unknowns (runtime §7j,
 flatten §7l) are retired; the bake is heavy (torch download) but mechanically de-risked.
 
+## 7m. Golden image BAKED and VALIDATED end-to-end (2026-10-03)
+
+The golden guest image is built and passes the full acceptance gate on a FRESH Lima instance booted
+from the FLATTENED image (not the provisioning guest -- no provisioning residue can mask a gap).
+
+- **Layout (frozen):** `/opt/z1b/scripts/` (candidate commit tree), `/opt/z1b/candidate/z1b_candidate.py`
+  (entry; `_ROOT=/opt/z1b`), `/opt/z1b/runtime/` (a `--copies` venv: torch 2.14.1, sentence-transformers,
+  sqlite-vec, numpy) + `/opt/z1b/runtime/hf` (baked MiniLM cache). `squashfs-tools` installed in-guest.
+- **Gate GREEN (all):** imports resolve with `env -i … -E -s`, NO host PYTHONPATH; venv `sys.prefix` is
+  `/opt/z1b/runtime`; MiniLM loads with `HF_HUB_OFFLINE=1` and embeds to **384**; a tiny REAL index is
+  built in-guest, packaged to a squashfs IN-GUEST and loop-mounted `-o ro` (writes refused); the
+  candidate serves the protocol end-to-end offline: `{"qid":1,"q":"frobnicator widget"}` ->
+  `{"qid":1,"results":[{"page":"wiki/widget.md","heading":"Widget","score":0.826}],"abstain":false}`.
+- **Artifact + digest:** private at `~/.zurvan/z1b/guest.qcow2` (NOT in git; 10 GiB), sha512 computed
+  AFTER flattening: `41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e717b44deb2b17ac43ecfbea709a3f4fabf5528e9e9b301dd3a7d7826fd0f969baf4aecf39c121728`.
+
+**Size follow-up (not a blocker):** torch pulled the CUDA build -> 10 GiB; a CPU-only wheel would cut
+it to ~1-2 GiB (rebake re-pins the digest). **Remaining (code, in-lane):** pin the digest + wire
+`install.sh` to place+verify `broker_dir/images/guest.qcow2` and refuse a mismatch; bind the
+golden-image digest into the run identity; mutation-test the gate. Then live E2E + installed-broker
+gate (operator). The read-only corpus is built in-guest from staged content (§7k.1); the gate proves it.
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
