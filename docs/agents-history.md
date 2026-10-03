@@ -3,6 +3,17 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-02 (Australia/Sydney) — Z1b Rev 3 #1: read-only corpus provisioning PROVEN on real VZ (developer closure of #1 complete)
+**Raouf:**
+- **Scope:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` on branch `z1b-rev3` (`18612aa`). Status on `main`: Rev 3 design §7b/§7f/§7g + progress doc, this CHANGELOG. No production code on `main`; no sudo, identity creation, authoring or model spend.
+- **What this proves.** The third developer-level property of #1 (VM-per-run candidate isolation): the candidate READS the frozen eval corpus but can never mutate it, and the exact corpus is bound to the run identity. Completes the developer trio with VM isolation (`c3ddb28`) and broker-only execution (`1adeb18`).
+- **Mechanism + honest refinement.** §7f(a) specified a `readonly` virtio disk; the gate uses a **squashfs** staged by `limactl copy` (scp over lima's ssh, NOT a host mount), loop-mounted `-o ro`. Stronger than a flag — squashfs has no kernel write path, so a compromised root in the guest cannot `remount,rw`. `verify_corpus_image` fails closed (`CORPUS_MISMATCH`) unless the image is a squashfs (`hsqs` magic) whose whole-file sha256 equals the declared identity (immutability and correct-identity are separate checks). `vm_copy_into_guest` stages it (`CANDIDATE_FAILED` on failure).
+- **Live gate (opt-in + serial, `ZURVAN_Z1B_VM_LIVE=1`).** Clean host: read the known file; write/create/delete/rename all fail "Read-only file system" even under sudo; no `/Users` mount; host image byte-unchanged; second guest pristine; teardown leaves no instance; wrong-digest rejection asserted. Positive control: the same write-probe on a writable tmpfs SUCCEEDS, so the read-only assertions are load-bearing.
+- **Operational finding (recorded, not a defect).** An interrupted run orphans a `limactl hostagent` VZ process that contends for VZ and flakes later back-to-back boots. Production is fail-closed: `vm_start` refuses a leftover instance (`SANDBOX_VIOLATION`). A dev re-run reaps orphans first (`ps | grep ZurvanEval/broker/bin/limactl`).
+- **Files:** `scripts/eval_seal/vm_runner.py`, `tests/test_z1b_vm.py`, `tests/test_z1b_vm_live.py` (branch `z1b-rev3`); `docs/superpowers/specs/2026-10-02-z1b-rev3-design.md`, `docs/superpowers/progress/2026-10-02-z1b-plan-gauntlet.md`, `CHANGELOG.md`, `AGENTS.md`, `docs/agents-history.md` (on `main`).
+- **Verification:** full live module **3 passed in 237 s** on a clean host; corpus gate + positive control **1 passed in 121 s**; 53 fake-runner unit + 5 broker-vm wiring tests; `-k z1b` **1593 passed / 2 skipped**; py3.9 parse clean; `public_repo_guard` + `boundary scan-diff` clean; `git diff --check` clean.
+- **#1 is NOT CLOSED.** Operator closure remains (§7f): golden retrieval image + the installed-broker closure gate (`tests/test_z1b_seal_live.py`, needs `sudo setup.sh`/`install.sh`, Raouf-only). Next: P1 queue #7 → #13 → #16 → #14 → #12.
+
 ### 2026-10-02 (Australia/Sydney) — Z1b gauntlet round 2: all findings fixed; main index-rebuild test repaired
 **Raouf:**
 - **Scope:** fixed every finding the inline Simurgh gauntlet raised, test-first with mutation checks. Dry-run code on branch `z1b-gauntlet`; the plan on `main` records the fixes. No production Z1b on `main` still; no sudo, authoring or model spend.
