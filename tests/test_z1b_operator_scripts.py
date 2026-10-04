@@ -185,7 +185,7 @@ def _t12_expected_dirs():
     return {
         "/Library/ZurvanEval": ("root", "wheel", "0755"),
         str(p.runtime_dir): ("root", "wheel", "0755"),
-        str(p.corpus_dir): ("root", "zurvancorpus", "0750"),
+        str(p.corpus_dir): ("root", "zurvancorpus", "0550"),  # no write bit: the seal-check rejects any
         str(p.stage_dir): ("zurvaneval", "zurvancandidate", "0750"),
         str(p.eval_home): ev, str(p.keys_dir): ev, str(p.private_dir): ev, str(p.sets_dir): ev, str(p.runs_dir): ev,
         str(p.incidents_dir): ev,
@@ -855,8 +855,8 @@ def test_t12_export_sources_returns_verified_bytes(tmp_path):
 def test_t12_corpus_modes_group_and_copy_not_link(t12_world):
     lines = _t12_lines(t12_world["corpus"])
     dirs, files = _t12_dirs(lines), _t12_files(lines)
-    assert dirs["/Library/ZurvanEval/corpus/wiki"] == ("root", "zurvancorpus", "0750")
-    assert dirs["/Library/ZurvanEval/corpus/wiki/decisions"] == ("root", "zurvancorpus", "0750")
+    assert dirs["/Library/ZurvanEval/corpus/wiki"] == ("root", "zurvancorpus", "0550")
+    assert dirs["/Library/ZurvanEval/corpus/wiki/decisions"] == ("root", "zurvancorpus", "0550")
     assert set(files) == {"/Library/ZurvanEval/corpus/search.sqlite", "/Library/ZurvanEval/corpus/wiki/decisions/p1.md"}
     for p, (o, g, m, src) in files.items():
         assert (o, g, m) == ("root", "zurvancorpus", "0440")
@@ -867,6 +867,57 @@ def test_t12_corpus_modes_group_and_copy_not_link(t12_world):
     assert "-type f -links +1" in text and "-type l" in text
     # print the digest of the INSTALLED bytes using the installed (pinned) code
     assert f"{CLT_PY} -I -c" in text and "corpus_sha256" in text and "/Library/ZurvanEval/broker/lib" in text
+    # the corpus ROOT is re-moded 0550 too, so a dir created by an older setup (0750) is repaired, not trusted
+    assert "/bin/chmod 0550 /Library/ZurvanEval/corpus" in text
+
+
+@needs_clt
+def test_t12_rendered_corpus_layout_passes_the_broker_seal_check(t12_world, tmp_path):
+    """Regression (operator gate, 2026-10-04): setup + install_corpus rendered the corpus dirs 0750 while the
+    broker's corpus_read_only check rejects ANY write bit on any entry -- so a correctly installed corpus could
+    never pass seal-check. Each half was tested alone (the seal-check fixture hand-built 0550). This test builds a
+    tree with EXACTLY the modes the installer renders and runs the real gate function on it."""
+    import types
+    from scripts.eval_seal import broker as B
+    setup_dirs = _t12_dirs(_t12_lines(t12_world["setup"]))
+    lines = _t12_lines(t12_world["corpus"])
+    dirs, files = _t12_dirs(lines), _t12_files(lines)
+    root_mode = setup_dirs["/Library/ZurvanEval/corpus"][2]
+    if "/bin/chmod 0550 /Library/ZurvanEval/corpus" in "\n".join(lines):
+        root_mode = "0550"
+    base = "/Library/ZurvanEval/corpus"
+
+    def build(tree, dir_mode_override=None):
+        tree.mkdir()
+        made = []
+        for d in sorted(dirs, key=len):
+            q = tree / d[len(base) + 1:]
+            q.mkdir(parents=True, exist_ok=True)
+            made.append((q, dir_mode_override or dirs[d][2]))
+        for f, (_o, _g, m, _src) in files.items():
+            q = tree / f[len(base) + 1:]
+            q.write_bytes(b"x")
+            os.chmod(str(q), int(m, 8))
+        for q, m in sorted(made, key=lambda t: -len(str(t[0]))):
+            os.chmod(str(q), int(m, 8))
+        os.chmod(str(tree), int(dir_mode_override or root_mode, 8))
+        return types.SimpleNamespace(corpus_dir=tree)
+
+    ctx = types.SimpleNamespace(root_uid=os.getuid())
+    good = build(tmp_path / "rendered")
+    try:
+        assert B._broker_check_corpus(good, ctx) is True        # what the installer renders passes the gate
+    finally:
+        for q in [good.corpus_dir, *good.corpus_dir.rglob("*")]:
+            if q.is_dir():
+                os.chmod(str(q), 0o700)
+    bad = build(tmp_path / "old", dir_mode_override="0750")       # the pre-fix layout: control
+    try:
+        assert B._broker_check_corpus(bad, ctx) is False
+    finally:
+        for q in [bad.corpus_dir, *bad.corpus_dir.rglob("*")]:
+            if q.is_dir():
+                os.chmod(str(q), 0o700)
 
 
 @needs_clt

@@ -487,7 +487,7 @@ def plan_setup(plan, dev_home, repo):
     table = (
         (ZE_ROOT, ("root", "wheel", "0755")),
         (RUNTIME_DIR, ("root", "wheel", "0755")),
-        (CORPUS_DIR, ("root", CORPUS_GROUP, "0750")),
+        (CORPUS_DIR, ("root", CORPUS_GROUP, "0550")),  # no write bit: seal-check corpus_read_only rejects any
         (STAGE_DIR, (EVAL_USER, CANDIDATE_USER, "0750")),
         (EVAL_HOME, ev), (KEYS_DIR, ev), (PRIVATE_DIR, ev), (SETS_DIR, ev), (RUNS_DIR, ev), (INCIDENTS_DIR, ev),
         (CANDIDATE_HOME, cd), (SCRATCH_DIR, cd),
@@ -796,11 +796,15 @@ def plan_install_corpus(plan, export_dir):
     plan.raw('if [ -n "$(/bin/ls -A %s)" ]; then echo "refusing: corpus directory is not empty (remove it deliberately first)" >&2; exit 1; fi'
              % CORPUS_DIR)
     for d in dirs:
-        plan.install_dir(CORPUS_DIR + "/" + d, "root", CORPUS_GROUP, "0750")
+        plan.install_dir(CORPUS_DIR + "/" + d, "root", CORPUS_GROUP, "0550")
     for f in files:
         plan.cmd("/usr/bin/install", "-o", "root", "-g", CORPUS_GROUP, "-m", "0440", os.path.join(root, f), CORPUS_DIR + "/" + f)
     plan.raw('if [ -n "$(/usr/bin/find %s \\( -type f -links +1 -o -type l \\) -print)" ]; '
              'then echo "refusing: hardlink or symlink in the installed corpus" >&2; exit 1; fi' % CORPUS_DIR)
+    plan.comment("corpus dirs carry NO write bit (seal-check corpus_read_only rejects any); re-mode the root too, so a")
+    plan.comment("directory created 0750 by an older setup is repaired rather than trusted. root ignores mode bits, so the")
+    plan.comment("copy above is unaffected; the eval and candidate identities read through the group r-x bits.")
+    plan.cmd("/bin/chmod", "0550", CORPUS_DIR)
     code = ('import sys; sys.path.insert(0, "%s"); from pathlib import Path; '
             'from scripts.eval_seal.corpus import corpus_sha256; '
             'print("corpus_sha256 " + corpus_sha256(Path("%s")))') % (BROKER_LIB, CORPUS_DIR)
