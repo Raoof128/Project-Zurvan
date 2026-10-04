@@ -223,20 +223,71 @@ def test_t15_the_two_claude_env_names_are_not_reserved_by_clean_env():
     subprocess.CompletedProcess([], 0, stdout=json.dumps({"result": "x", "is_error": True}).encode(), stderr=b""),
 ])
 def test_t15_claude_runner_failures_are_a_bare_internal_refusal(tmp_path, proc):
-    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=lambda argv, **kw: proc)
+    calls, slept = [], []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return proc
+
+    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=run, sleep=slept.append)
     with pytest.raises(SealRefusal) as ei:
         runner("author", "opus", "p", cwd=tmp_path)
     assert ei.value.code == "INTERNAL" and "SECRET" not in str(ei.value)
+    # a persistent failure is retried a BOUNDED number of times, then fails closed
+    assert len(calls) == A.AUTHOR_CALL_ATTEMPTS and slept == list(A.AUTHOR_RETRY_BACKOFF_S[:A.AUTHOR_CALL_ATTEMPTS - 1])
 
 
 def test_t15_claude_runner_timeout_and_oserror_become_internal(tmp_path):
     def boom(argv, **kw):
         raise subprocess.TimeoutExpired(argv, 1)
 
-    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=boom)
+    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=boom, sleep=lambda s: None)
     with pytest.raises(SealRefusal) as ei:
         runner("author", "opus", "p", cwd=tmp_path)
     assert ei.value.code == "INTERNAL"
+
+
+def _t15_flaky(fail_first, ok_text="MODEL TEXT", failure="exit1"):
+    """A fake `run` that fails `fail_first` times (a transient infrastructure error), then succeeds."""
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(kw.get("input"))
+        if len(calls) <= fail_first:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(argv, 1)
+            if failure == "oserror":
+                raise OSError("ENOTFOUND")
+            return subprocess.CompletedProcess(argv, 1, stdout=b"", stderr=b"API Error: Can't reach the API server")
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": ok_text, "is_error": False}).encode(),
+                                           stderr=b"")
+    return run, calls
+
+
+@pytest.mark.parametrize("failure", ["exit1", "timeout", "oserror"])
+def test_t15_claude_runner_retries_a_transient_failure_then_succeeds(tmp_path, failure):
+    """Regression (operator run, 2026-10-05): one transient DNS failure (ENOTFOUND) on call 209 of a ~2 h sealed
+    drafting run failed the WHOLE run, discarding every completed model call. A transient failure is now retried
+    with backoff; the same prompt is re-sent unchanged and the result is the model's, never the child's stderr."""
+    run, calls = _t15_flaky(1, failure=failure)
+    slept = []
+    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=run, sleep=slept.append)
+    assert runner("author", "opus", "THE PROMPT", cwd=tmp_path) == "MODEL TEXT"
+    assert calls == [b"THE PROMPT", b"THE PROMPT"] and slept == [A.AUTHOR_RETRY_BACKOFF_S[0]]
+
+
+def test_t15_claude_runner_retry_is_bounded_and_succeeds_on_the_last_attempt(tmp_path):
+    run, calls = _t15_flaky(A.AUTHOR_CALL_ATTEMPTS - 1)
+    runner = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=run, sleep=lambda s: None)
+    assert runner("author", "opus", "p", cwd=tmp_path) == "MODEL TEXT"
+    assert len(calls) == A.AUTHOR_CALL_ATTEMPTS
+    run2, calls2 = _t15_flaky(A.AUTHOR_CALL_ATTEMPTS)          # one more failure than attempts: fail closed
+    runner2 = A.claude_runner(tmp_path / "bin" / "claude", tmp_path / "h", run=run2, sleep=lambda s: None)
+    with pytest.raises(SealRefusal) as ei:
+        runner2("author", "opus", "p", cwd=tmp_path)
+    assert ei.value.code == "INTERNAL" and "API Error" not in str(ei.value)
+    assert len(calls2) == A.AUTHOR_CALL_ATTEMPTS
+    assert 2 <= A.AUTHOR_CALL_ATTEMPTS <= 5                     # bounded: a retry storm is not a fix
 
 
 # ---------------------------------------------------------------------------------------------- minhash

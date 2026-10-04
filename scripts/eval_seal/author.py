@@ -52,6 +52,11 @@ AUTHOR_DEFAULT_MODELS = {"author": "opus", "reviewer": "sonnet", "resolver": "ha
 AUTHOR_ALLOWED_TOOLS = "Read,Grep,Glob"
 AUTHOR_DENIED_TOOLS = "Bash,WebFetch,WebSearch,Write,Edit,NotebookEdit,Task"
 AUTHOR_CLAUDE_ENV = {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+# A sealed drafting run is ~300+ model calls over hours; one transient infrastructure failure (DNS, network, a
+# timed-out call) must not discard every completed call. Each call is retried a BOUNDED number of times with
+# backoff, re-sending the identical prompt; after the last attempt it still fails closed (bare INTERNAL).
+AUTHOR_CALL_ATTEMPTS = 3
+AUTHOR_RETRY_BACKOFF_S = (30, 120)
 
 _MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}")
 _SEED_RE = re.compile(r"[0-9]{1,10}")
@@ -96,12 +101,23 @@ def author_default_claude(paths) -> Path:
     return Path(paths.broker_bin) / "claude"
 
 
-def claude_runner(claude_bin, home, *, mcp_config=None, timeout_s: int = 900, run=None):
+def claude_runner(claude_bin, home, *, mcp_config=None, timeout_s: int = 900, run=None, sleep=None):
     claude_bin, home = Path(claude_bin), Path(home)
     mcp = Path(mcp_config) if mcp_config is not None else claude_bin.parent.parent / "empty-mcp.json"
     runner_run = run if run is not None else subprocess.run
+    pause = sleep if sleep is not None else time.sleep
 
     def runner(role: str, model: str, prompt: str, *, cwd) -> str:
+        for attempt in range(AUTHOR_CALL_ATTEMPTS):
+            try:
+                return once(role, model, prompt, cwd=cwd)
+            except SealRefusal:
+                if attempt == AUTHOR_CALL_ATTEMPTS - 1:
+                    raise                                   # bounded: the last failure fails closed
+                pause(AUTHOR_RETRY_BACKOFF_S[min(attempt, len(AUTHOR_RETRY_BACKOFF_S) - 1)])
+        raise SealRefusal("INTERNAL")                       # unreachable; keeps the contract explicit
+
+    def once(role: str, model: str, prompt: str, *, cwd) -> str:
         argv = author_claude_argv(claude_bin, model, mcp)
         # R18: claude keeps session transcripts (plaintext prompts and items) under its config dir; that dir
         # must be the Time Machine-excluded private/ dir of the eval home, never ~/.claude.
