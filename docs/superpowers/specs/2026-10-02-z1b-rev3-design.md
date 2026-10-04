@@ -547,7 +547,7 @@ verify-then-rollback run). No code changed.
   pinned `age`/`age-keygen`/`claude` (`PINNED.sha256` verified), MiniLM runtime, **golden image placed 0444
   only on sha512 match with the installed copy re-verified**, two-rule sudoers (`visudo` OK, installed last),
   scan daemon.
-- `zurvan eval z1b seal-check` (public CLI) = **22/24 green**; only `corpus_read_only` and `manifest_valid`
+- `zurvan eval z1b seal-check` (public CLI) = **21/23 green** (corrected 2026-10-04: originally mis-reported as 22/24 — the seal-check has 23 checks); only `corpus_read_only` and `manifest_valid`
   false — the two outstanding operator steps.
 
 **Remaining (operator/Raouf):** (3) freeze the corpus from the REAL knowledge base — the main checkout, whose
@@ -556,6 +556,28 @@ search+graph are 1 revision stale at rev 423 and must be rebuilt to current, the
 `zurvaneval` (interactive OAuth — cannot be automated); (6) sealed authoring ~320 items + review + re-solve
 (model spend; flips `manifest_valid`); (7) `zurvan eval z1b run` through the installed broker + the full live
 oracle. Then `git merge --ff-only z1b-rev3` into `main` and re-verify the merged tree. No automatic push.
+
+## 7p. Corpus frozen + installed; operator gate exposed a corpus-mode defect (2026-10-04, `bb376fd`)
+
+- **Corpus = the REAL knowledge base.** Main checkout rebuilt to current (search 299,925 chunks, graph 11,576
+  nodes; COHERENT+CURRENT at rev 428), exported with the FROZEN z1b-rev3 `prepare_corpus_export` against the main
+  KB: 1.3 GB, 11,486 wiki files, 104 docs, root md files, search + graph; `corpus_sha256 d62c3cec…be4c798`.
+  `install_corpus.sh` reprinted the same digest from the installed bytes with the installed code.
+- **Defect (found by running, not reading).** setup and `install_corpus` rendered the corpus root + subdirs
+  0750; `_broker_check_corpus` rejects any write bit on any entry, so a correct install could never pass
+  `corpus_read_only`. The seal-check fixture modelled 0550, the installer tests pinned 0750, and they never met.
+  **The installer was tightened to meet the gate; the gate was not changed.** Corpus dirs are 0550, and
+  `install_corpus` re-modes the root 0550 (repairing a dir an older setup made 0750). A regression test runs the
+  real gate on exactly the rendered modes, with a 0750 control.
+- **Re-installed at `bb376fd`** (broker + golden image re-verified; corpus cleared and re-installed, digest
+  unchanged). **seal-check 22/23 — only `manifest_valid` false.** The install-only state before the corpus was
+  21/23 (§7o originally said 22/24 in error; corrected there).
+- Live seal gates now run: gate1b needs `ok=true` (blocked only on the manifest); gate2's `sudo -n` cannot reach
+  cached credentials from pytest, so its property was verified directly (`zurvanauthor` → EACCES on all six
+  sealed paths) and is not counted as a passing test.
+
+**Remaining:** DEV set → `claude login` as `zurvaneval` (interactive, operator) → sealed authoring
+(`manifest_valid`) → `zurvan eval z1b run` + full live oracle → #1/Z1b CLOSED → `git merge --ff-only z1b-rev3`.
 
 ## 8. Build order for the Rev 3 plan
 
