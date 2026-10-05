@@ -412,8 +412,12 @@ def test_t12_setup_acl_targets_cover_the_scan_set(t12_world):
               f"{REPO_PATH}/logs", f"{DEV_HOME}/.zurvan/reports"):
         assert by_path[p] == full, p
     for p in (DEV_HOME, f"{DEV_HOME}/Desktop", f"{DEV_HOME}/Desktop/Raouf", REPO_PATH, f"{REPO_PATH}/data",
-              f"{REPO_PATH}/wiki", f"{DEV_HOME}/.claude", f"{DEV_HOME}/.claude/projects", f"{DEV_HOME}/.zurvan"):
+              f"{REPO_PATH}/wiki", f"{DEV_HOME}/.claude", f"{DEV_HOME}/.zurvan"):
         assert by_path[p] == {"search"}, p
+    # the scanner must LIST ~/.claude/projects to discover the *Zurvan* transcript dirs (incl. new worktrees);
+    # search-only made every real scan SCAN_INCOMPLETE (operator gate 2026-10-05). Listing only, NO inheritance:
+    # the eval identity sees directory names, never the contents of other projects.
+    assert by_path[f"{DEV_HOME}/.claude/projects"] == {"list", "search", "readattr"}
     # Rev 3 #2: the eval identity also gets a READ ACL on the author workspace, so the seal phase can read
     # the draft bundle -- and a SEARCH-only (traverse) ACL on the author home that contains it. Without the
     # traverse grant the workspace is unreachable through the 0700 home and seal refuses BAD_ARGS (found by
@@ -1238,3 +1242,21 @@ def test_t12_install_repairs_the_author_home_traverse_acl_idempotently(t12_world
     assert "/bin/test -d /Users/zurvanauthor" in text
     # traverse only: never list/read on the author home itself
     assert "allow read" not in " ".join(l for l in lines if l.endswith(" /Users/zurvanauthor"))
+
+
+
+@needs_clt
+def test_t12_refresh_acl_repairs_the_projects_listing_grant(tmp_path):
+    """An existing setup granted only search on ~/.claude/projects, so the scanner could not enumerate transcript
+    dirs and refused every run SCAN_INCOMPLETE. refresh_acl re-applies the listing grant idempotently (remove an
+    identical entry, then grant) -- never with inheritance -- before re-granting the transcript dirs."""
+    stage = tmp_path / "refresh"
+    r = _t12_sh("refresh_acl.sh", "--render", stage, "--repo", REPO_PATH, "--dev-user", DEV, "--dev-home", DEV_HOME)
+    assert r.returncode == 0, r.stderr
+    lines = _t12_lines(stage)
+    target = f"{DEV_HOME}/.claude/projects"
+    grant = "/bin/chmod +a 'user:zurvaneval allow list,search,readattr' %s" % target
+    assert grant in lines, [l for l in lines if "projects" in l]
+    i = lines.index(grant)
+    assert any("chmod -a 'user:zurvaneval allow list,search,readattr' %s" % target in l for l in lines[:i])
+    assert not any(target + " " in l + " " and "inherit" in l for l in lines if l.endswith(" " + target))

@@ -388,6 +388,9 @@ def _render_template(name, **kw):
 
 # ------------------------------------------------------------------ plans
 
+PROJECTS_LIST_PERMS = "list,search,readattr"   # ~/.claude/projects: enumerate, never inherit
+
+
 def _acl(perms):
     return "user:%s allow %s" % (EVAL_USER, perms)
 
@@ -537,8 +540,13 @@ def plan_setup(plan, dev_home, repo):
     # still aborts, so real errors are never swallowed.
     search_acl = shlex.quote(_acl("search"))
     full_acl = shlex.quote(_acl("read,list,search,readattr,file_inherit,directory_inherit"))
+    # the scanner LISTS ~/.claude/projects to find the *Zurvan* transcript dirs (new worktrees included); search-only
+    # there made every real scan SCAN_INCOMPLETE. Listing, no inheritance: names visible, other projects unreadable.
+    projects = dev_home + "/.claude/projects"
+    list_acl = shlex.quote(_acl(PROJECTS_LIST_PERMS))
     for p in search:
-        plan.raw("if [ -e %s ]; then /bin/chmod +a %s %s; fi" % (shlex.quote(p), search_acl, shlex.quote(p)))
+        acl = list_acl if p == projects else search_acl
+        plan.raw("if [ -e %s ]; then /bin/chmod +a %s %s; fi" % (shlex.quote(p), acl, shlex.quote(p)))
     for p in full:
         if "*" in p:
             plan.raw('for d in %s; do if [ -e "$d" ]; then /bin/chmod -R +a %s "$d"; fi; done'
@@ -876,6 +884,11 @@ def plan_refresh_acl(plan, dev_home):
     plan.comment("refresh_acl: transcript directories created after setup (new worktrees) are unreadable to the eval identity")
     plan.comment("until this runs, and the scan then reports SCAN_INCOMPLETE (fail closed). Read-only grant, same ACL as setup.")
     plan.cmd("/bin/test", "-d", dev_home + "/.claude/projects")
+    projects = dev_home + "/.claude/projects"
+    list_perms = shlex.quote(_acl(PROJECTS_LIST_PERMS))
+    plan.comment("the scanner must LIST ~/.claude/projects to find the transcript dirs; an older setup granted search only")
+    plan.raw("/bin/chmod -a %s %s 2>/dev/null || true" % (list_perms, shlex.quote(projects)))
+    plan.cmd("/bin/chmod", "+a", _acl(PROJECTS_LIST_PERMS), projects)
     plan.raw("/bin/ls -d %s >/dev/null" % _quote_target(glob))
     plan.comment("remove an identical entry first so running this twice never stacks duplicates, then grant")
     plan.raw("/bin/chmod -R -a %s %s || true" % (shlex.quote(perms), _quote_target(glob)))
