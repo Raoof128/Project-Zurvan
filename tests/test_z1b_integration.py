@@ -86,7 +86,13 @@ def test_t18_refresh_acl_renders_a_read_only_regrant_on_every_transcript_dir(tmp
     assert r.returncode == 0, r.stderr
     lines = [ln for ln in (stage / "commands.txt").read_text().splitlines() if ln and not ln.startswith("#")]
     grants = [ln for ln in lines if " +a " in ln]
-    assert grants and all(DEV_HOME + "/.claude/projects/*Zurvan*" in ln for ln in grants)
+    # the transcript dirs get the read-only inherited grant; the projects dir itself gets exactly ONE listing grant
+    # (no inheritance) so the scanner can enumerate transcript dirs (operator gate 2026-10-05: SCAN_INCOMPLETE)
+    projects = DEV_HOME + "/.claude/projects"
+    listing = [ln for ln in grants if ln.endswith(" " + projects)]
+    assert listing == ["/bin/chmod +a 'user:zurvaneval allow list,search,readattr' " + projects]
+    rest = [ln for ln in grants if ln not in listing]
+    assert rest and all(projects + "/*Zurvan*" in ln for ln in rest)
     for ln in grants:
         for forbidden in ("write", "delete", "add_file", "add_subdirectory", "writeattr", "chown"):
             assert forbidden not in ln, ln
