@@ -1059,3 +1059,17 @@ def test_t15_production_encrypt_failure_is_a_bare_internal_refusal(tmp_path):
     with pytest.raises(SealRefusal) as ei:
         A.author_age_encrypt(paths)(b"x", tmp_path / "o.age")
     assert ei.value.code == "INTERNAL"
+
+
+def test_t15_author_candidate_headroom_covers_the_measured_worst_stratum_yield():
+    """Regression (operator run, 2026-10-05): with 20 candidates per stratum the real sealed drafting run came back
+    SHORT -- RESERVE 79/80, one stratum yielding 14 of 20 (70%) after review + re-solve, every other stratum >= 15.
+    A short suite FAILS gate 8 (never padded, never redefined). The minimums are unchanged; the author now drafts
+    enough candidates that the worst measured per-stratum yield still fills HOLDOUT + RESERVE for every stratum."""
+    import math
+    spec = json.loads((Path(__file__).resolve().parent.parent / "eval" / "z1b" / "spec.json").read_text())
+    worst_measured_yield = 14 / 20
+    for s in spec["strata"]:
+        need = s["min_holdout"] + s["min_reserve"]
+        assert math.floor(A.AUTHOR_PER_STRATUM * worst_measured_yield) >= need, (s["id"], A.AUTHOR_PER_STRATUM, need)
+    assert A.AUTHOR_PER_STRATUM <= 30                          # bounded: headroom, not an unbounded spend

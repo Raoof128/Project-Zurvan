@@ -39,7 +39,10 @@ from .corpus import corpus_sha256 as author_corpus_sha256
 from .paths import SealPaths
 
 AUTHOR_ROLES = ("author", "reviewer", "resolver")
-AUTHOR_PER_STRATUM = 20
+# Candidates drafted per stratum. 20 (spec "about 20") came back SHORT on the real run: one stratum yielded 14/20
+# (70%) after review + re-solve, RESERVE 79/80. 24 keeps HOLDOUT 10 + RESERVE 5 = 15 fillable at that worst
+# measured yield (floor(24*0.7) = 16). The gate minimums are unchanged; this only adds headroom to MEET them.
+AUTHOR_PER_STRATUM = 24
 AUTHOR_REVIEW_BATCH = 20
 AUTHOR_CANARIES = 24
 AUTHOR_NEARDUP_THRESHOLD = 0.7      # estimated shingle Jaccard; real Jaccard >= 0.8 clears it with margin
