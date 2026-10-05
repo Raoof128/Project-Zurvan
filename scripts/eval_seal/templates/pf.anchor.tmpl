@@ -4,9 +4,11 @@
 # so the guest's traffic leaves through them and is dropped here. Lima maps the guest gateway onto HOST
 # LOOPBACK, so loopback is NOT exempt: the only loopback the candidate identity may reach is the reserved range
 # its per-run VM ssh control forward is pinned to (security review 2026-10-05). On lo0 the forward's replies are
-# outbound candidate-owned packets too, hence the second rule -- stateless with `flags any`, because pf's
-# default `flags S/SA` on a stateful rule matches only an initial SYN, never the SYN-ACK (measured live). The
-# range is below the ephemeral ports, so no implicit source port can match it.
+# outbound candidate-owned packets too, hence the second rule. It is stateless (pf's default `flags S/SA` on a
+# stateful rule matches only an initial SYN, never the SYN-ACK) and requires ACK (`flags A/A`): every reply
+# from the forward carries ACK, but a connection-INITIATING SYN never does -- so a candidate-identity process
+# that binds a reserved source port still cannot open a connection to another loopback service (security
+# review 2026-10-05: with `flags any` it reached the host's mysqld). The range is below the ephemeral ports.
 pass out quick on lo0 proto tcp from any to 127.0.0.1 port ${SSH_PORT_LO}:${SSH_PORT_HI} user ${CANDIDATE_USER}
-pass out quick on lo0 proto tcp from 127.0.0.1 port ${SSH_PORT_LO}:${SSH_PORT_HI} to 127.0.0.1 user ${CANDIDATE_USER} flags any no state
+pass out quick on lo0 proto tcp from 127.0.0.1 port ${SSH_PORT_LO}:${SSH_PORT_HI} to 127.0.0.1 user ${CANDIDATE_USER} flags A/A no state
 block drop out quick user ${CANDIDATE_USER}
