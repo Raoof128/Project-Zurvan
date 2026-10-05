@@ -505,6 +505,9 @@ def plan_setup(plan, dev_home, repo):
     plan.comment("and the eval identity gets a READ ACL on the workspace so the seal phase can read the draft bundle.")
     plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", AUTHOR_WS)
     plan.cmd("/usr/bin/tmutil", "addexclusion", "-p", AUTHOR_PRIVATE)
+    plan.comment("...and SEARCH-only (traverse) on the 0700 author home that contains it, or the workspace is unreachable")
+    plan.comment("and seal refuses BAD_ARGS. Traverse only: no list/read of the home; private/ and the keychain stay owner-only.")
+    plan.cmd("/bin/chmod", "+a", _acl("search"), AUTHOR_HOME)
     plan.cmd("/bin/chmod", "+a", _acl("read,list,search,readattr,file_inherit,directory_inherit"), AUTHOR_WS)
     plan.comment("T3: the candidate identity has no outbound network (pf matches user for TCP/UDP only: defence in depth)")
     plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
@@ -653,6 +656,11 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
     plan.raw('[ "$(/usr/bin/stat -f %%Su %s)" = root ] || { echo "refusing: the CLT python is not root-owned" >&2; exit 1; }'
              % shlex.quote(CLT_PYTHON))
     plan.cmd("/bin/rm", "-rf", BROKER_DIR, RUNTIME_DIR + "/hf")
+    plan.comment("repair (idempotent): the eval identity needs SEARCH-only traverse on the author home to reach the")
+    plan.comment("workspace at seal time; an older setup did not grant it. Remove an identical entry first, then grant.")
+    plan.cmd("/bin/test", "-d", AUTHOR_HOME)
+    plan.raw("/bin/chmod -a %s %s 2>/dev/null || true" % (shlex.quote(_acl("search")), AUTHOR_HOME))
+    plan.cmd("/bin/chmod", "+a", _acl("search"), AUTHOR_HOME)
 
     plan.install_dir(BROKER_DIR, "root", "wheel", "0555")
     plan.install_dir(BROKER_BIN, "root", "wheel", "0555")

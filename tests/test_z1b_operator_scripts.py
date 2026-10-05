@@ -400,11 +400,15 @@ def test_t12_setup_acl_targets_cover_the_scan_set(t12_world):
               f"{REPO_PATH}/wiki", f"{DEV_HOME}/.claude", f"{DEV_HOME}/.claude/projects", f"{DEV_HOME}/.zurvan"):
         assert by_path[p] == {"search"}, p
     # Rev 3 #2: the eval identity also gets a READ ACL on the author workspace, so the seal phase can read
-    # the draft bundle. That is the only ACL target outside the dev home / repo.
+    # the draft bundle -- and a SEARCH-only (traverse) ACL on the author home that contains it. Without the
+    # traverse grant the workspace is unreachable through the 0700 home and seal refuses BAD_ARGS (found by
+    # running the operator gate, 2026-10-05). Search-only: the eval identity can neither list the author home
+    # nor read anything else in it (private/ and the keychain keep their own owner-only modes).
     assert by_path["/Users/zurvanauthor/workspace"] == full
+    assert by_path["/Users/zurvanauthor"] == {"search"}
     for p in by_path:
         assert (p.startswith(DEV_HOME) or p.startswith(REPO_PATH)
-                or p == "/Users/zurvanauthor/workspace")
+                or p in ("/Users/zurvanauthor/workspace", "/Users/zurvanauthor"))
 
 
 @needs_clt
@@ -1181,3 +1185,19 @@ def test_t12_install_without_guest_image_omits_the_image_steps(t12_world):
     # the base install (no --guest-image) must not reference the golden image at all
     text = "\n".join(_t12_lines(t12_world["install"]))
     assert "images/guest.qcow2" not in text
+
+
+
+@needs_clt
+def test_t12_install_repairs_the_author_home_traverse_acl_idempotently(t12_world):
+    """An existing setup (made before the traverse grant existed) is repaired by re-running install.sh: remove an
+    identical entry first (never stacks duplicates), then grant search-only on the author home."""
+    lines = _t12_lines(t12_world["install"])
+    text = "\n".join(lines)
+    grant = "/bin/chmod +a 'user:zurvaneval allow search' /Users/zurvanauthor"
+    assert grant in lines, [l for l in lines if "zurvanauthor" in l]
+    i = lines.index(grant)
+    assert any("chmod -a 'user:zurvaneval allow search' /Users/zurvanauthor" in l for l in lines[:i])
+    assert "/bin/test -d /Users/zurvanauthor" in text
+    # traverse only: never list/read on the author home itself
+    assert "allow read" not in " ".join(l for l in lines if l.endswith(" /Users/zurvanauthor"))
