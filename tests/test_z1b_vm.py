@@ -161,23 +161,36 @@ def test_t1vm_config_uses_a_pinned_image_location_override_when_given():
 def test_t1vm_golden_profile_pins_the_golden_digest_and_a_viable_machine():
     """Regression (operator gate 2026-10-05): the broker rendered the ALPINE profile for the golden image, so
     Lima aborted on a digest mismatch; it also asked for 1 GiB and a 4 GiB disk for a 20 GiB torch image."""
-    cfg = V.vm_config_text("file:///g/guest.qcow2", "golden", 60123)
+    cfg = V.vm_config_text("file:///g/guest.qcow2", "golden", 40123)
     assert V.GOLDEN_IMAGE_DIGEST in cfg and V.GUEST_IMAGE_DIGEST not in cfg
     assert 'location: "file:///g/guest.qcow2"' in cfg and "mounts: []" in cfg
     assert 'memory: "4GiB"' in cfg and "disk:" not in cfg            # lima's default sparse disk (>= image)
     assert "hostResolver:\n  enabled: false" in cfg
     # security review 2026-10-05: the ssh control forward is pinned inside the pf-permitted loopback range, and
     # lima's automatic guest->host port forwards are all ignored (no guest service appears on host loopback)
-    assert "ssh:\n  localPort: 60123\n" in cfg
+    assert "ssh:\n  localPort: 40123\n" in cfg
     assert cfg.count("guestPortRange: [1, 65535]\n  ignore: true") == 2
     assert 'guestIP: "0.0.0.0"' in cfg and 'guestIP: "127.0.0.1"' in cfg
     with pytest.raises(SealRefusal):
-        V.vm_config_text(None, "golden", 60123)                       # the golden profile needs a pinned file
-    for bad_port in (None, 22, V.SSH_PORT_LO - 1, V.SSH_PORT_HI + 1, "60100"):
+        V.vm_config_text(None, "golden", 40123)                       # the golden profile needs a pinned file
+    for bad_port in (None, 22, V.SSH_PORT_LO - 1, V.SSH_PORT_HI + 1, "40100"):
         with pytest.raises(SealRefusal):
             V.vm_config_text("file:///x", "golden", bad_port)         # never outside the pf-permitted range
     with pytest.raises(SealRefusal):
         V.vm_config_text("file:///x", "bogus")
+
+
+def test_t1vm_reserved_ssh_range_is_below_the_ephemeral_ports():
+    """On lo0 the ssh forward's replies are outbound candidate-owned packets, so pf passes traffic FROM the range;
+    that is safe only if no implicit (ephemeral) source port can fall inside it."""
+    assert V.SSH_PORT_LO <= V.SSH_PORT_HI < V.EPHEMERAL_PORT_FIRST
+    import subprocess as sp
+    try:
+        first = int(sp.run(["/usr/sbin/sysctl", "-n", "net.inet.ip.portrange.first"], capture_output=True,
+                           text=True, timeout=5).stdout.strip())
+    except (OSError, ValueError, sp.SubprocessError):
+        return
+    assert V.SSH_PORT_HI < first, (V.SSH_PORT_HI, first)                 # this machine agrees
 
 
 def test_t1vm_ssh_port_is_deterministic_per_run_and_inside_the_pf_range():

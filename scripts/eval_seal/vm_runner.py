@@ -44,8 +44,12 @@ GOLDEN_IMAGE_DIGEST = ("sha512:41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e7
 # user-mode network maps the guest gateway onto HOST LOOPBACK -- where this machine serves mysqld, cloudflared,
 # local Python servers... pf therefore lets the candidate identity reach loopback ONLY on this reserved range,
 # and each run's ssh control forward is pinned inside it (ssh.localPort). One run at a time (broker lock).
-SSH_PORT_LO = 60000
-SSH_PORT_HI = 60999
+# The range sits BELOW macOS's ephemeral ports (49152-65535): on lo0 the forward's SYN-ACK is itself an outbound
+# candidate-owned packet, so pf must also pass traffic FROM the range -- safe only if no implicit source port
+# (e.g. lima's own connection to a host service) can ever land in it (measured live, 2026-10-05).
+SSH_PORT_LO = 40000
+SSH_PORT_HI = 40999
+EPHEMERAL_PORT_FIRST = 49152
 START_TIMEOUT = 300
 TEARDOWN_TIMEOUT = 120
 

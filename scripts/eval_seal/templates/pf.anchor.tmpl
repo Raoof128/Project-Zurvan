@@ -3,6 +3,9 @@
 # The candidate identity owns the candidate VM's host processes (lima's hostagent and its user-mode network),
 # so the guest's traffic leaves through them and is dropped here. Lima maps the guest gateway onto HOST
 # LOOPBACK, so loopback is NOT exempt: the only loopback the candidate identity may reach is the reserved range
-# its per-run VM ssh control forward is pinned to (security review 2026-10-05).
+# its per-run VM ssh control forward is pinned to (security review 2026-10-05). On lo0 the forward's replies are
+# outbound candidate-owned packets too, hence the second rule; the range is below the ephemeral ports, so no
+# implicit source port can match it.
 pass out quick on lo0 proto tcp from any to 127.0.0.1 port ${SSH_PORT_LO}:${SSH_PORT_HI} user ${CANDIDATE_USER}
+pass out quick on lo0 proto tcp from 127.0.0.1 port ${SSH_PORT_LO}:${SSH_PORT_HI} to 127.0.0.1 user ${CANDIDATE_USER}
 block drop out quick user ${CANDIDATE_USER}

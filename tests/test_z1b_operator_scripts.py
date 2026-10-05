@@ -344,7 +344,8 @@ def test_t12_setup_pf_anchor_blocks_candidate_outbound(t12_world):
     # the candidate identity owns the VM host processes; lima maps the guest gateway onto host loopback, so the
     # only loopback it may reach is the reserved range its per-run ssh control forward is pinned to
     # (operator gate + security review 2026-10-05)
-    assert rules == ["pass out quick on lo0 proto tcp from any to 127.0.0.1 port 60000:60999 user zurvancandidate",
+    assert rules == ["pass out quick on lo0 proto tcp from any to 127.0.0.1 port 40000:40999 user zurvancandidate",
+                     "pass out quick on lo0 proto tcp from 127.0.0.1 port 40000:40999 to 127.0.0.1 user zurvancandidate",
                      "block drop out quick user zurvancandidate"]
     text = "\n".join(_t12_lines(stage))
     assert 'anchor "zurvan-eval"' in text
@@ -543,7 +544,8 @@ def test_t12_install_re_renders_and_reloads_the_pf_anchor(t12_world):
     stage = Path(t12_world["install"])
     anchor = _t12_stage_file(stage, "/etc/pf.anchors/zurvan-eval").read_text()
     assert [ln for ln in anchor.splitlines() if ln and not ln.startswith("#")] == \
-        ["pass out quick on lo0 proto tcp from any to 127.0.0.1 port 60000:60999 user zurvancandidate",
+        ["pass out quick on lo0 proto tcp from any to 127.0.0.1 port 40000:40999 user zurvancandidate",
+         "pass out quick on lo0 proto tcp from 127.0.0.1 port 40000:40999 to 127.0.0.1 user zurvancandidate",
          "block drop out quick user zurvancandidate"]
     lines = _t12_lines(stage)
     assert "/sbin/pfctl -a zurvan-eval -f /etc/pf.anchors/zurvan-eval" in lines
