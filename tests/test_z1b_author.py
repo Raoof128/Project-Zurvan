@@ -688,7 +688,9 @@ def test_t15_unparseable_author_output_is_counted_not_fatal(tmp_path):
     fk = _T15Fake(world, author=lambda sid, prompt: "sorry, no JSON here" if sid == "alias" else json.dumps(
         {"candidates": world["raw"][sid]}))
     _, _, bundle = _t15_suite(tmp_path, fake=fk)
-    assert bundle["rejected"]["unparseable"] == 1 and bundle["coverage"]["ok"] is False
+    # every failed attempt is counted: bounded re-asks in the first pass and in each bounded top-up round
+    assert bundle["rejected"]["unparseable"] == A.AUTHOR_PARSE_ATTEMPTS * (1 + A.AUTHOR_TOPUP_ROUNDS)
+    assert bundle["coverage"]["ok"] is False and any(x["stratum"] == "alias" for x in bundle["short"])
 
 
 def test_t15_author_output_may_be_fenced_or_a_bare_list(tmp_path):
@@ -1073,3 +1075,129 @@ def test_t15_author_candidate_headroom_covers_the_measured_worst_stratum_yield()
         need = s["min_holdout"] + s["min_reserve"]
         assert math.floor(A.AUTHOR_PER_STRATUM * worst_measured_yield) >= need, (s["id"], A.AUTHOR_PER_STRATUM, need)
     assert A.AUTHOR_PER_STRATUM <= 30                          # bounded: headroom, not an unbounded spend
+
+
+# ------------------------------------------------------------------ re-ask + per-stratum top-up (operator run 2026-10-05)
+
+def _t15_round_author(world, per, *, bad=None, bad_times=0):
+    """An author hook that returns FRESH candidates on each call for a stratum (round-tagged queries, registered in
+    the truth table so the fake resolver can resolve them). `bad`/`bad_times`: that stratum's first N replies are
+    malformed JSON (an unescaped quote mid-object), as the real Opus reply was."""
+    rounds = {}
+
+    def author(sid, prompt):
+        k = rounds.get(sid, 0)
+        rounds[sid] = k + 1
+        if sid == bad and k < bad_times:
+            return '{"candidates": [{"query": "broken "quote" here", "difficulty": "easy"}]}'
+        si = STRATA.index(sid)
+        grading = BY_ID[sid]["grading"]
+        n_t = 0 if grading == "abstain" else (2 if grading == "set" else 1)
+        rows = []
+        for i in range(per):
+            q = _t15_query("%s-r%d-%d" % (sid, k, i))
+            targets = [{"page": "wiki/notes/n-%02d.md" % ((si * per + i + j + k * 7) % 60),
+                        "locator": {"kind": "page", "value": ""}} for j in range(n_t)]
+            rows.append({"query": q, "difficulty": DIFFS[i % 3], "targets": targets})
+            world["truth"][q] = targets
+        return json.dumps({"candidates": rows})
+    author.rounds = rounds
+    return author
+
+
+def _t15_need(sid):
+    return BY_ID[sid]["min_holdout"] + BY_ID[sid]["min_reserve"]
+
+
+def test_t15_author_reply_that_does_not_parse_is_re_asked(tmp_path):
+    """Regression: one malformed author reply silently dropped a WHOLE stratum (hash: 0 of 15) on the real run.
+    The author is re-asked; the stratum fills; the failed attempt is still counted as unparseable."""
+    world = _t15_world(20)
+    author = _t15_round_author(world, 20, bad="hash", bad_times=1)
+    _c, fake, b = _t15_suite(tmp_path, fake=_T15Fake(world, author=author))
+    assert author.rounds["hash"] == 2 and b["rejected"]["unparseable"] == 1
+    # the re-ask is IMMEDIATE (before any review) -- not a later top-up round masking a dropped stratum
+    roles = [(c[0], re.search(r"^STRATUM_ID: (\w+)$", c[2], re.M).group(1) if c[0] == "author" else None)
+             for c in fake.calls]
+    hash_calls = [i for i, (r, sid) in enumerate(roles) if r == "author" and sid == "hash"]
+    first_review = next(i for i, (r, _s) in enumerate(roles) if r == "reviewer")
+    assert len(hash_calls) == 2 and hash_calls[1] < first_review
+    assert b["coverage"]["holdout"]["hash"] >= BY_ID["hash"]["min_holdout"]
+    assert b["coverage"]["reserve"]["hash"] >= BY_ID["hash"]["min_reserve"]
+    assert b["coverage"]["ok"] is True
+
+
+def test_t15_author_re_ask_is_bounded_and_a_hopeless_stratum_stays_short(tmp_path):
+    world = _t15_world(20)
+    author = _t15_round_author(world, 20, bad="hash", bad_times=10 ** 6)
+    _c, fake, b = _t15_suite(tmp_path, fake=_T15Fake(world, author=author))
+    # initial attempts + each bounded top-up round's attempts, never more
+    assert author.rounds["hash"] == A.AUTHOR_PARSE_ATTEMPTS * (1 + A.AUTHOR_TOPUP_ROUNDS)
+    assert b["coverage"]["holdout"]["hash"] == 0 and b["coverage"]["ok"] is False      # short, never padded
+    assert any(s["stratum"] == "hash" for s in b["short"])
+    assert all(author.rounds[s] == 1 for s in STRATA if s != "hash")                    # nobody else re-asked
+
+
+def test_t15_low_yield_stratum_is_topped_up_and_fills(tmp_path):
+    """Regression: `semantic` yielded 13/24 on the real run (RESERVE short). A stratum below HOLDOUT+RESERVE after
+    review + re-solve gets a fresh batch for THAT stratum only; the new candidates go through the same checks."""
+    world = _t15_world(20)
+    author = _t15_round_author(world, 20)
+
+    def resolver(query, prompt):
+        # round-0 semantic items mostly fail to re-solve (8 of 20 resolve); later rounds resolve normally
+        tag = _t15_tag_of(world, query, "semantic")
+        if tag.startswith("semantic-r0-") and int(tag.rsplit("-", 1)[1]) >= 8:
+            return json.dumps({"results": []})
+        return fake._resolve(query, prompt)
+    fake = _T15Fake(world, author=author, resolver=resolver)
+    _c, _f, b = _t15_suite(tmp_path, fake=fake)
+    assert author.rounds["semantic"] == 2                                   # one top-up round was enough
+    assert all(author.rounds[s] == 1 for s in STRATA if s != "semantic")    # extra calls only where needed
+    assert b["coverage"]["reserve"]["semantic"] >= BY_ID["semantic"]["min_reserve"] and b["coverage"]["ok"] is True
+    assert b["rejected"]["resolve_miss"] == 12
+
+
+def test_t15_top_up_is_bounded_and_never_pads(tmp_path):
+    world = _t15_world(20)
+    author = _t15_round_author(world, 20)
+    fake = _T15Fake(world, author=author)
+    base = fake._resolve
+    fake.resolver = lambda q, p: (json.dumps({"results": []}) if _t15_tag_of(world, q, "semantic").startswith("semantic-")
+                                  else base(q, p))
+    _c, _f, b = _t15_suite(tmp_path, fake=fake)
+    assert author.rounds["semantic"] == 1 + A.AUTHOR_TOPUP_ROUNDS
+    assert b["coverage"]["holdout"]["semantic"] == 0 and b["coverage"]["ok"] is False
+    assert any(s["stratum"] == "semantic" for s in b["short"])
+    assert 1 <= A.AUTHOR_TOPUP_ROUNDS <= 3 and 2 <= A.AUTHOR_PARSE_ATTEMPTS <= 5
+
+
+def test_t15_top_up_candidates_are_deduplicated_against_earlier_rounds(tmp_path):
+    """A top-up reply that repeats round-1 questions adds nothing: every repeat is rejected as a duplicate of an
+    item already kept (filters run over earlier-kept + new, earlier wins), so nothing is double-counted."""
+    world = _t15_world(20)
+    calls = {"n": 0}
+
+    def author(sid, prompt):
+        if sid == "semantic":
+            calls["n"] += 1
+        return json.dumps({"candidates": world["raw"][sid]})               # identical every round
+    fake = _T15Fake(world, author=author)
+    base = fake._resolve
+    sem = {r["query"] for r in world["raw"]["semantic"]}
+    misses = set(sorted(sem)[8:])                                         # 12 of 20 semantic miss re-solve
+    fake.resolver = lambda q, p: json.dumps({"results": []}) if q in misses else base(q, p)
+    _c, _f, b = _t15_suite(tmp_path, fake=fake)
+    assert calls["n"] == 1 + A.AUTHOR_TOPUP_ROUNDS
+    assert b["rejected"]["exact_dup"] == 20 * A.AUTHOR_TOPUP_ROUNDS       # every repeat rejected
+    assert b["accepted"] == 15 * 20 + 8                                   # no duplicate ever accepted
+
+
+def _t15_tag_of(world, query, sid):
+    """Recover the generator tag of a query (round-tagged author hook) -- test helper only."""
+    for k in range(0, 8):
+        for i in range(0, 64):
+            for s in STRATA:
+                if _t15_query("%s-r%d-%d" % (s, k, i)) == query:
+                    return "%s-r%d-%d" % (s, k, i)
+    return ""

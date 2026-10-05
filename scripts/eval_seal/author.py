@@ -43,6 +43,13 @@ AUTHOR_ROLES = ("author", "reviewer", "resolver")
 # (70%) after review + re-solve, RESERVE 79/80. 24 keeps HOLDOUT 10 + RESERVE 5 = 15 fillable at that worst
 # measured yield (floor(24*0.7) = 16). The gate minimums are unchanged; this only adds headroom to MEET them.
 AUTHOR_PER_STRATUM = 24
+# Real run 2026-10-05: one malformed author reply (invalid JSON) silently dropped a whole stratum, and a low-yield
+# stratum (54% after review + re-solve) left RESERVE short. A reply that does not parse is re-asked (bounded), and a
+# stratum still below HOLDOUT + RESERVE after review + re-solve gets a fresh batch for THAT stratum only (bounded
+# rounds). Top-up candidates pass the same filters -- checked against everything already kept, earlier wins -- then
+# the same review and re-solve. Nothing is ever padded; a stratum that cannot fill honestly stays short.
+AUTHOR_PARSE_ATTEMPTS = 3
+AUTHOR_TOPUP_ROUNDS = 2
 AUTHOR_REVIEW_BATCH = 20
 AUTHOR_CANARIES = 24
 AUTHOR_NEARDUP_THRESHOLD = 0.7      # estimated shingle Jaccard; real Jaccard >= 0.8 clears it with margin
@@ -545,41 +552,69 @@ def author_suite(spec, rubric, dev_items, corpus_dir, runner, models, *, seed, t
     audit = _Audit(audit_dir)
     counts = {r: 0 for r in AUTHOR_REJECT_REASONS}
 
-    cands = []
-    for entry in spec["strata"]:
-        prompt = _author_author_prompt(templates["author"], rubric, entry, per_stratum)
-        out = runner("author", models["author"], prompt, cwd=corpus_dir)
-        audit.record("author", prompt, out)
-        raws = _author_list(_author_json(out), "candidates")
-        if raws is None:
+    def draft(entry):
+        """One stratum's candidates; a reply that does not parse is re-asked, a bounded number of times."""
+        for _attempt in range(AUTHOR_PARSE_ATTEMPTS):
+            prompt = _author_author_prompt(templates["author"], rubric, entry, per_stratum)
+            out = runner("author", models["author"], prompt, cwd=corpus_dir)
+            audit.record("author", prompt, out)
+            raws = _author_list(_author_json(out), "candidates")
+            if raws is not None:
+                break
             counts["unparseable"] += 1
-            continue
+        else:
+            return []
+        items = []
         for raw in raws:
             item = _author_build_item(raw, entry, models)
             if item is None:
                 counts["bad_schema"] += 1
             else:
-                cands.append(item)
+                items.append(item)
+        return items
 
-    kept, fcounts = author_filters(cands, dev_items, corpus_dir, spec, pages=pages)
-    for k, v in fcounts.items():
-        counts[k] += v
+    def review_and_resolve(items):
+        reviewed = []
+        for entry in spec["strata"]:
+            group = [i for i in items if i["stratum"] == entry["id"]]
+            if group:
+                reviewed.extend(_author_review(group, runner, models, templates["reviewer"], rubric, corpus_dir,
+                                               audit, counts))
+        ok = []
+        for item in reviewed:
+            prompt = _author_resolver_prompt(templates["resolver"], item["query"])
+            out = runner("resolver", models["resolver"], prompt, cwd=corpus_dir)
+            audit.record("resolver", prompt, out)
+            if _author_resolves(item, out):
+                ok.append(item)
+            else:
+                counts["resolve_miss"] += 1
+        return ok
 
-    reviewed = []
+    def filter_new(kept_so_far, new):
+        """Filters over earlier-kept + new (input order, earlier wins): the earlier items pass unchanged, so the
+        counts are the new candidates' rejections only. Returns the newly kept items."""
+        new_ids = {i["id"] for i in new}
+        kept_all, fcounts = author_filters(kept_so_far + new, dev_items, corpus_dir, spec, pages=pages)
+        for k, v in fcounts.items():
+            counts[k] += v
+        return [i for i in kept_all if i["id"] in new_ids]
+
+    cands = []
     for entry in spec["strata"]:
-        group = [i for i in kept if i["stratum"] == entry["id"]]
-        reviewed.extend(_author_review(group, runner, models, templates["reviewer"], rubric, corpus_dir,
-                                       audit, counts))
+        cands.extend(draft(entry))
+    kept = filter_new([], cands)
+    accepted = review_and_resolve(kept)
 
-    accepted = []
-    for item in reviewed:
-        prompt = _author_resolver_prompt(templates["resolver"], item["query"])
-        out = runner("resolver", models["resolver"], prompt, cwd=corpus_dir)
-        audit.record("resolver", prompt, out)
-        if _author_resolves(item, out):
-            accepted.append(item)
-        else:
-            counts["resolve_miss"] += 1
+    for _round in range(AUTHOR_TOPUP_ROUNDS):
+        need = [e for e in spec["strata"]
+                if sum(1 for a in accepted if a["stratum"] == e["id"]) < e["min_holdout"] + e["min_reserve"]]
+        if not need:
+            break
+        for entry in need:
+            new_kept = filter_new(kept, draft(entry))
+            kept = kept + new_kept
+            accepted.extend(review_and_resolve(new_kept))
 
     holdout, reserve, short = author_select(accepted, spec, seed=seed)
     cov = author_spec.coverage({"holdout": holdout, "reserve": reserve}, spec)
