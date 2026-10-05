@@ -294,3 +294,17 @@ def test_t1vm_door_copy_failure_is_candidate_failed(tmp_path):
     with pytest.raises(SealRefusal) as ei:
         V.vm_copy_into_guest(RID, p, "/stage/c.tar", V.GUEST_CORPUS_TAR, runner=_vm_recorder(returncode=2))
     assert ei.value.code == "CANDIDATE_FAILED"
+
+
+
+def test_t1vm_door_push_tree_passes_the_commit_and_refuses_a_malformed_one(tmp_path):
+    p = _vm_paths(tmp_path)
+    r = _vm_recorder()
+    V.vm_push_tree(RID, p, "c" * 40, runner=r)
+    assert r.calls[0][0] == _door(p) + ["vm-push-tree", RID, "c" * 40]
+    for bad in ("C" * 40, "c" * 39, "", None, "c" * 40 + "\n"):
+        with pytest.raises(SealRefusal):
+            V.vm_push_tree(RID, p, bad, runner=_vm_recorder())
+    with pytest.raises(SealRefusal) as ei:
+        V.vm_push_tree(RID, p, "c" * 40, runner=_vm_recorder(returncode=2))
+    assert ei.value.code == "CANDIDATE_FAILED"

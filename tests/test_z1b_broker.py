@@ -222,7 +222,7 @@ def _t10_drop(E, commit, *, data=None):
 
 
 def _t10_launcher(E):
-    def launch(run_id, corpus_sha=None):
+    def launch(run_id, corpus_sha=None, commit=None):
         E.launched.append((run_id, (E.paths.stage_dir / (run_id + ".bundle")).is_file()))
         with open(str(E.trace), "a") as fh:
             fh.write(json.dumps({"ev": "launch", "run": run_id, "t": time.time()}) + "\n")
@@ -1527,3 +1527,17 @@ def test_t10_pinned_check_covers_the_lima_guest_agent_and_nothing_outside_the_br
     (P.broker_bin / "limactl").symlink_to(tmp_path / "elsewhere")                     # never follow a symlink
     (tmp_path / "elsewhere").write_bytes(b"LIMACTL")
     assert B._broker_check_pinned(P, None) is False
+
+
+def test_t10_the_launcher_receives_the_commit_being_evaluated(tmp_path):
+    """Regression (operator gate 2026-10-05): the VM ran the image's baked candidate, so the evaluated commit never
+    reached the executor. The run path now hands the launcher the run's own commit, which the VM path unpacks."""
+    E = _t10_build(tmp_path)
+    seen = []
+    base = _t10_launcher(E)
+
+    def launcher(run_id, corpus_sha=None, commit=None):
+        seen.append(commit)
+        return base(run_id, corpus_sha, commit)
+    res = _t10_run(E, E.commits[0], ctx=_t10_ctx(E, launch_candidate=launcher))
+    assert seen == [E.commits[0]], (seen, res)

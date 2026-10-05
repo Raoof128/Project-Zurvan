@@ -42,10 +42,15 @@ def test_t1wire_candidate_executes_only_through_vm_launch(tmp_path, monkeypatch)
         seen["guest_env"] = guest_env
         seen["guest_user"] = guest_user
         return types.SimpleNamespace(stdin=object(), stdout=object(), pid=99)
-    monkeypatch.setattr(V, "vm_start", fake_vm_start)
-    monkeypatch.setattr(B, "broker_provision_corpus", fake_provision)
-    monkeypatch.setattr(V, "vm_launch", fake_vm_launch)
-    proc = B.broker_vm_launch("0123456789abcdef", p, "a" * 64)
+    order = []
+    monkeypatch.setattr(V, "vm_start", lambda *a, **k: (order.append("start"), fake_vm_start(*a, **k)))
+    monkeypatch.setattr(B, "broker_push_candidate_tree",
+                        lambda rid, paths, commit, **k: order.append(("tree", commit)))
+    monkeypatch.setattr(B, "broker_provision_corpus", lambda *a, **k: (order.append("corpus"), fake_provision(*a, **k)))
+    monkeypatch.setattr(V, "vm_launch", lambda *a, **k: (order.append("launch"), fake_vm_launch(*a, **k))[1])
+    proc = B.broker_vm_launch("0123456789abcdef", p, "a" * 64, "c" * 40)
+    # the COMMIT's tree goes in before the corpus and before the candidate starts (it is what runs)
+    assert order == ["start", ("tree", "c" * 40), "corpus", "launch"]
     assert proc.pid == 99 and seen["run_id"] == "0123456789abcdef"
     # boot happens once (vm_start), the corpus is provisioned (bound to the run's corpus_sha), then launch
     assert seen["started"] == "0123456789abcdef" and seen["provisioned"] == "0123456789abcdef"
@@ -251,9 +256,11 @@ def test_t1wire_a_failed_vm_launch_is_a_hard_failure_not_a_host_fallback(tmp_pat
     def boom(run_id, paths, guest_cmd, *, image_location=None, **kw):
         raise SealRefusal("CANDIDATE_FAILED")
     monkeypatch.setattr(V, "vm_launch", boom)
+    monkeypatch.setattr(V, "vm_start", lambda *a, **k: None)
+    monkeypatch.setattr(B, "broker_push_candidate_tree", lambda *a, **k: None)
     monkeypatch.setattr(B, "broker_provision_corpus", lambda *a, **k: None)
     with pytest.raises(SealRefusal) as ei:
-        B.broker_vm_launch("0123456789abcdef", p, "a" * 64)
+        B.broker_vm_launch("0123456789abcdef", p, "a" * 64, "c" * 40)
     assert ei.value.code == "CANDIDATE_FAILED"  # charged by the broker; no other path is tried
 
 
@@ -265,3 +272,23 @@ def test_t1wire_run_identity_binds_the_guest_image_digest(tmp_path):
     (p.runtime_dir / "bin" / "python3").write_text("#!/bin/sh\n")
     base = B.broker_runtime_sha256(p)
     assert V.GOLDEN_IMAGE_DIGEST[-16:] in B.broker_runtime_material(p)  # the digest is in the identity material
+
+
+
+def test_t1wire_the_candidate_that_runs_is_the_commits_own_tree(tmp_path, monkeypatch):
+    """Regression (operator gate 2026-10-05): the VM always ran the candidate BAKED into the golden image, so
+    `run --commit X` measured the image, not X. The commit's tree is pushed in (built as the candidate from the
+    verified bundle), unpacked as guest root, made readable to the candidate user, and run from there."""
+    p = _bvm_paths(tmp_path)
+    calls = []
+    monkeypatch.setattr(V, "vm_push_tree", lambda rid, paths, commit, **k: calls.append(("push", rid, commit)))
+    monkeypatch.setattr(V, "vm_run", lambda rid, paths, argv, **k: calls.append(("run", argv[-1], k.get("timeout"))))
+    B.broker_push_candidate_tree("0123456789abcdef", p, "c" * 40)
+    assert calls[0] == ("push", "0123456789abcdef", "c" * 40)
+    script = calls[1][1]
+    assert script.startswith("set -e;")
+    assert "tar xf %s -C %s" % (V.GUEST_TREE_TAR, V.GUEST_CANDIDATE_TREE) in script
+    assert "chmod -R a+rX %s" % V.GUEST_CANDIDATE_TREE in script and "rm -f %s" % V.GUEST_TREE_TAR in script
+    assert script.endswith("test -f %s/scripts/z1b_candidate.py" % V.GUEST_CANDIDATE_TREE)   # no fallback
+    assert B.GUEST_CANDIDATE_CMD[-1] == V.GUEST_CANDIDATE_TREE + "/scripts/z1b_candidate.py"
+    assert "/opt/z1b/candidate/" not in " ".join(B.GUEST_CANDIDATE_CMD)                    # never the baked copy

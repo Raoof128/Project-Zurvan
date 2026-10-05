@@ -379,6 +379,24 @@ GUEST_CORPUS_SQUASHFS = "/tmp/z1b-corpus.squashfs"  # built IN-GUEST from the st
 GUEST_CORPUS_MOUNT = "/opt/z1b/corpus"              #   loop mount keeps the data; the file itself is removed)
 GUEST_CORPUS_TAR = "/tmp/z1b-corpus.tar"            # the host stages corpus CONTENT here (never a host image)
 GUEST_CORPUS_CONTENT = "/tmp/z1b-corpus-content"    # extracted + digest-verified + squashed in-guest, then wiped
+GUEST_TREE_TAR = "/tmp/z1b-tree.tar"                # the COMMIT's tree (git archive, built as the candidate)
+GUEST_CANDIDATE_TREE = "/opt/z1b/cand"              # where the committed code is unpacked and run from
+
+
+def vm_push_tree(run_id: str, paths, commit: str, *, runner=None) -> None:
+    """Through the door: build the commit's tree from the staged bundle AS the candidate and copy it into the
+    guest at GUEST_TREE_TAR. CANDIDATE_FAILED on any failure."""
+    runner = runner or subprocess.run
+    if type(commit) is not str or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise SealRefusal("CANDIDATE_FAILED")
+    argv = vm_door(paths) + ["vm-push-tree", vm_instance_name(run_id)[1:], commit]
+    try:
+        done = runner(argv, env=dict(_DOOR_ENV), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT + 600)
+    except (OSError, subprocess.SubprocessError):
+        raise SealRefusal("CANDIDATE_FAILED") from None
+    if getattr(done, "returncode", 1) != 0:
+        raise SealRefusal("CANDIDATE_FAILED")
 
 
 def vm_copy_into_guest(run_id: str, paths, src, dst: str, *, runner=None) -> None:

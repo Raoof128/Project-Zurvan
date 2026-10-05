@@ -138,7 +138,7 @@ class BrokerContext:
     spec_path: object
     decrypt: object            # (Path) -> bytes
     encrypt: object            # (bytes, Path) -> None
-    launch_candidate: object   # (run_id, corpus_sha) -> Popen-like (stdin, stdout, kill, wait, poll)
+    launch_candidate: object   # (run_id, corpus_sha, commit) -> Popen-like (stdin, stdout, kill, wait, poll)
     wipe: object               # (run_id) -> None
     probe: object              # () -> dict path_id -> "EACCES" | "ENOENT" | "READABLE"
     tmutil_isexcluded: object  # (Path) -> bool
@@ -160,7 +160,10 @@ class BrokerContext:
 
 # Rev 3 #1: the candidate executes inside a disposable VM. The in-guest candidate entry and the pinned
 # guest image are part of the runtime identity, so a changed image/config is never served from cache.
-GUEST_CANDIDATE_CMD = ("/opt/z1b/runtime/bin/python3", "-B", "-E", "-s", "/opt/z1b/candidate/z1b_candidate.py")
+# The candidate is the COMMIT's own code: its tree is unpacked at /opt/z1b/cand each run (broker_push_candidate_tree)
+# and run with the golden image's pinned runtime (operator gate 2026-10-05: the VM had always run the candidate baked
+# into the image, so `run --commit X` measured the image, not X).
+GUEST_CANDIDATE_CMD = ("/opt/z1b/runtime/bin/python3", "-B", "-E", "-s", "/opt/z1b/cand/scripts/z1b_candidate.py")
 
 
 def broker_guest_image(paths: SealPaths) -> str:
@@ -314,13 +317,28 @@ def broker_provision_corpus(run_id: str, paths: SealPaths, corpus_sha: str, *, r
     vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner, timeout=PROVISION_TIMEOUT)
 
 
-def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str):
+def broker_push_candidate_tree(run_id: str, paths: SealPaths, commit: str, *, runner=None) -> None:
+    """Put exactly the evaluated commit's code into the guest. The door builds the tree AS zurvancandidate from the
+    staged, broker-verified bundle (git archive <commit>) and copies it in; then, as guest root, it is unpacked to
+    the candidate tree, made readable to the unprivileged candidate user, and the tar is wiped. A commit whose tree
+    has no candidate entry is a failed run (fail closed), never a fallback to the image's baked code."""
+    from . import vm_runner as vmr
+    vmr.vm_push_tree(run_id, paths, commit, runner=runner)
+    script = (
+        "set -e; rm -rf {cand}; mkdir -p {cand}; tar xf {tar} -C {cand}; rm -f {tar}; "
+        "chmod -R a+rX {cand}; test -f {cand}/scripts/z1b_candidate.py"
+    ).format(cand=vmr.GUEST_CANDIDATE_TREE, tar=vmr.GUEST_TREE_TAR)
+    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner, timeout=600)
+
+
+def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str, commit: str):
     """The ONE candidate-execution path: boot this run's disposable VM, stage the corpus CONTENT and build +
     mount the read-only corpus IN-GUEST (bound to corpus_sha), then return a shell Popen running the candidate
     on the protocol channel with the sealed env. There is no host-side execution fallback; a boot/provision/
     protocol failure propagates as a SealRefusal the broker charges and fails closed on."""
     from . import vm_runner as vmr
     vmr.vm_start(run_id, paths)              # the door renders the golden config itself; no image choice here
+    broker_push_candidate_tree(run_id, paths, commit)
     broker_provision_corpus(run_id, paths, corpus_sha)
     return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env(),
                          guest_user=GUEST_CANDIDATE_USER)
@@ -390,8 +408,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
             raise SealRefusal("INTERNAL")
         os.chmod(str(dest), 0o600)
 
-    def launch(run_id, corpus_sha):
-        return broker_vm_launch(run_id, paths, corpus_sha)   # the ONLY candidate executor: a disposable VM
+    def launch(run_id, corpus_sha, commit):
+        return broker_vm_launch(run_id, paths, corpus_sha, commit)   # the ONLY candidate executor: a disposable VM
 
     def wipe(run_id):
         broker_vm_wipe(run_id, paths)            # destroy the guest; never raises (sweep then checks)
@@ -1104,7 +1122,7 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
     try:
         sent, proc, failure, results, latencies = [], None, None, None, None
         try:
-            proc = ctx.launch_candidate(run_id, corpus_sha)
+            proc = ctx.launch_candidate(run_id, corpus_sha, args["commit"])
             results, latencies = broker_drive(proc, items, spec, sent)
         except Exception:  # noqa: BLE001 - any candidate-side failure, however it surfaces
             failure = "CANDIDATE_FAILED"

@@ -1207,3 +1207,60 @@ def test_t9_door_vm_grammar_is_strict(tmp_path, monkeypatch, capsys):
         assert candidate_run.main(argv, paths=p, execve=lambda *a: None) == 2, argv
     assert calls == []
     assert capsys.readouterr().out == ""
+
+
+
+def _t9_bundle(tmp_path, p, files):
+    """A real repository + commit, bundled into the stage dir as the broker leaves it (stage/<run>.bundle)."""
+    repo = tmp_path / "src"
+    repo.mkdir()
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1")
+    def git(*a):
+        return subprocess.run(["/usr/bin/git", "-C", str(repo)] + list(a), env=env, check=True,
+                              capture_output=True, text=True).stdout.strip()
+    git("init", "-q")
+    for rel, text in files.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / rel).write_text(text)
+    git("add", "-A")
+    git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "c")
+    commit = git("rev-parse", "HEAD")
+    git("bundle", "create", "-q", str(p.stage_dir / (_T9_RUN + ".bundle")), "HEAD")
+    return commit
+
+
+def test_t9_door_vm_push_tree_archives_exactly_the_commit_and_never_kills_the_vm(tmp_path, monkeypatch):
+    import io, tarfile
+    from scripts.eval_seal import vm_runner as V
+    p = _t9_paths(tmp_path)
+    commit = _t9_bundle(tmp_path, p, {"scripts/z1b_candidate.py": "print('the committed candidate')\n",
+                                       "scripts/hybrid_search.py": "X = 1\n"})
+    got = {}
+
+    def fake_copy(rid, paths, src, dst, **kw):
+        got.update(rid=rid, dst=dst, tar=Path(src).read_bytes())
+    monkeypatch.setattr(V, "local_copy", fake_copy)
+    killed = []
+    monkeypatch.setattr(candidate_run, "_default_killer", lambda: killed.append(1) or True)
+    assert candidate_run.main(["vm-push-tree", _T9_RUN, commit], paths=p) == 0
+    assert got["rid"] == _T9_RUN and got["dst"] == V.GUEST_TREE_TAR
+    names = tarfile.open(fileobj=io.BytesIO(got["tar"])).getnames()
+    assert "scripts/z1b_candidate.py" in names and "scripts/hybrid_search.py" in names
+    member = tarfile.open(fileobj=io.BytesIO(got["tar"])).extractfile("scripts/z1b_candidate.py").read()
+    assert member == b"print('the committed candidate')\n"                       # exactly the commit's bytes
+    assert not (p.scratch_dir / _T9_RUN).exists()                                  # scratch wiped
+    assert killed == []                     # the process-killing wipe would take the running VM down with it
+
+
+def test_t9_door_vm_push_tree_refuses_a_bad_commit_or_a_missing_bundle(tmp_path, monkeypatch):
+    from scripts.eval_seal import vm_runner as V
+    p = _t9_paths(tmp_path)
+    copied = []
+    monkeypatch.setattr(V, "local_copy", lambda *a, **k: copied.append(a))
+    monkeypatch.setattr(candidate_run, "_default_killer", lambda: True)
+    assert candidate_run.main(["vm-push-tree", _T9_RUN, "c" * 40], paths=p) == 2      # no staged bundle
+    _t9_bundle(tmp_path, p, {"scripts/z1b_candidate.py": "x\n"})
+    for bad in ("C" * 40, "c" * 39, "../x"):
+        assert candidate_run.main(["vm-push-tree", _T9_RUN, bad], paths=p) == 2
+    assert candidate_run.main(["vm-push-tree", _T9_RUN, "d" * 40], paths=p) == 2      # commit not in the bundle
+    assert copied == [] and not (p.scratch_dir / _T9_RUN).exists()

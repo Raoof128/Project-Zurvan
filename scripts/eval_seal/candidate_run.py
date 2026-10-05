@@ -261,7 +261,53 @@ def _cr_vm(argv, paths, *, execve=None) -> int:
     if verb == "vm-delete" and len(argv) == 2:
         vmr.local_teardown(rid, paths)
         return 0
+    if verb == "vm-push-tree" and len(argv) == 3:
+        if not _VM_COMMIT.fullmatch(argv[2]):
+            return 2
+        try:
+            _run_dir, tar = _cr_commit_tree_tar(rid, argv[2], paths)
+            vmr.local_copy(rid, paths, tar, vmr.GUEST_TREE_TAR)
+        except (SealRefusal, OSError, subprocess.SubprocessError):
+            return 2
+        finally:
+            # ALWAYS wipe this run's scratch -- also when the build failed after creating it, or the next run would
+            # refuse it as a leftover. Never the default killer: it SIGKILLs every candidate-owned process, which
+            # is the running VM.
+            wipe(paths, rid, killer=lambda: False)
+        return 0
     return 2
+
+
+_VM_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
+def _cr_commit_tree_tar(rid, commit, paths):
+    """The commit's tree, as a tar, built AS zurvancandidate from the staged (broker-verified) bundle -- untrusted
+    git pack parsing never runs as the key owner (plan "Decisions for Raouf" #2). Clone with hooks and fsmonitor
+    off and no template, exactly as the legacy runner did; then `git archive <commit>`. Returns (run_dir, tar)."""
+    staged = paths.stage_dir / (rid + ".bundle")
+    st = os.lstat(str(staged))
+    if not stat.S_ISREG(st.st_mode):
+        raise SealRefusal("BUNDLE_INVALID")
+    run_dir = Path(os.path.realpath(str(paths.scratch_dir))) / rid
+    try:
+        os.mkdir(str(run_dir), 0o700)       # never reuse a run directory: a leftover means a wipe failed
+    except OSError:
+        raise SealRefusal("SANDBOX_VIOLATION") from None
+    tmp_dir = run_dir / "tmp"
+    os.mkdir(str(tmp_dir), 0o700)
+    repo = run_dir / "repo"
+    env = clean_env(paths.candidate_home, {"TMPDIR": str(tmp_dir)})
+    git = [GIT, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+    steps = (git + ["clone", "--quiet", "--no-hardlinks", "--no-checkout", "--template=", str(staged), str(repo)],
+             git + ["-C", str(repo), "cat-file", "-e", commit + "^{commit}"],
+             git + ["-C", str(repo), "archive", "--format=tar", "-o", str(run_dir / "tree.tar"), commit])
+    for argv in steps:
+        done = subprocess.run(argv, env=env, cwd=str(run_dir), stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+        if done.returncode != 0:
+            raise SealRefusal("BUNDLE_INVALID")
+    return run_dir, run_dir / "tree.tar"
 
 
 # ---------------------------------------------------------------- entry point
