@@ -193,10 +193,81 @@ def wipe(paths: SealPaths, run_id: str, *, killer=None) -> None:
     shutil.rmtree(target)
 
 
+# ---------------------------------------------------------------- the VM door (Rev 3 #1, operator gate 2026-10-05)
+#
+# The broker (zurvaneval) never runs limactl. It asks this door, which runs as zurvancandidate, so the VM's host
+# processes belong to the candidate identity: the pf anchor blocks the guest's outbound traffic, and a
+# hypervisor escape lands where no key is readable. The door re-validates everything and renders the VM config
+# itself from the pinned golden image, so the broker can neither swap the image nor inject Lima config.
+
+_VM_DST = re.compile(r"/[A-Za-z0-9._/-]{1,200}")
+
+
+def _cr_golden_location(paths) -> str:
+    img = Path(paths.broker_dir) / "images" / "guest.qcow2"
+    st = os.lstat(str(img))                      # raises -> refused: no golden image installed
+    if not stat.S_ISREG(st.st_mode):
+        raise SealRefusal("CANDIDATE_FAILED")
+    return "file://" + str(img)
+
+
+def _cr_stage_file(paths, src) -> str:
+    """A copy source must be a regular, non-symlink file directly reachable under the stage dir."""
+    if type(src) is not str or "\x00" in src or not os.path.isabs(src):
+        raise SealRefusal("BAD_ARGS")
+    stage = os.path.realpath(str(paths.stage_dir)) + os.sep
+    real = os.path.realpath(src)
+    if not real.startswith(stage):
+        raise SealRefusal("BAD_ARGS")
+    st = os.lstat(src)
+    if not stat.S_ISREG(st.st_mode) or real != os.path.abspath(src):
+        raise SealRefusal("BAD_ARGS")
+    return real
+
+
+def _cr_vm(argv, paths, *, execve=None) -> int:
+    from . import vm_runner as vmr
+    verb = argv[0]
+    if verb == "vm-list" and len(argv) == 1:
+        for name in vmr.local_leftovers(paths):
+            sys.stdout.write(name + "\n")
+        sys.stdout.flush()
+        return 0
+    if len(argv) < 2:
+        return 2
+    rid = _cr_check_run_id(argv[1])
+    if verb == "vm-start" and len(argv) == 2:
+        try:
+            vmr.local_start(rid, paths, image_location=_cr_golden_location(paths), profile="golden")
+        except SealRefusal as exc:
+            return vmr.DOOR_RC_LEFTOVER if exc.code == "SANDBOX_VIOLATION" else 2
+        except OSError:
+            return 2
+        return 0
+    if verb == "vm-shell" and len(argv) >= 4 and argv[2] == "--":
+        exe = vmr._vm_limactl(paths)
+        (execve or os.execve)(exe, vmr.local_shell_argv(rid, paths, argv[3:]),
+                              vmr._vm_env(paths, vmr._vm_lima_home(paths)))
+        return 3                                     # execve does not return; a test double may
+    if verb == "vm-copy" and len(argv) == 4:
+        dst = argv[3]
+        if not _VM_DST.fullmatch(dst) or ".." in dst.split("/"):
+            return 2
+        try:
+            vmr.local_copy(rid, paths, _cr_stage_file(paths, argv[2]), dst)
+        except (SealRefusal, OSError):
+            return 2
+        return 0
+    if verb == "vm-delete" and len(argv) == 2:
+        vmr.local_teardown(rid, paths)
+        return 0
+    return 2
+
+
 # ---------------------------------------------------------------- entry point
 
-def main(argv, *, paths: SealPaths = None, killer=None) -> int:
-    """probe | wipe <run_id>.
+def main(argv, *, paths: SealPaths = None, killer=None, execve=None) -> int:
+    """probe | wipe <run_id> | vm-start|vm-shell|vm-copy|vm-delete <run_id> ... | vm-list.
 
     Rev 3 #1: candidate CODE no longer executes through this wrapper. The candidate runs inside a
     disposable VM (vm_runner), so the privileged `sudo -u zurvancandidate zurvan-candidate-run` door
@@ -215,6 +286,8 @@ def main(argv, *, paths: SealPaths = None, killer=None) -> int:
         if len(argv) == 2 and argv[0] == "wipe":
             wipe(paths, _cr_check_run_id(argv[1]), killer=killer)
             return 0
+        if argv[:1] and argv[0].startswith("vm-"):
+            return _cr_vm(argv, paths, execve=execve)
         return 2
     except SealRefusal:
         return 2

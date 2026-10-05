@@ -208,6 +208,11 @@ def broker_runtime_sha256(paths: SealPaths) -> str:
 # coherent snapshot that already contains search.sqlite + graph.sqlite), so there is NO in-guest index
 # build: the broker stages+mounts the corpus read-only and hands the candidate exactly these variables.
 GUEST_HF_HOME = "/opt/z1b/runtime/hf"
+# The unprivileged guest user the candidate runs as (created at provisioning; no sudo, no shell). The guest
+# login user has passwordless sudo, so the candidate must never run as it (operator gate 2026-10-05).
+GUEST_CANDIDATE_USER = "z1bcand"
+# In-guest provisioning extracts, hashes and squashes the whole corpus (~1.3 GB on the real store).
+PROVISION_TIMEOUT = 1800
 
 
 def broker_candidate_env() -> dict:
@@ -228,10 +233,11 @@ def broker_stage_corpus_tar(paths: SealPaths) -> Path:
     """Tar the frozen corpus CONTENT for transport into the guest. The HOST supplies content only -- it NEVER
     runs mksquashfs and never builds a mountable filesystem. Members are emitted in sorted order with a fixed
     (root-owned, mtime 0) header so the staged bytes are reproducible and carry no host identity. The tar is
-    written to the eval-owned runs dir (0700 zurvaneval) as a 0600 file the caller removes after transport."""
-    runs = Path(paths.runs_dir)
-    runs.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix="corpus-stage.", suffix=".tar", dir=str(runs))
+    written to the stage dir (zurvaneval:zurvancandidate 0750) as a 0640 file -- the VM door copies it into the
+    guest AS zurvancandidate, which already reads the corpus through zurvancorpus -- and removed after transport."""
+    stage = Path(paths.stage_dir)
+    stage.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="corpus-stage.", suffix=".tar", dir=str(stage))
     os.close(fd)
     tar_path = Path(name)
     base = str(paths.corpus_dir)
@@ -247,7 +253,7 @@ def broker_stage_corpus_tar(paths: SealPaths) -> Path:
                 ti.mtime = 0
                 with open(full, "rb") as fh:
                     tf.addfile(ti, fh)
-        os.chmod(str(tar_path), 0o600)
+        os.chmod(str(tar_path), 0o640)
     except OSError:
         try:
             tar_path.unlink()
@@ -292,12 +298,20 @@ def broker_provision_corpus(run_id: str, paths: SealPaths, corpus_sha: str, *, r
         "tar xf {tar} -C {content}; "
         'd="$({verify})"; '
         '[ "$d" = "{sha}" ] || {{ echo CORPUS_DIGEST_MISMATCH >&2; exit 3; }}; '
+        "chmod -R a+rX {content}; "      # modes are not in corpus_sha256; the unprivileged candidate must read
         "mksquashfs {content} {sq} -noappend -no-xattrs -all-root -quiet -no-progress; "
         "mkdir -p {mount}; mount -o loop,ro {sq} {mount}; "
-        "rm -rf {content} {tar} {sq}"   # plaintext + tar + squashfs file gone; the ro loop mount persists
+        "rm -rf {content} {tar} {sq}; "  # plaintext + tar + squashfs file gone; the ro loop mount persists
+        # The candidate runs as {user}: no sudo, no login. Every non-loopback packet it originates is REJECTed
+        # (IPv4 and IPv6) -- TCP, UDP and DNS to the gateway alike -- and, without root, it cannot undo it.
+        "id -u {user} >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent "
+        "--shell /usr/sbin/nologin {user}; "
+        "iptables -I OUTPUT 1 -m owner --uid-owner {user} ! -o lo -j REJECT; "
+        "ip6tables -I OUTPUT 1 -m owner --uid-owner {user} ! -o lo -j REJECT"
     ).format(content=vmr.GUEST_CORPUS_CONTENT, sq=vmr.GUEST_CORPUS_SQUASHFS,
-             tar=vmr.GUEST_CORPUS_TAR, mount=vmr.GUEST_CORPUS_MOUNT, verify=verify, sha=corpus_sha)
-    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner)
+             tar=vmr.GUEST_CORPUS_TAR, mount=vmr.GUEST_CORPUS_MOUNT, verify=verify, sha=corpus_sha,
+             user=GUEST_CANDIDATE_USER)
+    vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner, timeout=PROVISION_TIMEOUT)
 
 
 def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str):
@@ -306,9 +320,10 @@ def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str):
     on the protocol channel with the sealed env. There is no host-side execution fallback; a boot/provision/
     protocol failure propagates as a SealRefusal the broker charges and fails closed on."""
     from . import vm_runner as vmr
-    vmr.vm_start(run_id, paths, image_location=broker_guest_image(paths))
+    vmr.vm_start(run_id, paths)              # the door renders the golden config itself; no image choice here
     broker_provision_corpus(run_id, paths, corpus_sha)
-    return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env())
+    return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env(),
+                         guest_user=GUEST_CANDIDATE_USER)
 
 
 def broker_vm_wipe(run_id: str, paths: SealPaths) -> None:

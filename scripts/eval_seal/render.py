@@ -569,6 +569,30 @@ def _resolve_tool(explicit, name, search_path):
     return real
 
 
+LIMA_GUESTAGENT = "lima-guestagent.Linux-aarch64.gz"
+
+
+def _lima_files(limactl_real):
+    """The Lima asset tree a copied limactl needs (it resolves <bin>/../share/lima): the guest agent it injects
+    into every VM, plus templates. Regular files only, no symlink, nothing escaping the tree (design s7c)."""
+    root = os.path.realpath(os.path.join(os.path.dirname(str(limactl_real)), "..", "share", "lima"))
+    if not os.path.isdir(root):
+        raise OperatorRefusal("the Lima asset tree is missing next to limactl: %s" % root)
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for dn in list(dirnames):
+            if os.path.islink(os.path.join(dirpath, dn)):
+                raise OperatorRefusal("a symlinked directory in the Lima asset tree: %s" % dn)
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            if os.path.islink(full) or not os.path.isfile(full):
+                raise OperatorRefusal("the Lima asset tree must hold regular files only: %s" % full)
+            out[os.path.relpath(full, root)] = full
+    if LIMA_GUESTAGENT not in out:
+        raise OperatorRefusal("the Lima asset tree has no %s" % LIMA_GUESTAGENT)
+    return out
+
+
 def _hf_files(hf_dir):
     root = os.path.realpath(str(hf_dir))
     name = os.path.basename(os.path.abspath(str(hf_dir)))
@@ -622,7 +646,7 @@ def allowed_signers_cmd(keys_dir: str, eval_user: str) -> str:
 
 
 def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keygen, claude, hf_dir, real,
-                 guest_image=None):
+                 guest_image=None, limactl=None):
     validate_sha(sha)
     validate_user(dev_user)
     git_user = dev_user if os.geteuid() == 0 else None
@@ -643,7 +667,9 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
         "age": _resolve_tool(age, "age", search_path),
         "age-keygen": _resolve_tool(age_keygen, "age-keygen", search_path),
         "claude": _resolve_tool(claude, "claude", search_path),
+        "limactl": _resolve_tool(limactl, "limactl", search_path),
     }
+    lima_map = _lima_files(tools["limactl"])
     hf_name, hf_map = _hf_files(hf_dir if hf_dir else (Path(dev_home) / ".cache/huggingface/hub" / DEFAULT_HF_MODEL))
 
     plan.comment("install: broker sources from reviewed commit %s (scripts/eval_seal tree %s)" % (sha, tree))
@@ -681,12 +707,28 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
         plan.install_file(BROKER_BIN + "/" + name, data, "root", "wheel", "0555")
 
     pinned = []
-    for name in ("age", "age-keygen", "claude"):
+    plan.comment("limactl runs every candidate VM (as zurvancandidate, through the candidate-run door); it is pinned")
+    plan.comment("like the other binaries and keeps its virtualization entitlement because its bytes are copied unchanged")
+    for name in ("age", "age-keygen", "claude", "limactl"):
         final = BROKER_BIN + "/" + name
         digest = plan.stage_copy(final, tools[name])
         plan.comment("pinned %s from %s sha256=%s" % (name, tools[name], digest))
         plan.install_staged(final, plan.staged_path(final), "root", "wheel", "0555")
         pinned.append("%s  %s" % (digest, final))
+    lima_share = BROKER_DIR + "/share/lima"
+    plan.comment("the Lima asset tree limactl resolves at <bin>/../share/lima; the guest agent it injects is pinned")
+    lima_dirs = set()
+    for rel in lima_map:
+        for a in _ancestors(rel):
+            lima_dirs.add(a)
+    for d in [BROKER_DIR + "/share", lima_share] + [lima_share + "/" + d for d in sorted(lima_dirs)]:
+        plan.install_dir(d, "root", "wheel", "0555")
+    for rel in sorted(lima_map):
+        final = lima_share + "/" + rel
+        digest = plan.stage_copy(final, lima_map[rel])
+        plan.install_staged(final, plan.staged_path(final), "root", "wheel", "0444")
+        if rel == LIMA_GUESTAGENT:
+            pinned.append("%s  %s" % (digest, final))
     plan.install_file(BROKER_DIR + "/PINNED.sha256", ("\n".join(pinned) + "\n").encode(), "root", "wheel", "0444")
     plan.install_file(str(_P.installed_sha_file), (sha + "\n").encode(), "root", "wheel", "0444")
     plan.install_file(BROKER_DIR + "/INSTALLED_TREE", (tree + "\n").encode(), "root", "wheel", "0444")
@@ -694,6 +736,12 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
                       (json.dumps({"dev_home": dev_home, "repo": repo}, sort_keys=True) + "\n").encode(),
                       "root", "wheel", "0444")
     plan.install_file(BROKER_DIR + "/empty-mcp.json", (TEMPLATES / "empty-mcp.json").read_bytes(), "root", "wheel", "0444")
+    plan.comment("pf: the candidate identity owns the VM's host processes, so its rule must spare loopback (the VM")
+    plan.comment("control channel is ssh to 127.0.0.1); every other outbound packet stays blocked. Re-render + reload")
+    plan.comment("the anchor here so an existing setup (whose rule also blocked loopback) is repaired by install.sh.")
+    plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
+                      "root", "wheel", "0644")
+    plan.cmd("/sbin/pfctl", "-a", "zurvan-eval", "-f", PF_ANCHOR_FILE)
 
     # The GOLDEN guest image the broker boots. Placed 0444 under the root-owned broker tree ONLY when its
     # sha512 matches the pinned digest (design §7m); a mismatch refuses the install. The digest is also bound
@@ -919,7 +967,7 @@ def build_parser():
     p = sub.add_parser("install")
     common(p)
     p.add_argument("--sha", required=True)
-    for opt in ("age", "age-keygen", "claude", "hf-dir"):
+    for opt in ("age", "age-keygen", "claude", "hf-dir", "limactl"):
         p.add_argument("--" + opt, default=None)
     p.add_argument("--guest-image", default=None)
     p = sub.add_parser("install-corpus")
@@ -940,7 +988,7 @@ def render_main(argv=None):
             plan_setup(plan, dev_home, repo)
         elif args.kind == "install":
             plan_install(plan, repo, args.sha, dev_user, dev_home, args.search_path, args.age, args.age_keygen,
-                         args.claude, args.hf_dir, args.real, args.guest_image)
+                         args.claude, args.hf_dir, args.real, args.guest_image, args.limactl)
         elif args.kind == "install-corpus":
             plan_install_corpus(plan, args.export_dir)
         elif args.kind == "tamper-drill":

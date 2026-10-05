@@ -27,19 +27,20 @@ def test_t1wire_candidate_executes_only_through_vm_launch(tmp_path, monkeypatch)
     p = _bvm_paths(tmp_path)
     seen = {}
 
-    def fake_vm_start(run_id, paths, *, image_location=None, **kw):
+    def fake_vm_start(run_id, paths, **kw):
         seen["started"] = run_id
-        seen["image"] = image_location
+        seen["start_kw"] = kw
 
     def fake_provision(run_id, paths, corpus_sha, **kw):
         seen["provisioned"] = run_id
         seen["corpus_sha"] = corpus_sha
 
-    def fake_vm_launch(run_id, paths, guest_cmd, *, boot=True, guest_env=None, image_location=None, **kw):
+    def fake_vm_launch(run_id, paths, guest_cmd, *, boot=True, guest_env=None, guest_user=None, **kw):
         seen["run_id"] = run_id
         seen["guest_cmd"] = list(guest_cmd)
         seen["boot"] = boot
         seen["guest_env"] = guest_env
+        seen["guest_user"] = guest_user
         return types.SimpleNamespace(stdin=object(), stdout=object(), pid=99)
     monkeypatch.setattr(V, "vm_start", fake_vm_start)
     monkeypatch.setattr(B, "broker_provision_corpus", fake_provision)
@@ -50,7 +51,10 @@ def test_t1wire_candidate_executes_only_through_vm_launch(tmp_path, monkeypatch)
     assert seen["started"] == "0123456789abcdef" and seen["provisioned"] == "0123456789abcdef"
     assert seen["corpus_sha"] == "a" * 64
     assert seen["boot"] is False                                   # vm_launch must NOT boot a second time
-    assert seen["image"].startswith("file://") and "images/guest" in seen["image"]
+    # the broker does NOT choose the image: the door renders the pinned golden config itself
+    assert seen["start_kw"] == {}
+    # the candidate runs as the no-sudo guest user (the login user is root-equivalent in the guest)
+    assert seen["guest_user"] == B.GUEST_CANDIDATE_USER == "z1bcand"
     # the candidate entry is the fixed in-guest path, not a host clone, and runs with the sealed env
     assert seen["guest_cmd"] == list(B.GUEST_CANDIDATE_CMD)
     assert seen["guest_env"] == B.broker_candidate_env()
@@ -109,6 +113,15 @@ def test_t1wire_provision_stages_content_then_builds_and_mounts_ro_in_guest(tmp_
     assert "mount -o loop,ro %s %s" % (V.GUEST_CORPUS_SQUASHFS, V.GUEST_CORPUS_MOUNT) in script  # guest mounts ro
     assert sha in script and "exit 3" in script                   # digest bound + fail-closed on mismatch
     assert "rm -rf %s %s %s" % (V.GUEST_CORPUS_CONTENT, V.GUEST_CORPUS_TAR, V.GUEST_CORPUS_SQUASHFS) in script
+    # the unprivileged candidate can read the corpus (modes are outside corpus_sha256), set before squashing
+    assert script.index("chmod -R a+rX %s" % V.GUEST_CORPUS_CONTENT) < script.index("mksquashfs")
+    assert script.index("chmod -R a+rX") > script.index("exit 3")                # only after the digest check
+    # the candidate's guest user exists and every non-loopback packet it sends is REJECTed (v4 + v6, incl. DNS)
+    u = B.GUEST_CANDIDATE_USER
+    assert "useradd --system --no-create-home" in script and "--shell /usr/sbin/nologin %s" % u in script
+    assert "iptables -I OUTPUT 1 -m owner --uid-owner %s ! -o lo -j REJECT" % u in script
+    assert "ip6tables -I OUTPUT 1 -m owner --uid-owner %s ! -o lo -j REJECT" % u in script
+    assert script.startswith("set -e;")                                          # any failure: no run, fail closed
     # (b) the staged tar carries EXACTLY the frozen corpus content for that digest
     import io, tarfile, tempfile
     from scripts.eval_seal.corpus import corpus_sha256
@@ -129,6 +142,7 @@ def test_t1wire_provision_stages_a_tar_not_a_host_squashfs_and_leaves_corpus_unt
     seen = {}
     def grab(rid, paths, src, dst, **kw):
         seen["src"] = Path(src)
+        seen["mode"] = Path(src).stat().st_mode & 0o777
         seen["is_tar"] = tarfile.is_tarfile(str(src))             # inspect it WHILE it exists, before transport
         seen["dst"] = dst
     monkeypatch.setattr(V, "vm_copy_into_guest", grab)
@@ -140,7 +154,8 @@ def test_t1wire_provision_stages_a_tar_not_a_host_squashfs_and_leaves_corpus_unt
     assert not list(Path(p.corpus_dir).glob("*.squashfs"))        # no packaging artifact inside corpus/
     assert seen["is_tar"] and seen["dst"] == V.GUEST_CORPUS_TAR    # host stages a TAR, never a built image
     assert not seen["src"].exists()                               # staged tar removed after transport
-    assert Path(p.runs_dir) in seen["src"].parents                # it lived in the eval runs dir, not corpus/
+    assert Path(p.stage_dir) in seen["src"].parents               # staged where the door may copy it, not corpus/
+    assert seen["mode"] == 0o640                                   # group-readable for the candidate, no world bits
 
 
 def test_t1wire_provision_refuses_a_malformed_corpus_sha_before_touching_the_guest(tmp_path, monkeypatch):
@@ -186,7 +201,9 @@ def test_t1wire_provision_refuses_a_byte_tampered_after_the_digest_was_establish
                   .replace(V.GUEST_CORPUS_TAR, str(tarf))
                   .replace(V.GUEST_CORPUS_SQUASHFS, host["sq"])
                   .replace(V.GUEST_CORPUS_MOUNT, host["mount"])
-                  .replace("mksquashfs ", ": mksquashfs ").replace("mount -o", ": mount -o"))
+                  .replace("mksquashfs ", ": mksquashfs ").replace("mount -o", ": mount -o")
+                  .replace("useradd ", ": useradd ").replace("ip6tables ", ": ip6tables ")
+                  .replace("iptables ", ": iptables "))
         done = subprocess.run(["/bin/sh", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if done.returncode != 0:
             raise SealRefusal("CANDIDATE_FAILED")

@@ -82,7 +82,7 @@ def _live_paths(tmp_path):
 
 
 def _shell(p, run_id, script, timeout=60):
-    argv = V.vm_shell_argv(run_id, p, ["sh", "-c", script])
+    argv = V.local_shell_argv(run_id, p, ["sh", "-c", script])
     env = V._vm_env(p, V._vm_lima_home(p))
     return subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, timeout=timeout)
@@ -93,7 +93,7 @@ def test_t1_vm_iso_gate_boundary_holds_end_to_end(tmp_path):
     run_id = "00000000" + ("%08x" % (os.getpid() & 0xffffffff))
     booted = False
     try:
-        V.vm_start(run_id, p, image_location=_ensure_image())
+        V.local_start(run_id, p, image_location=_ensure_image())
         booted = True
         # (1) candidate executes inside the guest; (3) result returns only via the protocol stdout
         got = _shell(p, run_id, "printf 'RESULT %s ok\\n' 42")
@@ -107,11 +107,11 @@ def test_t1_vm_iso_gate_boundary_holds_end_to_end(tmp_path):
         secret = _shell(p, run_id, "cat %s/CLAUDE.md 2>&1 | head -1; echo rc=${PIPESTATUS[0]}" % str(ROOT))
         assert b"rc=0" not in secret.stdout, secret.stdout
     finally:
-        V.vm_teardown(run_id, p)
+        V.local_teardown(run_id, p)
     # (4) teardown left no reusable guest state: no instance remains and the per-run config is gone. The
     # shared LIMA_HOME persists on purpose (it caches the pinned image); it is NOT reusable guest state.
     if booted:
-        assert V.vm_leftover_instances(p) == []
+        assert V.local_leftovers(p) == []
         assert not (V._vm_lima_home(p) / (V.vm_instance_name(run_id) + ".yaml")).exists()
     shutil.rmtree(str(root), ignore_errors=True)
 
@@ -120,13 +120,16 @@ def test_t1_vm_iso_gate_a_killed_run_leaves_no_reusable_guest(tmp_path):
     p, root = _live_paths(tmp_path)
     run_id = "ffffffff" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        proc = V.vm_launch(run_id, p, ["sh", "-c", "sleep 600"], image_location=_ensure_image())
+        V.local_start(run_id, p, image_location=_ensure_image())
+        proc = subprocess.Popen(V.local_shell_argv(run_id, p, ["sh", "-c", "sleep 600"]),
+                                env=V._vm_env(p, V._vm_lima_home(p)), stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         time.sleep(1)
         proc.kill()                      # abnormal termination mid-run
         proc.wait(timeout=30)
     finally:
-        V.vm_teardown(run_id, p)
-    assert V.vm_leftover_instances(p) == []
+        V.local_teardown(run_id, p)
+    assert V.local_leftovers(p) == []
     assert not (V._vm_lima_home(p) / (V.vm_instance_name(run_id) + ".yaml")).exists()
     shutil.rmtree(str(root), ignore_errors=True)
 
@@ -163,19 +166,35 @@ def _write_live_corpus(p):
     return corpus_sha256(c)
 
 
-def test_t1_vm_iso_gate_read_only_corpus_boundary(tmp_path):
+def _local_door(monkeypatch, p):
+    """In production the broker reaches the VM through the candidate-run door (as zurvancandidate). This dev
+    harness has no installed door, so the broker's door calls are replaced by the SAME local_* code the door
+    runs -- the guest script, staging and digest checks are the broker's own."""
+    def run(rid, paths, guest_cmd, *, runner=None, timeout=V.TEARDOWN_TIMEOUT):
+        done = subprocess.run(V.local_shell_argv(rid, paths, guest_cmd), env=V._vm_env(paths, V._vm_lima_home(paths)),
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+        if done.returncode != 0:
+            raise SealRefusal("CANDIDATE_FAILED")
+        return done
+    monkeypatch.setattr(V, "vm_run", run)
+    monkeypatch.setattr(V, "vm_copy_into_guest", lambda rid, paths, src, dst, **kw: V.local_copy(rid, paths, src, dst))
+    p.stage_dir.mkdir(parents=True, exist_ok=True)
+
+
+def test_t1_vm_iso_gate_read_only_corpus_boundary(tmp_path, monkeypatch):
     # The HOST supplies corpus CONTENT only; the GUEST builds the immutable read-only filesystem. This drives
     # the REAL broker_provision_corpus (content tar -> in-guest digest-verify -> mksquashfs -> loop ro mount)
     # against the golden image, then proves the closure properties the reviewer required.
     image = _golden_image()
     p, root = _live_paths(tmp_path)
+    _local_door(monkeypatch, p)
     declared = _write_live_corpus(p)
     import hashlib
     before = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
               for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
     run_id = "cccccccc" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        V.vm_start(run_id, p, image_location=image)
+        V.local_start(run_id, p, image_location=image, profile="golden")
         B.broker_provision_corpus(run_id, p, declared)            # the real content->guest->ro-mount path
         # the candidate can READ the known content on the mount
         got = _shell(p, run_id, "cat %s/pages/doc1.md" % V.GUEST_CORPUS_MOUNT)
@@ -187,6 +206,21 @@ def test_t1_vm_iso_gate_read_only_corpus_boundary(tmp_path):
                        "mv %s/pages/doc1.md %s/renamed" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT)):
             r = _shell(p, run_id, "sudo sh -c '%s' 2>&1; echo rc=$?" % script)
             assert b"rc=0" not in r.stdout, (script, r.stdout)
+        # in-guest isolation of the candidate (operator gate 2026-10-05): it runs as the no-sudo guest user, reads
+        # the corpus, and every non-loopback packet it sends -- TCP and DNS alike -- is REJECTed. This dev VM's
+        # hostagent has NO pf block, so the in-guest layer must hold on its own here.
+        U = B.GUEST_CANDIDATE_USER
+        rd = _shell(p, run_id, "sudo -n -u %s cat %s/pages/doc1.md" % (U, V.GUEST_CORPUS_MOUNT))
+        assert b"known-corpus-content-v1" in rd.stdout, rd.stdout
+        su = _shell(p, run_id, "sudo -n -u %s sudo -n true 2>/dev/null; echo rc=$?" % U)
+        assert b"rc=0" not in su.stdout, su.stdout                              # the candidate has no sudo
+        probe = ("python3 -c \\\"import socket; socket.create_connection(('1.1.1.1', 443), timeout=5)\\\"")
+        tcp = _shell(p, run_id, "sudo -n -u %s sh -c \"%s\" 2>/dev/null; echo rc=$?" % (U, probe))
+        assert b"rc=0" not in tcp.stdout, tcp.stdout                            # TCP egress blocked
+        dns = _shell(p, run_id, "sudo -n -u %s getent hosts example.com; echo rc=$?" % U)
+        assert b"rc=0" not in dns.stdout, dns.stdout                            # DNS exfil channel blocked
+        ctl = _shell(p, run_id, "getent hosts example.com >/dev/null; echo rc=$?")
+        assert b"rc=0" in ctl.stdout, ctl.stdout     # control: the login user still resolves, so the block is z1bcand's
         # cleanup: the staged plaintext, the tar and the squashfs FILE are gone; only the ro mount remains
         for gone in (V.GUEST_CORPUS_CONTENT, V.GUEST_CORPUS_TAR, V.GUEST_CORPUS_SQUASHFS):
             g = _shell(p, run_id, "test -e %s; echo rc=$?" % gone)
@@ -201,37 +235,37 @@ def test_t1_vm_iso_gate_read_only_corpus_boundary(tmp_path):
                                  "echo x > /tmp/rwctl/probe' 2>&1; echo rc=$?")
         assert b"rc=0" in ctrl.stdout, ctrl.stdout
     finally:
-        V.vm_teardown(run_id, p)
+        V.local_teardown(run_id, p)
     # the host source corpus is byte-for-byte unchanged (the host only read it), and teardown left nothing
     after = {q.name: hashlib.sha256(q.read_bytes()).hexdigest()
              for q in sorted(Path(p.corpus_dir).rglob("*")) if q.is_file()}
     assert after == before and not list(Path(p.corpus_dir).glob("*.squashfs"))
-    assert V.vm_leftover_instances(p) == []
+    assert V.local_leftovers(p) == []
 
     # THE tamper gate: the digest is declared, then one corpus byte changes before provisioning. The guest
     # re-derives corpus_sha256 of the bytes it received and REFUSES -> provisioning raises CANDIDATE_FAILED.
     (Path(p.corpus_dir) / "pages" / "doc1.md").write_text("TAMPERED-after-digest\n")
     run_t = "eeeeeeee" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        V.vm_start(run_t, p, image_location=image)
+        V.local_start(run_t, p, image_location=image, profile="golden")
         with pytest.raises(SealRefusal) as ei:
             B.broker_provision_corpus(run_t, p, declared)         # declared != bytes now reaching the guest
         assert ei.value.code == "CANDIDATE_FAILED"
         # and nothing got mounted (fail-closed, no writable fallback)
         assert b"rc=0" not in _shell(p, run_t, "test -e %s/pages; echo rc=$?" % V.GUEST_CORPUS_MOUNT).stdout
     finally:
-        V.vm_teardown(run_t, p)
-    assert V.vm_leftover_instances(p) == []
+        V.local_teardown(run_t, p)
+    assert V.local_leftovers(p) == []
 
     # a second clean guest starts from the PRISTINE corpus (no state carried over from any prior run)
     declared2 = _write_live_corpus(p)
     run2 = "dddddddd" + ("%08x" % (os.getpid() & 0xffffffff))
     try:
-        V.vm_start(run2, p, image_location=image)
+        V.local_start(run2, p, image_location=image, profile="golden")
         B.broker_provision_corpus(run2, p, declared2)
         g2 = _shell(p, run2, "cat %s/pages/doc1.md; ls %s/pages" % (V.GUEST_CORPUS_MOUNT, V.GUEST_CORPUS_MOUNT))
         assert b"known-corpus-content-v1" in g2.stdout and b"doc2.md" in g2.stdout and b"new" not in g2.stdout
     finally:
-        V.vm_teardown(run2, p)
-    assert V.vm_leftover_instances(p) == []
+        V.local_teardown(run2, p)
+    assert V.local_leftovers(p) == []
     shutil.rmtree(str(root), ignore_errors=True)

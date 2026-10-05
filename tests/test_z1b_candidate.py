@@ -1098,3 +1098,112 @@ def test_t9_adapter_default_search_requires_the_db_env_and_never_guesses(monkeyp
     with pytest.raises(SystemExit) as ei:
         z1b_candidate.adapter_main([])
     assert ei.value.code == 2
+
+
+# ------------------------------------------------------------------ the VM door (operator gate 2026-10-05)
+#
+# The broker (zurvaneval) runs every VM operation through this door AS zurvancandidate, so the VM's host
+# processes belong to the candidate identity (pf blocks the guest's egress; a hypervisor escape holds no key).
+# The door re-validates every argument and renders the VM config itself.
+
+def _t9_vm(monkeypatch):
+    from scripts.eval_seal import vm_runner as V
+    calls = []
+    monkeypatch.setattr(V, "local_start", lambda rid, paths, **kw: calls.append(("start", rid, kw)))
+    monkeypatch.setattr(V, "local_copy", lambda rid, paths, src, dst, **kw: calls.append(("copy", rid, src, dst)))
+    monkeypatch.setattr(V, "local_teardown", lambda rid, paths, **kw: calls.append(("delete", rid)))
+    monkeypatch.setattr(V, "local_leftovers", lambda paths, **kw: ["z" + _T9_RUN])
+    return V, calls
+
+
+def _t9_golden(p):
+    img = p.broker_dir / "images" / "guest.qcow2"
+    img.parent.mkdir(parents=True, exist_ok=True)
+    img.write_bytes(b"QFI\xfb")
+    return img
+
+
+def test_t9_door_vm_start_boots_the_pinned_golden_image_as_the_candidate(tmp_path, monkeypatch):
+    p = _t9_paths(tmp_path)
+    V, calls = _t9_vm(monkeypatch)
+    assert candidate_run.main(["vm-start", _T9_RUN], paths=p) == 2          # no golden image installed: refused
+    assert calls == []
+    img = _t9_golden(p)
+    assert candidate_run.main(["vm-start", _T9_RUN], paths=p) == 0
+    assert calls == [("start", _T9_RUN, {"image_location": "file://" + str(img), "profile": "golden"})]
+
+
+def test_t9_door_vm_start_reports_a_leftover_instance_distinctly(tmp_path, monkeypatch):
+    from scripts.eval_seal import vm_runner as V
+    p = _t9_paths(tmp_path)
+    _t9_golden(p)
+
+    def leftover(*a, **k):
+        raise candidate_run.SealRefusal("SANDBOX_VIOLATION")
+    monkeypatch.setattr(V, "local_start", leftover)
+    assert candidate_run.main(["vm-start", _T9_RUN], paths=p) == V.DOOR_RC_LEFTOVER
+
+    def failed(*a, **k):
+        raise candidate_run.SealRefusal("CANDIDATE_FAILED")
+    monkeypatch.setattr(V, "local_start", failed)
+    assert candidate_run.main(["vm-start", _T9_RUN], paths=p) == 2
+
+
+def test_t9_door_vm_shell_execs_limactl_as_the_candidate_with_the_guest_argv_verbatim(tmp_path, monkeypatch):
+    from scripts.eval_seal import vm_runner as V
+    p = _t9_paths(tmp_path)
+    seen = {}
+
+    def fake_execve(exe, argv, env):
+        seen.update(exe=exe, argv=argv, env=env)
+    rc = candidate_run.main(["vm-shell", _T9_RUN, "--", "/usr/bin/sudo", "-n", "-u", "z1bcand", "--", "/x"],
+                            paths=p, execve=fake_execve)
+    assert seen["exe"] == str(p.broker_bin / "limactl")
+    assert seen["argv"] == V.local_shell_argv(_T9_RUN, p, ["/usr/bin/sudo", "-n", "-u", "z1bcand", "--", "/x"])
+    assert seen["env"]["LIMA_HOME"] == str(p.candidate_home / "lima") and "PYTHONPATH" not in seen["env"]
+    assert rc == 3                                                          # execve never returns in production
+
+
+def test_t9_door_vm_copy_accepts_only_a_regular_file_under_the_stage_dir(tmp_path, monkeypatch):
+    p = _t9_paths(tmp_path)
+    V, calls = _t9_vm(monkeypatch)
+    good = p.stage_dir / "corpus-stage.x.tar"
+    good.write_bytes(b"tar")
+    outside = tmp_path / "secret.tar"
+    outside.write_bytes(b"s")
+    link = p.stage_dir / "link.tar"
+    link.symlink_to(outside)
+    sub = p.stage_dir / "d"
+    sub.mkdir()
+    for src, dst in ((str(outside), "/tmp/z1b-corpus.tar"),          # outside the stage dir
+                     (str(link), "/tmp/z1b-corpus.tar"),             # a symlink planted in the stage dir
+                     (str(sub), "/tmp/z1b-corpus.tar"),              # not a regular file
+                     ("relative.tar", "/tmp/z1b-corpus.tar"),        # not absolute
+                     (str(good), "relative"),                        # guest dst not absolute
+                     (str(good), "/tmp/../etc/shadow"),              # guest dst traversal
+                     (str(good), "/tmp/a b")):                       # guest dst charset
+        assert candidate_run.main(["vm-copy", _T9_RUN, src, dst], paths=p) == 2, (src, dst)
+    assert calls == []
+    assert candidate_run.main(["vm-copy", _T9_RUN, str(good), "/tmp/z1b-corpus.tar"], paths=p) == 0
+    assert calls == [("copy", _T9_RUN, os.path.realpath(str(good)), "/tmp/z1b-corpus.tar")]
+
+
+def test_t9_door_vm_delete_and_list(tmp_path, monkeypatch, capsys):
+    p = _t9_paths(tmp_path)
+    V, calls = _t9_vm(monkeypatch)
+    assert candidate_run.main(["vm-delete", _T9_RUN], paths=p) == 0 and calls == [("delete", _T9_RUN)]
+    assert candidate_run.main(["vm-list"], paths=p) == 0
+    assert capsys.readouterr().out == "z" + _T9_RUN + "\n"
+
+
+def test_t9_door_vm_grammar_is_strict(tmp_path, monkeypatch, capsys):
+    p = _t9_paths(tmp_path)
+    V, calls = _t9_vm(monkeypatch)
+    _t9_golden(p)
+    for argv in (["vm-start"], ["vm-start", "../x"], ["vm-start", _T9_RUN, "extra"], ["vm-start", _T9_RUN.upper()],
+                 ["vm-shell", _T9_RUN], ["vm-shell", _T9_RUN, "/x"], ["vm-shell", _T9_RUN, "--"],
+                 ["vm-copy", _T9_RUN, "/a"], ["vm-delete"], ["vm-delete", "x"], ["vm-list", "x"],
+                 ["vm-exec", _T9_RUN], ["vm-", _T9_RUN]):
+        assert candidate_run.main(argv, paths=p, execve=lambda *a: None) == 2, argv
+    assert calls == []
+    assert capsys.readouterr().out == ""

@@ -92,6 +92,16 @@ def _t12_fake_tools(tmp_path):
         p.write_bytes(body)
         p.chmod(0o755)
         out[name] = p
+    # limactl resolves its asset tree at <bin>/../share/lima, so the fake mirrors that layout
+    lima_bin = tmp_path / "lima" / "bin"
+    lima_bin.mkdir(parents=True)
+    (lima_bin / "limactl").write_bytes(b"LIMACTL-BIN-1")
+    (lima_bin / "limactl").chmod(0o755)
+    out["limactl"] = lima_bin / "limactl"
+    share = tmp_path / "lima" / "share" / "lima"
+    (share / "templates").mkdir(parents=True)
+    (share / "lima-guestagent.Linux-aarch64.gz").write_bytes(b"GUESTAGENT-1")
+    (share / "templates" / "default.yaml").write_text("images: []\n")
     hf = tmp_path / "hfmodel" / "models--sentence-transformers--all-MiniLM-L6-v2"
     (hf / "blobs").mkdir(parents=True)
     (hf / "refs").mkdir()
@@ -109,7 +119,7 @@ def _t12_install_args(repo, sha, tools, stage):
     return [
         sha, "--render", stage, "--repo", repo, "--dev-user", DEV, "--dev-home", DEV_HOME,
         "--age", tools["age"], "--age-keygen", tools["age-keygen"], "--claude", tools["claude"],
-        "--hf-dir", tools["hf"],
+        "--hf-dir", tools["hf"], "--limactl", tools["limactl"],
     ]
 
 
@@ -331,7 +341,9 @@ def test_t12_setup_pf_anchor_blocks_candidate_outbound(t12_world):
     stage = Path(t12_world["setup"])
     anchor = (stage / "etc/pf.anchors/zurvan-eval").read_text()
     rules = [ln for ln in anchor.splitlines() if ln and not ln.startswith("#")]
-    assert rules == ["block drop out quick user zurvancandidate"]
+    # loopback is spared: the candidate identity owns the VM host processes, whose control channel is ssh to
+    # 127.0.0.1 (operator gate 2026-10-05: blocking lo0 made a candidate-owned VM uncontrollable)
+    assert rules == ["block drop out quick on ! lo0 user zurvancandidate"]
     text = "\n".join(_t12_lines(stage))
     assert 'anchor "zurvan-eval"' in text
     assert 'load anchor "zurvan-eval" from "/etc/pf.anchors/zurvan-eval"' in text
@@ -504,14 +516,34 @@ def test_t12_install_modes_owners_and_no_writable_bits(t12_world):
 def test_t12_install_pins_binaries_by_digest(t12_world):
     stage, tools = t12_world["install"], t12_world["tools"]
     pinned = _t12_stage_file(stage, "/Library/ZurvanEval/broker/PINNED.sha256").read_text().splitlines()
+    agent = tools["limactl"].parent.parent / "share" / "lima" / "lima-guestagent.Linux-aarch64.gz"
     want = sorted(
-        f"{hashlib.sha256(tools[n].read_bytes()).hexdigest()}  /Library/ZurvanEval/broker/bin/{n}"
-        for n in ("age", "age-keygen", "claude"))
+        [f"{hashlib.sha256(tools[n].read_bytes()).hexdigest()}  /Library/ZurvanEval/broker/bin/{n}"
+         for n in ("age", "age-keygen", "claude", "limactl")]
+        + [f"{hashlib.sha256(agent.read_bytes()).hexdigest()}  "
+           "/Library/ZurvanEval/broker/share/lima/lima-guestagent.Linux-aarch64.gz"])
     assert sorted(pinned) == want
-    for n in ("age", "age-keygen", "claude"):
+    for n in ("age", "age-keygen", "claude", "limactl"):
         assert _t12_stage_file(stage, f"/Library/ZurvanEval/broker/bin/{n}").read_bytes() == tools[n].read_bytes()
+    # the whole Lima asset tree limactl resolves at <bin>/../share/lima, byte-identical, root-owned read-only
+    staged_share = _t12_stage_file(stage, "/Library/ZurvanEval/broker/share/lima")
+    assert (staged_share / "lima-guestagent.Linux-aarch64.gz").read_bytes() == agent.read_bytes()
+    assert (staged_share / "templates" / "default.yaml").read_text() == "images: []\n"
     text = "\n".join(_t12_lines(stage))
     assert "/usr/bin/shasum -a 256 -c /Library/ZurvanEval/broker/PINNED.sha256" in text
+    assert "/usr/bin/install -o root -g wheel -m 0444" in text and "/broker/share/lima/" in text
+
+
+@needs_clt
+def test_t12_install_re_renders_and_reloads_the_pf_anchor(t12_world):
+    """install.sh repairs an anchor an older setup rendered (whose rule also blocked loopback): it re-installs the
+    lo0-sparing anchor and reloads it."""
+    stage = Path(t12_world["install"])
+    anchor = _t12_stage_file(stage, "/etc/pf.anchors/zurvan-eval").read_text()
+    assert [ln for ln in anchor.splitlines() if ln and not ln.startswith("#")] == \
+        ["block drop out quick on ! lo0 user zurvancandidate"]
+    lines = _t12_lines(stage)
+    assert "/sbin/pfctl -a zurvan-eval -f /etc/pf.anchors/zurvan-eval" in lines
 
 
 @needs_clt

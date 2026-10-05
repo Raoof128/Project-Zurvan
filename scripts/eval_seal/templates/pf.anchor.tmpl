@@ -1,3 +1,5 @@
 # zurvan-eval: the candidate identity gets no outbound network at all (spec T3, defence in depth).
 # pf matches `user` for TCP and UDP only; confidentiality never rests on this rule.
-block drop out quick user ${CANDIDATE_USER}
+# Loopback is spared: the candidate identity owns the VM's host processes, whose control channel is ssh to
+# 127.0.0.1; the guest's outbound traffic leaves through those processes and is blocked here.
+block drop out quick on ! lo0 user ${CANDIDATE_USER}
