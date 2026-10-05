@@ -1364,11 +1364,25 @@ def _broker_check_pinned(paths, ctx) -> bool:
     lines = [ln for ln in paths.pinned_file.read_text(encoding="ascii").splitlines() if ln.strip()]
     if not lines:
         return False
+    real = SealPaths.real()
+    # A pin may name ONLY a file directly in broker/bin or broker/share/lima (the Lima guest agent), spelled
+    # exactly as the real install lays it out -- PINNED can never redirect the check elsewhere -- and the file
+    # is hashed through lstat: a symlink is never followed.
+    allowed = {str(real.broker_bin): paths.broker_bin,
+               str(real.broker_dir / "share" / "lima"): paths.broker_dir / "share" / "lima"}
     for line in lines:
         digest, _sep, path = line.partition("  ")
         if not _HEX64.fullmatch(digest) or not path:
             return False
-        actual = paths.broker_bin / os.path.basename(path)
+        parent, name = os.path.dirname(path), os.path.basename(path)
+        if parent not in allowed or not name or name in (".", ".."):
+            return False
+        actual = allowed[parent] / name
+        try:
+            if not stat.S_ISREG(os.lstat(str(actual)).st_mode):
+                return False
+        except OSError:
+            return False
         if broker_file_sha256(actual) != digest:
             return False
     return True

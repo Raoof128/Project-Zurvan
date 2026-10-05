@@ -247,7 +247,7 @@ def _cr_vm(argv, paths, *, execve=None) -> int:
     if verb == "vm-shell" and len(argv) >= 4 and argv[2] == "--":
         exe = vmr._vm_limactl(paths)
         (execve or os.execve)(exe, vmr.local_shell_argv(rid, paths, argv[3:]),
-                              vmr._vm_env(paths, vmr._vm_lima_home(paths)))
+                              vmr._vm_env(paths, vmr._vm_lima_home(paths, rid)))
         return 3                                     # execve does not return; a test double may
     if verb == "vm-copy" and len(argv) == 4:
         dst = argv[3]

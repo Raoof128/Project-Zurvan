@@ -1160,7 +1160,7 @@ def test_t9_door_vm_shell_execs_limactl_as_the_candidate_with_the_guest_argv_ver
                             paths=p, execve=fake_execve)
     assert seen["exe"] == str(p.broker_bin / "limactl")
     assert seen["argv"] == V.local_shell_argv(_T9_RUN, p, ["/usr/bin/sudo", "-n", "-u", "z1bcand", "--", "/x"])
-    assert seen["env"]["LIMA_HOME"] == str(p.candidate_home / "lima") and "PYTHONPATH" not in seen["env"]
+    assert seen["env"]["LIMA_HOME"] == str(p.candidate_home / "l" / _T9_RUN) and "PYTHONPATH" not in seen["env"]
     assert rc == 3                                                          # execve never returns in production
 
 

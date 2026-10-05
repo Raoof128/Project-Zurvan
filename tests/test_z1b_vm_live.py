@@ -83,7 +83,7 @@ def _live_paths(tmp_path):
 
 def _shell(p, run_id, script, timeout=60):
     argv = V.local_shell_argv(run_id, p, ["sh", "-c", script])
-    env = V._vm_env(p, V._vm_lima_home(p))
+    env = V._vm_env(p, V._vm_lima_home(p, run_id))
     return subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE, timeout=timeout)
 
@@ -112,7 +112,7 @@ def test_t1_vm_iso_gate_boundary_holds_end_to_end(tmp_path):
     # shared LIMA_HOME persists on purpose (it caches the pinned image); it is NOT reusable guest state.
     if booted:
         assert V.local_leftovers(p) == []
-        assert not (V._vm_lima_home(p) / (V.vm_instance_name(run_id) + ".yaml")).exists()
+        assert not V._vm_lima_home(p, run_id).exists()
     shutil.rmtree(str(root), ignore_errors=True)
 
 
@@ -122,7 +122,7 @@ def test_t1_vm_iso_gate_a_killed_run_leaves_no_reusable_guest(tmp_path):
     try:
         V.local_start(run_id, p, image_location=_ensure_image())
         proc = subprocess.Popen(V.local_shell_argv(run_id, p, ["sh", "-c", "sleep 600"]),
-                                env=V._vm_env(p, V._vm_lima_home(p)), stdin=subprocess.PIPE,
+                                env=V._vm_env(p, V._vm_lima_home(p, run_id)), stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         time.sleep(1)
         proc.kill()                      # abnormal termination mid-run
@@ -130,7 +130,7 @@ def test_t1_vm_iso_gate_a_killed_run_leaves_no_reusable_guest(tmp_path):
     finally:
         V.local_teardown(run_id, p)
     assert V.local_leftovers(p) == []
-    assert not (V._vm_lima_home(p) / (V.vm_instance_name(run_id) + ".yaml")).exists()
+    assert not V._vm_lima_home(p, run_id).exists()
     shutil.rmtree(str(root), ignore_errors=True)
 
 
@@ -171,7 +171,7 @@ def _local_door(monkeypatch, p):
     harness has no installed door, so the broker's door calls are replaced by the SAME local_* code the door
     runs -- the guest script, staging and digest checks are the broker's own."""
     def run(rid, paths, guest_cmd, *, runner=None, timeout=V.TEARDOWN_TIMEOUT):
-        done = subprocess.run(V.local_shell_argv(rid, paths, guest_cmd), env=V._vm_env(paths, V._vm_lima_home(paths)),
+        done = subprocess.run(V.local_shell_argv(rid, paths, guest_cmd), env=V._vm_env(paths, V._vm_lima_home(paths, rid)),
                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
         if done.returncode != 0:
             raise SealRefusal("CANDIDATE_FAILED")

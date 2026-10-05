@@ -30,13 +30,13 @@ try:
     from .paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from .manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
     from .promotion import NAMESPACE as PROMOTION_NAMESPACE
-    from .vm_runner import GOLDEN_IMAGE_DIGEST
+    from .vm_runner import GOLDEN_IMAGE_DIGEST, SSH_PORT_HI, SSH_PORT_LO
 except ImportError:  # run as a script: scripts/eval_seal is not a package here
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from scripts.eval_seal.paths import AUTHOR_USER, CANDIDATE_USER, CORPUS_GROUP, EVAL_USER, SealPaths
     from scripts.eval_seal.manifest import NAMESPACE as MANIFEST_NAMESPACE, PRINCIPAL as MANIFEST_PRINCIPAL
     from scripts.eval_seal.promotion import NAMESPACE as PROMOTION_NAMESPACE
-    from scripts.eval_seal.vm_runner import GOLDEN_IMAGE_DIGEST
+    from scripts.eval_seal.vm_runner import GOLDEN_IMAGE_DIGEST, SSH_PORT_HI, SSH_PORT_LO
 
 # the eval signing key verifies in BOTH sealed namespaces (manifest + promotion attestation, #16); the
 # anchor lists both, while ssh-keygen still enforces each signature's own namespace at verify time.
@@ -510,7 +510,8 @@ def plan_setup(plan, dev_home, repo):
     plan.cmd("/bin/chmod", "+a", _acl("search"), AUTHOR_HOME)
     plan.cmd("/bin/chmod", "+a", _acl("read,list,search,readattr,file_inherit,directory_inherit"), AUTHOR_WS)
     plan.comment("T3: the candidate identity has no outbound network (pf matches user for TCP/UDP only: defence in depth)")
-    plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
+    plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER, SSH_PORT_LO=str(SSH_PORT_LO),
+                                       SSH_PORT_HI=str(SSH_PORT_HI)).encode(),
                       "root", "wheel", "0644")
     plan.cmd("/bin/cp", "-p", PF_CONF, PF_CONF_BAK)
     plan.raw("/usr/bin/grep -qxF 'anchor \"zurvan-eval\"' %s || /usr/bin/printf '%%s\\n' 'anchor \"zurvan-eval\"' "
@@ -739,7 +740,8 @@ def plan_install(plan, repo, sha, dev_user, dev_home, search_path, age, age_keyg
     plan.comment("pf: the candidate identity owns the VM's host processes, so its rule must spare loopback (the VM")
     plan.comment("control channel is ssh to 127.0.0.1); every other outbound packet stays blocked. Re-render + reload")
     plan.comment("the anchor here so an existing setup (whose rule also blocked loopback) is repaired by install.sh.")
-    plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER).encode(),
+    plan.install_file(PF_ANCHOR_FILE, _render_template("pf.anchor.tmpl", CANDIDATE_USER=CANDIDATE_USER, SSH_PORT_LO=str(SSH_PORT_LO),
+                                       SSH_PORT_HI=str(SSH_PORT_HI)).encode(),
                       "root", "wheel", "0644")
     plan.cmd("/sbin/pfctl", "-a", "zurvan-eval", "-f", PF_ANCHOR_FILE)
 

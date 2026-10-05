@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -39,11 +40,17 @@ GUEST_IMAGE_DIGEST = ("sha512:737b0eb365944ffcf6da477c059c105bbde222942fd5a8380c
 # a changed image is never served from cache. A rebake (e.g. CPU-only torch) re-pins this.
 GOLDEN_IMAGE_DIGEST = ("sha512:41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e717b44deb2b17ac43ecfb"
                        "ea709a3f4fabf5528e9e9b301dd3a7d7826fd0f969baf4aecf39c121728")
+# Security review 2026-10-05 (egress bypass): the candidate identity owns the VM's host processes, and lima's
+# user-mode network maps the guest gateway onto HOST LOOPBACK -- where this machine serves mysqld, cloudflared,
+# local Python servers... pf therefore lets the candidate identity reach loopback ONLY on this reserved range,
+# and each run's ssh control forward is pinned inside it (ssh.localPort). One run at a time (broker lock).
+SSH_PORT_LO = 60000
+SSH_PORT_HI = 60999
 START_TIMEOUT = 300
 TEARDOWN_TIMEOUT = 120
 
 
-def vm_config_text(image_location: str = None, profile: str = "isolation") -> str:
+def vm_config_text(image_location: str = None, profile: str = "isolation", ssh_port: int = None) -> str:
     """The pinned Lima config. Every line here is measured-necessary (design s7d):
     - `mounts: []`        : the guest sees NO host filesystem (the boundary against host-side secrets);
     - `containerd` off    : Alpine has no systemd, so lima's containerd check would mark the VM DEGRADED
@@ -56,7 +63,7 @@ def vm_config_text(image_location: str = None, profile: str = "isolation") -> st
     sparse disk (the image is 20 GiB virtual, and the corpus is staged + squashed in-guest), and lima's host
     resolver OFF (the candidate's network is closed in-guest; see broker_provision_corpus)."""
     if profile == "golden":
-        if not image_location:
+        if not image_location or type(ssh_port) is not int or not SSH_PORT_LO <= ssh_port <= SSH_PORT_HI:
             raise SealRefusal("CANDIDATE_FAILED")
         return (
             "images:\n"
@@ -71,7 +78,16 @@ def vm_config_text(image_location: str = None, profile: str = "isolation") -> st
             'memory: "4GiB"\n'
             "hostResolver:\n"
             "  enabled: false\n"
-        ) % (image_location, GUEST_IMAGE_ARCH, GOLDEN_IMAGE_DIGEST)
+            "ssh:\n"
+            "  localPort: %d\n"
+            "portForwards:\n"
+            '- guestIP: "0.0.0.0"\n'
+            "  guestPortRange: [1, 65535]\n"
+            "  ignore: true\n"
+            '- guestIP: "127.0.0.1"\n'
+            "  guestPortRange: [1, 65535]\n"
+            "  ignore: true\n"
+        ) % (image_location, GUEST_IMAGE_ARCH, GOLDEN_IMAGE_DIGEST, ssh_port)
     if profile != "isolation":
         raise SealRefusal("CANDIDATE_FAILED")
     return (
@@ -87,6 +103,12 @@ def vm_config_text(image_location: str = None, profile: str = "isolation") -> st
         'memory: "1GiB"\n'
         'disk: "4GiB"\n'
     ) % (image_location or GUEST_IMAGE_URL, GUEST_IMAGE_ARCH, GUEST_IMAGE_DIGEST)
+
+def vm_ssh_port(run_id: str) -> int:
+    """The run's ssh control forward on host loopback, deterministic and inside the pf-permitted range."""
+    rid = vm_instance_name(run_id)[1:]
+    return SSH_PORT_LO + int(rid, 16) % (SSH_PORT_HI - SSH_PORT_LO + 1)
+
 
 def vm_instance_name(run_id: str) -> str:
     """A short instance name. `LIMA_HOME` + this must keep the VZ ssh.sock path under 104 chars
@@ -105,8 +127,12 @@ def _vm_limactl(paths) -> str:
 
 
 def _vm_env(paths, lima_home: Path) -> dict:
-    # A short LIMA_HOME (ssh.sock length) and nothing inherited from the caller.
-    return clean_env(paths.candidate_home, {"LIMA_HOME": str(lima_home)})
+    # A short LIMA_HOME (ssh.sock length) and nothing inherited from the caller. GODEBUG=netdns=go forces lima's
+    # PURE Go resolver: the user-mode network answers guest DNS by resolving on the host, and Go's default darwin
+    # resolver hands that to mDNSResponder (root), which pf cannot attribute -- a DNS channel out for guest root.
+    # The pure resolver sends the query from lima's OWN socket (owned by the candidate identity), so pf drops it
+    # (security review 2026-10-05).
+    return clean_env(paths.candidate_home, {"LIMA_HOME": str(lima_home), "GODEBUG": "netdns=go"})
 
 
 # lima appends a 16-digit suffix to the control socket: <LIMA_HOME>/<name>/ssh.sock.<16 digits>. That whole
@@ -115,8 +141,17 @@ def _vm_env(paths, lima_home: Path) -> dict:
 SSH_SOCK_SUFFIX = len("/ssh.sock.") + 16
 
 
-def _vm_lima_home(paths) -> Path:
-    return Path(paths.candidate_home) / "lima"
+def _vm_lima_base(paths) -> Path:
+    return Path(paths.candidate_home) / "l"
+
+
+def _vm_lima_home(paths, run_id: str) -> Path:
+    """A FRESH LIMA_HOME per run (security review 2026-10-05, cross-run integrity): lima merges
+    $LIMA_HOME/_config/{default,override}.yaml into every instance, so a SHARED, candidate-owned LIMA_HOME let
+    code running as the candidate identity (e.g. after a VM escape) plant config -- mounts, networks,
+    provisioning -- into every later run. Per-run homes are created at start, refused if present, and removed
+    whole at teardown, so no lima state survives a run. <base>/<run>/<instance>/ssh.sock.<16> stays < 104."""
+    return _vm_lima_base(paths) / vm_instance_name(run_id)[1:]
 
 
 # ------------------------------------------------------------------ local lifecycle (runs AS the VM owner)
@@ -133,13 +168,17 @@ def local_start(run_id: str, paths, *, runner=None, image_location: str = None, 
     (a VM that will not boot is a failed run, charged by the broker)."""
     runner = runner or subprocess.run
     name = vm_instance_name(run_id)
-    lima_home = _vm_lima_home(paths)
-    lima_home.mkdir(parents=True, exist_ok=True)
-    os.chmod(str(lima_home), 0o700)
-    if (lima_home / name).exists():
-        raise SealRefusal("SANDBOX_VIOLATION")  # a leftover instance means a prior teardown failed
+    base = _vm_lima_base(paths)
+    base.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(base), 0o700)
+    lima_home = _vm_lima_home(paths, run_id)
+    try:
+        os.mkdir(str(lima_home), 0o700)      # never reuse a run's lima home: a leftover means a teardown failed
+    except FileExistsError:
+        raise SealRefusal("SANDBOX_VIOLATION") from None
     cfg = lima_home / (name + ".yaml")
-    cfg.write_text(vm_config_text(image_location, profile))
+    cfg.write_text(vm_config_text(image_location, profile,
+                                  vm_ssh_port(run_id) if profile == "golden" else None))
     argv = [_vm_limactl(paths), "start", "--tty=false", "--name=" + name, str(cfg)]
     try:
         done = runner(argv, env=_vm_env(paths, lima_home), stdin=subprocess.DEVNULL,
@@ -163,7 +202,7 @@ def local_copy(run_id: str, paths, src, dst: str, *, runner=None) -> None:
     name = vm_instance_name(run_id)
     argv = [_vm_limactl(paths), "copy", str(src), "%s:%s" % (name, dst)]
     try:
-        done = runner(argv, env=_vm_env(paths, _vm_lima_home(paths)), stdin=subprocess.DEVNULL,
+        done = runner(argv, env=_vm_env(paths, _vm_lima_home(paths, run_id)), stdin=subprocess.DEVNULL,
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         raise SealRefusal("CANDIDATE_FAILED") from None
@@ -176,7 +215,7 @@ def local_teardown(run_id: str, paths, *, runner=None) -> None:
     timed out or was killed must leave no reusable guest state. Both steps are attempted regardless."""
     runner = runner or subprocess.run
     name = vm_instance_name(run_id)
-    lima_home = _vm_lima_home(paths)
+    lima_home = _vm_lima_home(paths, run_id)
     env = _vm_env(paths, lima_home)
     try:
         runner([_vm_limactl(paths), "delete", "-f", name], env=env, stdin=subprocess.DEVNULL,
@@ -184,7 +223,11 @@ def local_teardown(run_id: str, paths, *, runner=None) -> None:
     except (OSError, subprocess.SubprocessError):
         pass
     try:
-        (lima_home / (name + ".yaml")).unlink()
+        st = os.lstat(str(lima_home))
+        if os.path.islink(str(lima_home)) or not stat.S_ISDIR(st.st_mode):
+            os.unlink(str(lima_home))           # a link or file planted at the run path: remove it, never follow
+        else:
+            shutil.rmtree(str(lima_home))       # the whole per-run home: config, keys, instance -- nothing survives
     except OSError:
         pass
 
@@ -192,18 +235,15 @@ def local_teardown(run_id: str, paths, *, runner=None) -> None:
 def local_leftovers(paths, *, runner=None) -> list:
     """Any instances still present in the shared LIMA_HOME (the post-run sweep's VM arm): a non-empty list
     is a teardown failure that must burn the run's items."""
-    runner = runner or subprocess.run
-    lima_home = _vm_lima_home(paths)
-    if not lima_home.is_dir():
-        return []
+    base = _vm_lima_base(paths)
     try:
-        done = runner([_vm_limactl(paths), "list", "--format", "{{.Name}}"],
-                      env=_vm_env(paths, lima_home), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                      stderr=subprocess.DEVNULL, timeout=TEARDOWN_TIMEOUT)
-    except (OSError, subprocess.SubprocessError):
-        return ["<limactl-list-failed>"]
-    out = getattr(done, "stdout", b"") or b""
-    return [n for n in out.decode("ascii", "replace").split() if n]
+        names = sorted(os.listdir(str(base)))
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return ["<lima-home-unreadable>"]
+    # teardown removes a run's whole lima home, so ANY entry left here is a failed teardown
+    return ["z" + n if re.fullmatch(r"[0-9a-f]{16}", n) else "<unexpected:%s>" % n[:32] for n in names]
 
 
 def _guest_env_prefix(guest_env) -> list:

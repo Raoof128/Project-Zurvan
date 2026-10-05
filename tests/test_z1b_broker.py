@@ -1497,3 +1497,33 @@ def test_t10_rev3_two_declarations_in_one_commit_do_not_share_a_cache_entry(tmp_
     na2 = _t10_drop(E, commit)
     a2 = _t10_run(E, commit, declare=_T10_DECL_PATH, name=na2)[2]
     assert a2["cached"] is True
+
+
+def test_t10_pinned_check_covers_the_lima_guest_agent_and_nothing_outside_the_broker_tree(tmp_path):
+    """Regression (operator gate 2026-10-05): install.sh now also pins limactl and the Lima guest agent under
+    broker/share/lima. The check mapped every pin to broker/bin/<basename>, so the guest-agent pin could never
+    match. A pin may name ONLY broker/bin/<name> or broker/share/lima/<name>; never a symlink; never elsewhere."""
+    P = SealPaths.for_root(tmp_path / "root")
+    share = P.broker_dir / "share" / "lima"
+    for d in (P.broker_bin, share):
+        d.mkdir(parents=True, exist_ok=True)
+    (P.broker_bin / "limactl").write_bytes(b"LIMACTL")
+    (share / "lima-guestagent.Linux-aarch64.gz").write_bytes(b"AGENT")
+    h = lambda b: hashlib.sha256(b).hexdigest()
+    good = ("%s  /Library/ZurvanEval/broker/bin/limactl\n" % h(b"LIMACTL")
+            + "%s  /Library/ZurvanEval/broker/share/lima/lima-guestagent.Linux-aarch64.gz\n" % h(b"AGENT"))
+    P.pinned_file.write_text(good)
+    assert B._broker_check_pinned(P, None) is True
+    (share / "lima-guestagent.Linux-aarch64.gz").write_bytes(b"AGENT-TAMPERED")     # the guest agent is pinned
+    assert B._broker_check_pinned(P, None) is False
+    (share / "lima-guestagent.Linux-aarch64.gz").write_bytes(b"AGENT")
+    for bad_path in ("/tmp/lima-guestagent.Linux-aarch64.gz",                         # outside the broker tree
+                     "/Library/ZurvanEval/broker/lib/limactl",                        # not an allowed directory
+                     "/Library/ZurvanEval/broker/share/lima/../bin/limactl"):         # traversal
+        P.pinned_file.write_text(good + "%s  %s\n" % (h(b"LIMACTL"), bad_path))
+        assert B._broker_check_pinned(P, None) is False, bad_path
+    P.pinned_file.write_text(good)
+    (P.broker_bin / "limactl").unlink()
+    (P.broker_bin / "limactl").symlink_to(tmp_path / "elsewhere")                     # never follow a symlink
+    (tmp_path / "elsewhere").write_bytes(b"LIMACTL")
+    assert B._broker_check_pinned(P, None) is False
