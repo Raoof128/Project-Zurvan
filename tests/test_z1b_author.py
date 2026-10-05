@@ -1201,3 +1201,60 @@ def _t15_tag_of(world, query, sid):
                 if _t15_query("%s-r%d-%d" % (s, k, i)) == query:
                     return "%s-r%d-%d" % (s, k, i)
     return ""
+
+
+# ------------------------------------------------------------------ corpus-quote filter (operator gate 2026-10-05)
+
+_T15_LONG = ("the integrity sweep verifies every sealed generation digest before promotion and records "
+             "0f3c9a7e5b2d4f61a8c0e9b7d3f2a1c4e6b8d0f2a4c6e8b0d2f4a6c8e0b2d4f6 as the pinned value")
+
+
+def _t15_quote_corpus(tmp_path):
+    corpus = _t15_corpus(tmp_path)
+    (corpus / "wiki" / "notes" / "n-05.md").write_text("# Zzt Heading 05 Quorum\n\n" + _T15_LONG + "\n")
+    return corpus
+
+
+def test_t15_corpus_quote_ids_flags_a_query_that_quotes_a_page_and_spares_a_paraphrase(tmp_path):
+    """Regression: the real leak scan burned 8 sealed items -- queries quoting >=64 informative corpus bytes
+    (e.g. a full sha256) that development transcripts contained because a DEV-authoring agent had READ the page.
+    The authoring filter uses the scanner's own matcher, so it rejects exactly what the scanner would flag."""
+    corpus = _t15_quote_corpus(tmp_path)
+    quoting = _t15_item("hash", query="which value does " + _T15_LONG[60:170] + " name", tag="q1")
+    paraphrase = _t15_item("hash", query="which digest gets pinned when a generation is swept and promoted",
+                           tag="q2")
+    whole = _t15_item("semantic", query=_T15_LONG[:120], tag="q3")                 # the page contains it whole
+    got = A.author_corpus_quote_ids([quoting, paraphrase, whole], corpus)
+    assert got == {quoting["id"], whole["id"]}
+
+
+def test_t15_suite_rejects_corpus_quotes_and_accepts_nothing_the_scanner_would_burn(tmp_path):
+    """Composition: whatever the author ACCEPTS, the real scan.scan() over a transcript that contains every
+    corpus page (what a DEV-authoring session's tool results look like) reports no item hit."""
+    from scripts.eval_seal import scan as S
+    world = _t15_world(20)
+    sid = "hash"
+    bad_q = "which value does " + _T15_LONG[60:170] + " name"
+    # EXACTLY min_holdout + min_reserve candidates in this stratum: an unfiltered quote would HAVE to be selected,
+    # so the assertions below cannot pass vacuously by the quote simply not being drawn
+    need = BY_ID[sid]["min_holdout"] + BY_ID[sid]["min_reserve"]
+    world["raw"][sid] = [{"query": bad_q, "difficulty": "easy",
+                          "targets": [{"page": "wiki/notes/n-05.md", "locator": {"kind": "page", "value": ""}}]}] \
+        + world["raw"][sid][:need - 1]
+    world["truth"][bad_q] = world["raw"][sid][0]["targets"]
+    corpus = _t15_quote_corpus(tmp_path)
+    fake = _T15Fake(world)
+    b = A.author_suite(SPEC, RUBRIC, [], corpus, fake, MODELS, seed=7, templates=TEMPLATES, dev_sha256="d" * 64)
+    assert b["rejected"]["corpus_quote"] >= 1
+    accepted = b["holdout"] + b["reserve"]
+    assert bad_q not in {i["query"] for i in accepted}
+    transcript = tmp_path / "transcripts"
+    transcript.mkdir()
+    blob = "".join(p.read_text(errors="replace") for p in sorted(corpus.rglob("*.md")))
+    (transcript / "session.jsonl").write_text(blob)
+    res = S.scan([str(transcript)], [], {i["id"]: i["query"] for i in accepted})
+    assert res["hits"] == [], res["hits"]                                         # nothing the scanner would burn
+
+
+def test_t15_corpus_quote_is_a_named_rejection_reason():
+    assert "corpus_quote" in A.AUTHOR_REJECT_REASONS

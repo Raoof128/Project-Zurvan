@@ -56,7 +56,7 @@ AUTHOR_NEARDUP_THRESHOLD = 0.7      # estimated shingle Jaccard; real Jaccard >=
 AUTHOR_LEXICAL_THRESHOLD = 0.9      # token-set Jaccard
 AUTHOR_REJECT_REASONS = (
     "bad_schema", "target_missing", "answer_leak", "dev_contamination", "exact_dup", "lexical_overlap",
-    "near_dup", "unparseable", "reviewer_rejected", "resolve_miss",
+    "near_dup", "unparseable", "reviewer_rejected", "resolve_miss", "corpus_quote",
 )
 AUTHOR_DEFAULT_MODELS = {"author": "opus", "reviewer": "sonnet", "resolver": "haiku"}
 AUTHOR_ALLOWED_TOOLS = "Read,Grep,Glob"
@@ -261,6 +261,33 @@ def _author_leaks(item, corpus_dir) -> bool:
 
 
 # ----------------------------------------------------------------------------------------------- filters
+
+def author_corpus_quote_ids(items, corpus_dir, *, pages=None) -> set:
+    """Ids of candidates whose query quotes the corpus: it shares >= MIN_MATCH informative bytes with a corpus
+    page, or a page contains the whole query. Uses the LEAK SCANNER'S OWN matcher (scan.build_fingerprints +
+    scan._scan_window), so authoring rejects exactly what the scanner would flag. Such a query is burned the
+    moment any development transcript holds that page's text -- the real scan burned 8 sealed items this way
+    (operator gate 2026-10-05) although the dev side never saw them -- so it is never accepted."""
+    from . import scan as author_scan          # lazy: scan imports the broker
+    items = [i for i in items if isinstance(i, dict) and isinstance(i.get("query"), str) and i.get("id")]
+    if not items:
+        return set()
+    qtexts = [i["query"] for i in items]
+    qbytes = [q.encode("utf-8") for q in qtexts]
+    ids = [i["id"] for i in items]
+    fp = author_scan.build_fingerprints(qtexts)
+    d1 = author_scan.load_d1()
+    wholes = [k for k, b in enumerate(qbytes) if d1.informative_length(b) >= author_scan.WHOLE_QUERY_MIN]
+    corpus_dir = Path(corpus_dir)
+    hits = set()
+    for rel in sorted(author_corpus_pages(corpus_dir) if pages is None else pages):
+        try:
+            data = (corpus_dir / rel).read_bytes()[:_MAX_PAGE_READ * 64]
+        except OSError:
+            continue
+        author_scan._scan_window(data, {}, set(), fp, qbytes, ids, hits, wholes)
+    return hits
+
 
 def author_filters(cands, dev_items, corpus_dir, spec, *, pages=None):
     """Deterministic filters, in order: schema, target exists (store-relative), answer leakage, DEV
@@ -593,7 +620,11 @@ def author_suite(spec, rubric, dev_items, corpus_dir, runner, models, *, seed, t
 
     def filter_new(kept_so_far, new):
         """Filters over earlier-kept + new (input order, earlier wins): the earlier items pass unchanged, so the
-        counts are the new candidates' rejections only. Returns the newly kept items."""
+        counts are the new candidates' rejections only. Returns the newly kept items. A candidate that quotes the
+        corpus is dropped first (corpus_quote): the leak scan would burn it on the next transcript read."""
+        quoting = author_corpus_quote_ids(new, corpus_dir, pages=pages)
+        counts["corpus_quote"] += len(quoting)
+        new = [i for i in new if i["id"] not in quoting]
         new_ids = {i["id"] for i in new}
         kept_all, fcounts = author_filters(kept_so_far + new, dev_items, corpus_dir, spec, pages=pages)
         for k, v in fcounts.items():
