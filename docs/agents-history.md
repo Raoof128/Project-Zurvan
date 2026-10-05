@@ -3,6 +3,15 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 #1: operator closure install EXECUTED and LIVE; corpus + authoring remain
+**Raouf:**
+- **Scope:** operator closure begun on the real machine, authorised by Raouf (sudo password supplied this session; fed to `sudo -S` via stdin, never written to any file/commit/memory). Run from the `z1b-rev3` worktree at the frozen tip `762790a`. No code changed. **This install is LEFT INSTALLED — the machine is NOT pristine** (unlike the earlier verification run that rolled back). Nothing merged; nothing pushed.
+- **Checkpoint:** `main=690e22f`, `z1b-rev3=762790a`, trees clean; golden `guest.qcow2` (11,182,604,288 B) rehashed → SHA-512 `41bfeb0b…c121728` == pinned `GOLDEN_IMAGE_DIGEST` == sidecar.
+- **`setup.sh` (exit 0):** identities `zurvaneval`/`zurvancandidate`/`zurvanauthor` (uid 600/601/602), corpus gid 603, sealed dirs, TM exclusions, pf candidate-block + launchd pf daemon, cron/at denial, read-only scan ACLs, age key. Preflight fix held (no silent abort).
+- **`install.sh 762790a --guest-image …/guest.qcow2` (exit 0):** broker sources at the SHA (root:wheel 0555/0444); pinned `age`/`age-keygen`/`claude` (`PINNED.sha256` verified); MiniLM runtime; **golden image placed 0444 only on sha512 match, installed copy re-verified**; two-rule sudoers (`visudo` OK, installed last); scan daemon.
+- **seal-check (PUBLIC CLI) = 21/23 green (corrected 2026-10-04: originally mis-reported as 22/24 — the seal-check has 23 checks):** only `corpus_read_only` + `manifest_valid` false — the two outstanding steps. `broker_sha_matches` 762790a; root-ownership, pinned binaries, dev/candidate read-denial, keys/sets/runs/stage private, sudoers/pf/scan-agent/deny-rules, TM exclusions, ledger all green.
+- **Remaining (operator/Raouf):** freeze corpus from the REAL KB (main checkout; rebuild its stale search+graph to rev 423 → `prepare_corpus_export` → `sudo install_corpus.sh`) → flips `corpus_read_only`; DEV set; **`claude login` as `zurvaneval` (interactive OAuth, cannot be automated)**; sealed authoring (~320 items, model spend) → flips `manifest_valid`; then `zurvan eval z1b run` + full live oracle → #1/Z1b CLOSED → `git merge --ff-only z1b-rev3`; re-verify merged tree. No automatic push.
+
 ### 2026-10-03 (Australia/Sydney) — Z1b Rev 3 #1: corpus provisioning reworked to IN-GUEST build (host supplies content only)
 **Raouf:**
 - **Scope:** code on `z1b-rev3` (`762790a`): `scripts/eval_seal/broker.py`, `scripts/eval_seal/vm_runner.py`, tests `test_z1b_broker_vm.py`, `test_z1b_vm.py`, `test_z1b_vm_live.py`, `test_z1b_broker.py`. Status/design on `main` (§7k.1 implementation). Branch unmerged; nothing pushed.

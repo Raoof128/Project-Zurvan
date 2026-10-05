@@ -579,6 +579,37 @@ oracle. Then `git merge --ff-only z1b-rev3` into `main` and re-verify the merged
 **Remaining:** DEV set → `claude login` as `zurvaneval` (interactive, operator) → sealed authoring
 (`manifest_valid`) → `zurvan eval z1b run` + full live oracle → #1/Z1b CLOSED → `git merge --ff-only z1b-rev3`.
 
+## 7q. Operator closure: what running the real path changed (2026-10-05/06, `57808b6`…`04bee6f`)
+
+Every item was found by RUNNING, mostly in free rehearsals before any charged run; each fix is test-first,
+mutation-checked and re-installed. The architecture that now runs:
+
+- **Candidate VM ownership.** The broker (zurvaneval, the key owner) never runs limactl. Every VM operation goes
+  through the existing digest-pinned `zurvan-candidate-run` door as **zurvancandidate** (`vm-start`, `vm-shell`,
+  `vm-copy`, `vm-push-tree`, `vm-delete`, `vm-list`); sudoers keeps exactly two rules. The door renders the golden
+  config itself (golden digest, 4 GiB, Lima default sparse disk, host resolver off, pinned ssh port, all port
+  forwards ignored) and uses a **fresh LIMA_HOME per run** (`<candidate_home>/l/<run>`), removed whole at teardown.
+  `install.sh` pins limactl + the Lima guest agent and installs the Lima asset tree read-only.
+- **What runs is the commit.** `vm-push-tree` builds `git archive <commit>` from the staged, broker-verified bundle
+  AS the candidate (untrusted pack parsing off the key owner); the guest unpacks it to `/opt/z1b/cand` and runs
+  that candidate with the image's pinned runtime — never the image's baked copy.
+- **Egress, host layer (holds against guest root).** pf for zurvancandidate: loopback only to the reserved ssh range
+  40000–40999 (below the ephemeral ports), replies `flags A/A no state`, everything else dropped; lima's resolver
+  forced to pure Go (`GODEBUG=netdns=go`) so host-side DNS leaves from a candidate-owned socket and is dropped.
+  **Egress, guest layer.** The candidate runs as `z1bcand` (no sudo); iptables/ip6tables REJECT every non-loopback
+  packet it originates (TCP, UDP, DNS). Both verified live, as guest root and as `z1bcand`.
+- **Authoring.** 24 candidates/stratum; unparseable replies re-asked; bounded per-stratum top-up; bounded call
+  retry; **`corpus_quote` filter** using the leak scanner's own matcher, so a corpus read can never burn a sealed
+  item. Author creds: `zurvanauthor` in `private/claude`, dedicated non-`login` keychain unlocked in-process.
+- **Scan.** The eval identity LISTs `~/.claude/projects` (no inheritance) so new transcript dirs are scanned or the
+  scan fails closed (accepted trade-off: directory names visible to the sealed identity).
+
+**Incident and gate 8.** Suite `7c18c2e16c0a3119` (160/80, sealed 23/23) lost 8 items to a leak-scan burn
+(`item_leak`, incident `438dfd7ca96ba06a`, acknowledged): **gate 8 FAILED for that suite** (158/74). Cause, by
+aggregate diagnosis only: corpus-quoting queries whose pages development agents had read — not a real leak; the
+`corpus_quote` filter closes the class. The suite is archived under `/Users/zurvaneval/retired/`; a fresh suite is
+being authored on `04bee6f`. Gate 4's dirty-tree refusal PASSED uncharged; run budget untouched (8).
+
 ## 8. Build order for the Rev 3 plan
 
 1. Re-sync the ported branch fixes (G19, G20) into fresh executable blocks, from a clean `main`.
