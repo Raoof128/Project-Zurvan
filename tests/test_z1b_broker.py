@@ -24,6 +24,7 @@ import pytest
 from scripts.eval_seal import broker as B
 from scripts.eval_seal import manifest as manifest_mod
 from scripts.eval_seal import output, sealed_store, sweep, sysenv
+from scripts.eval_seal import vm_runner as V
 from scripts.eval_seal.codes import SealRefusal
 from scripts.eval_seal.corpus import corpus_sha256
 from scripts.eval_seal.ledger import Ledger
@@ -1372,6 +1373,22 @@ def test_t10_runtime_digest_changes_with_any_runtime_file_and_the_interpreter(tm
     with pytest.raises(SealRefusal) as ei:
         B.broker_runtime_sha256(SealPaths.for_root(tmp_path / "none"))
     assert ei.value.code == "SEAL_NOT_CONFIGURED"
+
+
+def test_t10_runtime_digest_works_for_the_installed_vm_runtime_with_no_host_interpreter(tmp_path):
+    """Operator gate 2026-10-06: since Rev 3 #1 the candidate runs on the GUEST image's interpreter and the
+    installer builds no host venv; the host runtime holds only hf/. Requiring runtime/bin/python3 refused
+    every real run SEAL_NOT_CONFIGURED at the run key (after the scan, before the charge). The guest image
+    digest, guest command and VM config carry the executing runtime; the host tree listing still binds hf/."""
+    paths = SealPaths.for_root(tmp_path)
+    hub = paths.runtime_dir / "hf" / "hub"
+    hub.mkdir(parents=True)
+    (hub / "model.bin").write_bytes(b"weights-1")
+    first = B.broker_runtime_sha256(paths)
+    assert len(first) == 64 and first == B.broker_runtime_sha256(paths)
+    assert "guest-image:" + V.GOLDEN_IMAGE_DIGEST in B.broker_runtime_material(paths)
+    (hub / "model.bin").write_bytes(b"weights-2-longer")
+    assert B.broker_runtime_sha256(paths) != first
 
 
 def test_t10_new_seal_path_properties_have_the_installer_locations(tmp_path):

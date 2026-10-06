@@ -173,12 +173,14 @@ def broker_guest_image(paths: SealPaths) -> str:
 
 
 def broker_runtime_material(paths: SealPaths) -> str:
-    """The text whose sha256 is the runtime identity (R14 + Rev 3 #1): the runtime tree listing, the
-    interpreter bytes, and the pinned guest image digest + VM config."""
+    """The text whose sha256 is the runtime identity (R14 + Rev 3 #1): the host runtime tree listing (hf/),
+    the pinned guest image digest, the guest command and the VM config. The candidate executes on the GUEST
+    image's interpreter, so a host interpreter is hashed only if one is present; requiring it refused every
+    real run (operator gate 2026-10-06: the installer builds no host venv)."""
     from . import vm_runner as vmr
     root = paths.runtime_dir
     py = root / "bin" / "python3"
-    if not root.is_dir() or not py.exists():
+    if not root.is_dir():
         raise SealRefusal("SEAL_NOT_CONFIGURED")
     lines = []
     for top, dirnames, filenames in os.walk(str(root), topdown=True, followlinks=False):
@@ -196,7 +198,8 @@ def broker_runtime_material(paths: SealPaths) -> str:
             else:
                 raise SealRefusal("SEAL_NOT_CONFIGURED")
             lines.append("%s\0%s\n" % (rel, detail))
-    lines.append("interpreter:" + broker_file_sha256(Path(os.path.realpath(str(py)))) + "\n")
+    if os.path.lexists(str(py)):
+        lines.append("interpreter:" + broker_file_sha256(Path(os.path.realpath(str(py)))) + "\n")
     lines.append("guest-image:" + vmr.GOLDEN_IMAGE_DIGEST + "\n")   # the image the broker actually boots
     lines.append("guest-cmd:" + "\0".join(GUEST_CANDIDATE_CMD) + "\n")
     lines.append("vm-config:" + hashlib.sha256(vmr.vm_config_text().encode()).hexdigest() + "\n")
