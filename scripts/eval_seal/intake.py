@@ -12,6 +12,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -27,6 +28,9 @@ _RUN_ID = re.compile(r"[0-9a-f]{16}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _HEAD_LINE = re.compile(r"([0-9a-f]{40}) ([^\x00-\x1f]+)")
 _CHUNK = 1024 * 1024
+# O_RDONLY on a directory needs its read bit; O_SEARCH needs only x. Not every Python build exports it,
+# so on macOS fall back to its <sys/fcntl.h> value (O_EXEC | O_DIRECTORY)
+_DIR_SEARCH = getattr(os, "O_SEARCH", 0x40100000 if sys.platform == "darwin" else os.O_RDONLY)
 _GIT_TIMEOUT = 600
 # the only GIT_* variables a caller env may carry, with the values sysenv.clean_env pins
 _PINNED_GIT_ENV = {
@@ -56,7 +60,8 @@ def stage_bundle(name: str, paths: SealPaths, *, expected_uid: int, run_id: str)
     created = False
     try:
         try:
-            dir_fd = os.open(str(paths.drop_dir), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            # search-only: the real drop dir is 1733, so the broker has x but never r on it
+            dir_fd = os.open(str(paths.drop_dir), _DIR_SEARCH | os.O_DIRECTORY | os.O_NOFOLLOW)
             src_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
         except OSError:
             raise _intake_bad() from None

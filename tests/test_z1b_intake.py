@@ -100,6 +100,22 @@ def test_t8_stage_copies_bytes_unlinks_drop_and_sets_mode(t8):
     assert not drop.is_symlink()
 
 
+def test_t8_stage_works_when_the_drop_dir_is_not_readable_by_the_broker(t8):
+    """The real drop dir is root:wheel 1733: the broker identity may search and write it, never list it.
+    Opening it O_RDONLY for a dir_fd needs the read bit, so every real run failed BUNDLE_INVALID
+    (found at the 2026-10-06 operator gate). Reproduced here by taking the read bit from the owner."""
+    _t8_drop(t8)
+    drop_dir = t8["paths"].drop_dir
+    os.chmod(str(drop_dir), 0o1333)
+    try:
+        with pytest.raises(PermissionError):
+            os.listdir(str(drop_dir))
+        staged = _t8_stage(t8)
+        assert staged.read_bytes() == t8["bundle"].read_bytes()
+    finally:
+        os.chmod(str(drop_dir), 0o755)
+
+
 def test_t8_stage_then_verify_accepts_real_bundle(t8):
     _t8_drop(t8)
     staged = _t8_stage(t8)
