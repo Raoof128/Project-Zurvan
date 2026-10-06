@@ -40,10 +40,12 @@ _T17_EARLY_REFUSALS = ("MANIFEST_INVALID", "CORPUS_MISMATCH", "INTEGRITY_INCIDEN
 
 
 def _t17_sudo_n(user, *argv):
-    """Run `sudo -n -u <user> <argv>`; return (returncode, stdout). Never prompts, never hangs."""
+    """Run `sudo -n -u <user> <argv>`; return (returncode, stdout). Never prompts, never hangs.
+    cwd is "/": the target user cannot read the dev checkout, and `python3 -c` puts the cwd on sys.path,
+    so from the repo the gate-2 probe died importing json (EACCES) before it opened any sealed path."""
     cp = subprocess.run(["/usr/bin/sudo", "-n", "-u", user] + list(argv), stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=30,
-                        env={"PATH": "/usr/bin:/bin"})
+                        env={"PATH": "/usr/bin:/bin"}, cwd="/")
     return cp.returncode, cp.stdout
 
 
@@ -159,7 +161,11 @@ def test_t17_live_gate7_holdout_never_accepts_final_acceptance():
 # ------------------------------------------------------------------ gate 9 precondition
 
 def test_t17_live_gate9_precondition_sudo_offers_the_dev_identity_exactly_one_door():
-    """No other command runs as zurvaneval or zurvancandidate from the dev session."""
+    """No other command runs as zurvaneval or zurvancandidate from the dev session.
+    A cached sudo ticket is the OPERATOR's authority (gate 2 needs one), not the dev identity's, so it is
+    dropped first: this measures the sudoers rules alone."""
+    subprocess.run(["/usr/bin/sudo", "-k"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                   stderr=subprocess.DEVNULL, timeout=30, env={"PATH": "/usr/bin:/bin"}, cwd="/")
     for user in (EVAL_USER, CANDIDATE_USER):
         for argv in (["/usr/bin/id"], ["/bin/cat", str(REAL.sets_dir / "holdout.age")], ["/bin/sh", "-c", "id"],
                      ["/usr/bin/env"], ["/bin/ls", str(REAL.eval_home)]):
