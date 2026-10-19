@@ -17,3 +17,4 @@ pub mod store;
 #[cfg(test)]
 pub mod testutil;
 pub mod text;
+pub mod vectors;

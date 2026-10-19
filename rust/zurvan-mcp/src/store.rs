@@ -44,6 +44,9 @@ pub struct IndexMeta {
     pub generation: Generation,
     pub chunks: i64,
     pub files: i64,
+    /// Rows in `embeddings` — what the vector cache must hold (can differ
+    /// from `chunks` if a chunk has no vector).
+    pub embeddings: i64,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_indexed_at: Option<String>,
@@ -81,10 +84,13 @@ fn compute_index(path: &Path, generation: Generation) -> Result<IndexMeta, Strin
             other => Err(other.to_string()),
         })?;
     let (provider, model) = row.unwrap_or((None, None));
+    let embeddings: i64 =
+        conn.query_row("SELECT count(*) FROM embeddings", [], |r| r.get(0)).map_err(|e| e.to_string())?;
     Ok(IndexMeta {
         generation,
         chunks,
         files,
+        embeddings,
         provider,
         model,
         max_indexed_at,

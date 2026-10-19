@@ -30,8 +30,27 @@ async fn main() -> anyhow::Result<()> {
             running.waiting().await?;
             Ok(())
         }
+        "build-cache" => {
+            let meta = zurvan_mcp::store::MetaCache::default().index(&cfg).map_err(anyhow::Error::msg)?;
+            let t = std::time::Instant::now();
+            let loader = zurvan_mcp::vectors::Loader::default();
+            let cache = loader
+                .get(&cfg, &meta, &|n, total| eprintln!("  {n}/{total} vectors"))
+                .map_err(anyhow::Error::msg)?;
+            let path = cfg.cache_dir.join(format!("vectors-{}.zvec", cache.key()));
+            let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            println!(
+                "vector cache ready: {} rows × {} dims, {} bytes, {:.2} s\n{}",
+                cache.rows(),
+                cache.dim(),
+                bytes,
+                t.elapsed().as_secs_f64(),
+                path.display()
+            );
+            Ok(())
+        }
         other => {
-            eprintln!("zurvan-mcp: unknown command {other:?} (expected: serve)");
+            eprintln!("zurvan-mcp: unknown command {other:?} (expected: serve | build-cache)");
             std::process::exit(2);
         }
     }
