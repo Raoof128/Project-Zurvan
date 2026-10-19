@@ -1,0 +1,25 @@
+[package]
+name = "zurvan-mcp"
+version = "3.0.0"
+edition = "2021"
+rust-version = "1.97"
+description = "Zurvan knowledge engine MCP server (stdio), drop-in for scripts/mcp_server.py"
+publish = false
+
+[lib]
+name = "zurvan_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zurvan-mcp"
+path = "src/main.rs"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = "thin"

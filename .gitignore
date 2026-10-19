@@ -126,3 +126,8 @@ data/snapshots/
 # Write attribution sidecar: records WHO wrote each wiki page, so it
 # carries private wiki paths. Local operational state, never tracked.
 data/writes.jsonl
+
+# zurvan-mcp (Rust MCP server): build output, and the derived vector cache it
+# writes per index generation (data/cache/vectors-<key>.zvec, never published)
+rust/zurvan-mcp/target/
+data/cache/
