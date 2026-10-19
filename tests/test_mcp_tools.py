@@ -235,3 +235,61 @@ def test_write_tools_still_fail_closed_under_the_guard(monkeypatch):
 
     monkeypatch.setenv("ZURVAN_MCP_READONLY", "1")
     assert "read-only mode" in mt.tool_zurvan_decision_add("t", "r", "accepted", [])
+
+
+# ── zurvan_orient (design 2026-10-19 §7A A12) ────────────────────────────────
+
+def _orient_store(monkeypatch, tmp_path):
+    """A throwaway root for read_file_slice, and stubbed search + staleness."""
+    import scripts.agent_workflow as agent_workflow
+    import scripts.context_export as context_export
+    import scripts.mcp_resources as mcp_resources
+    import scripts.mcp_security as mcp_security
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "wiki" / "a.md").write_text("A" * 2500, encoding="utf-8")
+    (tmp_path / "wiki" / "b.md").write_text("bee page", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "c.md").write_text("see", encoding="utf-8")
+    (tmp_path / "docs" / "d.md").write_text("dee", encoding="utf-8")
+    monkeypatch.setattr(mcp_resources, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(mcp_security, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_workflow, "_index_staleness", lambda *a, **k: "fresh")
+    hits = [
+        {"source_path": "wiki/a.md", "hybrid_score": 0.9, "heading": "H", "text": "alpha"},
+        {"source_path": "wiki/a.md", "hybrid_score": 0.8, "heading": None, "text": "alpha two"},
+        {"source_path": "wiki/b.md", "hybrid_score": 0.7, "text": "bee"},
+        {"source_path": "docs/c.md", "hybrid_score": 0.6, "text": "see"},
+        {"source_path": "docs/d.md", "hybrid_score": 0.5, "text": "dee"},
+    ]
+    monkeypatch.setattr(context_export, "_search_internal", lambda q, hybrid, limit: hits[:limit])
+
+
+def test_orient_combines_status_search_and_top_pages(monkeypatch, tmp_path):
+    from scripts.mcp_tools import tool_zurvan_orient
+    _orient_store(monkeypatch, tmp_path)
+    out = tool_zurvan_orient("anything", 10)
+    parts = out.split("\n\n")
+    assert parts[0] == "Search index: fresh"
+    assert parts[1].startswith("1. wiki/a.md (score 0.90)\n   heading: H\n   alpha\n2. wiki/a.md (score 0.80)")
+    assert parts[2] == "## Top pages"
+    # The three DISTINCT paths in rank order, 2,000 characters each at most.
+    assert parts[3] == "[wiki/a.md — characters 0-2000] More: call again with offset=2000.\n" + "A" * 2000
+    assert parts[4] == "[wiki/b.md — characters 0-8]\nbee page"
+    assert parts[5] == "[docs/c.md — characters 0-3]\nsee"
+    assert len(parts) == 6, "docs/d.md is the fourth distinct path and is not read"
+
+
+def test_orient_without_results_has_no_pages_section(monkeypatch, tmp_path):
+    import scripts.context_export as context_export
+    from scripts.mcp_tools import tool_zurvan_orient
+    _orient_store(monkeypatch, tmp_path)
+    monkeypatch.setattr(context_export, "_search_internal", lambda q, hybrid, limit: [])
+    assert tool_zurvan_orient("nothing", 10) == "Search index: fresh\n\nNo matches found."
+
+
+def test_orient_is_registered_read_only():
+    import asyncio
+    import scripts.mcp_server as srv
+    tools = {t.name: t for t in asyncio.run(srv.mcp.list_tools())}
+    assert "zurvan_orient" in tools
+    assert tools["zurvan_orient"].annotations.read_only_hint is True

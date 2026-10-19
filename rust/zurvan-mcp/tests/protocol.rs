@@ -140,14 +140,15 @@ fn instructions_on_initialize() {
 fn both_lifecycles() {
     let mut legacy = Server::spawn();
     assert_eq!(legacy.init_legacy()["result"]["protocolVersion"], json!("2025-11-25"));
-    assert_eq!(legacy.request("tools/list", json!({}))["result"]["tools"].as_array().unwrap().len(), 14);
+    let expected = fixture("tools_list.json")["tools"].as_array().unwrap().len();
+    assert_eq!(legacy.request("tools/list", json!({}))["result"]["tools"].as_array().unwrap().len(), expected);
 
     let mut modern = Server::spawn();
     let disc = modern.request("server/discover", json!({"_meta": meta_2026()}));
     let versions = disc["result"]["supportedVersions"].as_array().unwrap();
     assert!(versions.contains(&json!("2026-07-28")) && versions.contains(&json!("2025-11-25")), "{disc}");
     let tools = modern.request("tools/list", json!({"_meta": meta_2026()}));
-    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), 14);
+    assert_eq!(tools["result"]["tools"].as_array().unwrap().len(), expected);
 }
 
 #[test]
@@ -207,6 +208,19 @@ fn read_page_slices_by_code_point() {
     assert_eq!(crlf["content"][0]["text"], json!("[wiki/a/b.md — characters 10-14] More: call again with offset=14.\ne\nse"));
     let end = s.call("zurvan_read_page", json!({"path": "wiki/a/b.md", "offset": 999}));
     assert_eq!(end["content"][0]["text"], json!("[end of wiki/a/b.md — offset 999 is past the end]"));
+}
+
+#[test]
+fn orient_sections_in_order() {
+    // No index in this fixture root: search finds nothing, so orient is the
+    // freshness line and "No matches found." — as Python's tool_zurvan_orient.
+    let mut s = Server::spawn();
+    s.init_legacy();
+    let r = s.call("zurvan_orient", json!({"topic": "anything"}));
+    let text = r["content"][0]["text"].as_str().unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.starts_with("[index ")).collect();
+    assert_eq!(lines.join("\n"), "Search index: missing — run `zurvan index search`\n\nNo matches found.", "{text}");
+    assert_ne!(r["isError"], json!(true));
 }
 
 #[test]

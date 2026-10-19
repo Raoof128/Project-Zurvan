@@ -78,6 +78,20 @@ def zurvan_search(
     """
     return tools.tool_zurvan_search(query, hybrid, limit)
 
+@mcp.tool(title="Orient on a topic", annotations=READ_ONLY)
+def zurvan_orient(
+    topic: Annotated[str, Field(description="The subject to orient on.")],
+    limit: Annotated[int, Field(description="Maximum number of search results.", ge=1, le=50)] = 10,
+) -> str:
+    """One call instead of three: index freshness, hybrid search, and the opening of the top pages.
+
+    Returns the "Search index:" freshness line, the same numbered results as
+    zurvan_search, then the first 2,000 characters of each of the top three
+    distinct result pages. Use it to start on a topic; continue a page with
+    zurvan_read_page and the offset its header names.
+    """
+    return tools.tool_zurvan_orient(topic, limit)
+
 @mcp.tool(title="Build a context bundle", annotations=READ_ONLY)
 def zurvan_context(
     topic: Annotated[str, Field(description="The subject to assemble context for.")],

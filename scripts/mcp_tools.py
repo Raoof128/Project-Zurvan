@@ -132,6 +132,25 @@ def _budget(text: str, budget: int = RESULT_CHAR_BUDGET) -> str:
     )
 
 
+def _format_search_results(results) -> str:
+    """The numbered result list `zurvan_search` shows (unbudgeted)."""
+    if not results:
+        return "No matches found."
+    output = []
+    for i, r in enumerate(results, 1):
+        score = r.get("hybrid_score", "N/A")
+        score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
+        heading = r.get("heading")
+        snippet = _snippet(r.get("text", ""))
+        line = f"{i}. {r['source_path']} (score {score_str})"
+        if heading:
+            line += f"\n   heading: {heading}"
+        if snippet:
+            line += f"\n   {snippet}"
+        output.append(line)
+    return "\n".join(output)
+
+
 @_protocol_safe
 def tool_zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
     """Searches Zurvan memory."""
@@ -140,21 +159,44 @@ def tool_zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
         results = _search_internal(query, hybrid, limit)
         if not results:
             return "No matches found."
-        output = []
-        for i, r in enumerate(results, 1):
-            score = r.get("hybrid_score", "N/A")
-            score_str = f"{score:.2f}" if isinstance(score, float) else str(score)
-            heading = r.get("heading")
-            snippet = _snippet(r.get("text", ""))
-            line = f"{i}. {r['source_path']} (score {score_str})"
-            if heading:
-                line += f"\n   heading: {heading}"
-            if snippet:
-                line += f"\n   {snippet}"
-            output.append(line)
-        return _budget("\n".join(output))
+        return _budget(_format_search_results(results))
     except Exception as e:
         return f"Error searching Zurvan for '{query}': {e}"
+
+
+ORIENT_PAGES = 3
+ORIENT_PAGE_CHARS = 2000
+
+
+@_protocol_safe
+def tool_zurvan_orient(topic: str, limit: int = 10) -> str:
+    """Status line + hybrid results + the opening of the top pages, in one call.
+
+    Design 2026-10-19 §7A A12: the prescribed workflow was three round trips
+    (status, search, read_page). Sections are separated by a blank line; each
+    page is the first 2,000 characters of one of the top three DISTINCT result
+    paths, in rank order, with read_page's slice header naming the next offset.
+    """
+    try:
+        from scripts.agent_workflow import _index_staleness
+        from scripts.context_export import _search_internal
+        from scripts.mcp_resources import read_file_slice
+
+        parts = [f"Search index: {_index_staleness()}"]
+        results = _search_internal(topic, True, limit)
+        parts.append(_format_search_results(results))
+        paths = []
+        for r in results:
+            if r["source_path"] not in paths:
+                paths.append(r["source_path"])
+            if len(paths) == ORIENT_PAGES:
+                break
+        if paths:
+            parts.append("## Top pages")
+            parts += [read_file_slice(p, 0, ORIENT_PAGE_CHARS) for p in paths]
+        return _budget("\n\n".join(parts))
+    except Exception as e:
+        return f"Error orienting on '{topic}': {e}"
 
 @_protocol_safe
 def tool_zurvan_context(topic: str, hybrid: bool = True, graph: bool = True, limit: int = 10) -> str:

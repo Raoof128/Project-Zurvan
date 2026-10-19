@@ -111,8 +111,17 @@ pub fn keyword(root: &Path, query: &str, limit: usize) -> Vec<Hit> {
     hits
 }
 
-/// `tool_zurvan_search`'s rendering of `_search_internal` results.
+/// `tool_zurvan_search`'s rendering of `_search_internal` results, budgeted.
 pub fn format_results(hits: &[Hit]) -> String {
+    if hits.is_empty() {
+        return "No matches found.".into();
+    }
+    budget(&format_results_raw(hits), RESULT_CHAR_BUDGET)
+}
+
+/// `mcp_tools._format_search_results`: the same list, unbudgeted (orient
+/// budgets the whole response instead).
+pub fn format_results_raw(hits: &[Hit]) -> String {
     if hits.is_empty() {
         return "No matches found.".into();
     }
@@ -135,7 +144,7 @@ pub fn format_results(hits: &[Hit]) -> String {
             line
         })
         .collect();
-    budget(&out.join("\n"), RESULT_CHAR_BUDGET)
+    out.join("\n")
 }
 
 /// Everything a hybrid search needs, loaded lazily and kept for the life of

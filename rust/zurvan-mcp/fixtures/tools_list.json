@@ -54,6 +54,51 @@
    }
   },
   {
+   "name": "zurvan_orient",
+   "title": "Orient on a topic",
+   "description": "One call instead of three: index freshness, hybrid search, and the opening of the top pages.\n\n    Returns the \"Search index:\" freshness line, the same numbered results as\n    zurvan_search, then the first 2,000 characters of each of the top three\n    distinct result pages. Use it to start on a topic; continue a page with\n    zurvan_read_page and the offset its header names.\n    ",
+   "inputSchema": {
+    "properties": {
+     "topic": {
+      "description": "The subject to orient on.",
+      "title": "Topic",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of search results.",
+      "maximum": 50,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "topic"
+    ],
+    "type": "object",
+    "title": "zurvan_orientArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_orientOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "zurvan_context",
    "title": "Build a context bundle",
    "description": "Build a ready-to-read Markdown context bundle for a topic.\n\n    Higher-level than zurvan_search: it gathers the top matches AND (when\n    graph=True) their graph neighbours into a single Markdown digest you can\n    read in one shot. Use this when you need to understand the decisions,\n    claims, and related concepts around a topic before making a change.\n    ",

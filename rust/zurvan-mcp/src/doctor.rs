@@ -133,7 +133,7 @@ pub fn checks(cfg: &Config) -> Vec<Check> {
             std::result::Result::Ok((n, instructions))
         });
         out.push(match r {
-            std::result::Result::Ok((14, true)) => check(Ok, "protocol", format!("{protocol}: 14 tools, instructions present"), None),
+            std::result::Result::Ok((n, true)) if n == crate::server::tool_count() => check(Ok, "protocol", format!("{protocol}: {n} tools, instructions present"), None),
             std::result::Result::Ok((n, i)) => check(Fail, "protocol", format!("{protocol}: {n} tools, instructions present: {i}"), None),
             Err(e) => check(Fail, "protocol", format!("{protocol}: {e}"), None),
         });

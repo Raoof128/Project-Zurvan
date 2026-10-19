@@ -23,7 +23,7 @@ pub fn run(cfg: &Config) -> (String, bool) {
     };
     step("initialize carries instructions", if opened["instructions"].as_str().is_some_and(|s| !s.is_empty()) { Ok(()) } else { Err("missing".into()) });
     step("tools/list", match c.request("tools/list", json!({})) {
-        Ok(r) if r["tools"].as_array().map(|a| a.len()) == Some(14) => Ok(()),
+        Ok(r) if r["tools"].as_array().map(|a| a.len()) == Some(crate::server::tool_count()) => Ok(()),
         Ok(r) => Err(format!("{} tools", r["tools"].as_array().map(|a| a.len()).unwrap_or(0))),
         Err(e) => Err(e),
     });

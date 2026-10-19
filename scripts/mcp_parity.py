@@ -39,7 +39,7 @@ REPO = Path(__file__).resolve().parents[1]
 DEFAULT_A = f"{sys.executable} {REPO / 'scripts' / 'mcp_server.py'}"
 DEFAULT_B = str(REPO / "rust" / "zurvan-mcp" / "target" / "release" / "zurvan-mcp")
 GROUPS = ("listing", "status", "read_page", "read_gate", "graph", "search_hybrid",
-          "search_keyword", "context", "writes", "eval")
+          "search_keyword", "context", "orient", "writes", "eval")
 
 # Lines a server adds that the other does not, stripped before comparison
 # (design §7.8 stamp, §7A status lines, §7.9 write revision).
@@ -274,6 +274,12 @@ def context_cases(root: Path) -> list[Case]:
     return cases
 
 
+def orient_cases(root: Path) -> list[Case]:
+    topics = [(f"instrument#{i}", item["query"]) for i, item in enumerate(_instrument()[5:10], start=5)]
+    topics += [(f"adhoc#{i}", q) for i, q in enumerate(_adhoc()[5:10], start=5)]
+    return [tool(f"orient:{label}", "orient", "zurvan_orient", {"topic": t, "limit": 10}) for label, t in topics]
+
+
 EVAL_PREFIX = "Evaluates the Python reference retriever, not this server.\n"
 
 
@@ -478,6 +484,7 @@ CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "search_hybrid": search_cases(True),
     "search_keyword": search_cases(False),
     "context": context_cases,
+    "orient": orient_cases,
     "eval": eval_cases,
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,

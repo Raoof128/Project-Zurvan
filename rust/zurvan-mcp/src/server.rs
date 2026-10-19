@@ -37,6 +37,11 @@ pub enum ToolOutput {
     ArgError(String),
 }
 
+/// How many tools this server lists (the captured fixture's count).
+pub fn tool_count() -> usize {
+    serde_json::from_str::<Value>(TOOLS_FIXTURE).ok().and_then(|v| v["tools"].as_array().map(|a| a.len())).unwrap_or(0)
+}
+
 /// A tool result is an error iff its text starts with `Error` or `Failed to`
 /// (plan decision). Python returned these with isError false.
 pub fn is_error_text(s: &str) -> bool {
@@ -104,6 +109,42 @@ impl ZurvanServer {
         });
     }
 
+    /// `tool_zurvan_orient` (§7A A12): the freshness line (stamp under it),
+    /// the search results, then the first 2,000 characters of the top three
+    /// distinct result pages; sections separated by a blank line; budgeted.
+    fn orient_tool(&self, topic: &str, limit: usize, progress: &dyn Fn(u64, u64)) -> String {
+        match self.search.search(topic, true, limit, progress) {
+            Err(e) => format!("Error orienting on '{topic}': {e}"),
+            Ok((hits, notice)) => {
+                let mut head = format!("Search index: {}", status::staleness_text(&status::freshness(&self.cfg, &self.meta)));
+                let stamp = status::stamp(&self.cfg, &self.meta);
+                if !stamp.is_empty() {
+                    head.push('\n');
+                    head.push_str(&stamp);
+                }
+                if let Some(n) = notice {
+                    head.push('\n');
+                    head.push_str(&n);
+                }
+                let mut parts = vec![head, search::format_results_raw(&hits)];
+                let mut paths: Vec<&str> = Vec::new();
+                for h in &hits {
+                    if !paths.contains(&h.source_path.as_str()) {
+                        paths.push(&h.source_path);
+                    }
+                    if paths.len() == 3 {
+                        break;
+                    }
+                }
+                if !paths.is_empty() {
+                    parts.push("## Top pages".into());
+                    parts.extend(paths.iter().map(|p| pages::read_file_slice(&self.cfg, p, 0, 2000)));
+                }
+                crate::text::budget(&parts.join("\n\n"), crate::text::RESULT_CHAR_BUDGET)
+            }
+        }
+    }
+
     /// `tool_zurvan_search`, led by the §7.8 stamp. Errors stay unstamped so
     /// the A5 error flag (text starts with "Error") still holds.
     fn search_tool(&self, query: &str, hybrid: bool, limit: usize, progress: &dyn Fn(u64, u64)) -> String {
@@ -166,6 +207,10 @@ impl ZurvanServer {
                         parts.join("\n")
                     }
                 })
+            }
+            "zurvan_orient" => {
+                let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
+                ToolOutput::Text(self.orient_tool(&s("topic"), limit, progress))
             }
             "zurvan_search" => {
                 let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
