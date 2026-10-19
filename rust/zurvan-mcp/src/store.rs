@@ -161,6 +161,14 @@ impl MetaCache {
     }
 }
 
+/// The graph store opened read-only, or Python's error text for it.
+pub fn open_graph(cfg: &Config) -> Result<Connection, String> {
+    if !cfg.graph_db.exists() {
+        return Err(graph_missing_message(&cfg.graph_db));
+    }
+    open_ro(&cfg.graph_db).map_err(|e| e.to_string())
+}
+
 /// `knowledge_state` of the revision ledger: (current_revision, state).
 pub fn ledger(cfg: &Config) -> Option<(i64, String)> {
     let conn = open_ro(&cfg.registry_db).ok()?;

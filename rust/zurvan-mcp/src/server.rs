@@ -5,8 +5,9 @@
 use crate::args::validate;
 use crate::config::Config;
 use crate::pages;
+use crate::graph;
 use crate::status;
-use crate::store::MetaCache;
+use crate::store::{self, MetaCache};
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData, GetPromptRequestParams,
     GetPromptResponse, GetPromptResult, Implementation, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
@@ -98,6 +99,15 @@ impl ZurvanServer {
         match name {
             "zurvan_read_page" => ToolOutput::Text(pages::read_page(&self.cfg, &s("path"), i("offset"), i("limit"))),
             "zurvan_status" => ToolOutput::Text(status::status_text(&self.cfg, &self.meta)),
+            "zurvan_graph_neighbours" => {
+                let conn = store::open_graph(&self.cfg);
+                ToolOutput::Text(graph::neighbours_tool(conn.as_ref().map_err(Clone::clone), &s("path_or_node_id"), i("limit"), i("cursor")))
+            }
+            "zurvan_graph_expand" => {
+                let conn = store::open_graph(&self.cfg);
+                let depth = i("depth").unwrap_or(2).clamp(1, 5) as u32;
+                ToolOutput::Text(graph::expand_tool(conn.as_ref().map_err(Clone::clone), &s("path_or_node_id"), depth, i("limit"), i("cursor")))
+            }
             // Python raises here and the SDK masks an unexpected exception's
             // message: the result is exactly "Error executing tool <name>",
             // isError, no structured content (captured 2026-10-19).

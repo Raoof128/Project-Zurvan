@@ -8,6 +8,7 @@
 pub mod args;
 pub mod config;
 pub mod corpus;
+pub mod graph;
 pub mod pages;
 pub mod security;
 pub mod server;

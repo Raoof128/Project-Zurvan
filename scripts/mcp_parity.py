@@ -210,9 +210,39 @@ def status_cases(root: Path) -> list[Case]:
             Case("status:resource:zurvan://graph/stats", "status", "resources/read", {"uri": "zurvan://graph/stats"})]
 
 
+def graph_cases(root: Path) -> list[Case]:
+    """The highest-degree nodes (the hub has thousands of edges), three pages
+    each. Named by rank only: node paths can be private page names."""
+    import sqlite3
+    db = root / "data" / "graph.sqlite"
+    nodes: list[str] = []
+    if db.exists():
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                "SELECT n.node_id, n.path, (SELECT count(*) FROM edges e WHERE e.from_node_id = n.node_id)"
+                " + (SELECT count(*) FROM edges e WHERE e.to_node_id = n.node_id) AS deg"
+                " FROM nodes n ORDER BY deg DESC, n.node_id LIMIT 9").fetchall()
+            nodes = [path or node_id for node_id, path, _ in rows]
+        finally:
+            con.close()
+    nodes.append("zurvan-parity-no-such-node")
+    cases = []
+    for rank, node in enumerate(nodes):
+        for cursor in (0, 25, 50):
+            cases.append(tool(f"graph#{rank}:neighbours@{cursor}", "graph", "zurvan_graph_neighbours",
+                              {"path_or_node_id": node, "limit": 25, "cursor": cursor}))
+            for depth in (1, 2):
+                cases.append(tool(f"graph#{rank}:expand{depth}@{cursor}", "graph", "zurvan_graph_expand",
+                                  {"path_or_node_id": node, "depth": depth, "limit": 25, "cursor": cursor},
+                                  norm="graph_expand"))
+    return cases
+
+
 CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "listing": listing_cases,
     "status": status_cases,
+    "graph": graph_cases,
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,
 }
