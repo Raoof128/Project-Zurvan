@@ -3,7 +3,7 @@
 
 use crate::config::{readonly, Config};
 use crate::corpus::scan_markdown_files;
-use crate::store::{ledger, MetaCache};
+use crate::store::{generation, ledger, MetaCache};
 use crate::text::thousands;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use rayon::prelude::*;
@@ -42,13 +42,14 @@ fn parse_naive(s: &str) -> Option<NaiveDateTime> {
 /// (Python ignores ZURVAN_SEARCH_DB here) against each corpus file's mtime as
 /// a LOCAL naive datetime, exactly as `datetime.fromtimestamp` gives it.
 pub fn freshness(cfg: &Config, cache: &MetaCache) -> Freshness {
-    if let Some((at, f)) = cache.freshness.lock().unwrap().as_ref() {
-        if at.elapsed() < FRESHNESS_REUSE {
+    let g = generation(&cfg.root.join("data").join("search.sqlite")).ok();
+    if let Some((at, seen, f)) = cache.freshness.lock().unwrap().as_ref() {
+        if at.elapsed() < FRESHNESS_REUSE && *seen == g {
             return f.clone();
         }
     }
     let f = compute_freshness(cfg, cache);
-    *cache.freshness.lock().unwrap() = Some((Instant::now(), f.clone()));
+    *cache.freshness.lock().unwrap() = Some((Instant::now(), g, f.clone()));
     f
 }
 
@@ -247,11 +248,10 @@ mod tests {
         assert_eq!(lines[8], "Ledger: rev 751 CLEAN");
     }
 
-    /// Python output captured 2026-10-19 on empty roots. Python's
-    /// `graph_query.get_stats` opens read-WRITE, so with `data/` present it
-    /// CREATES an empty graph.sqlite and then reports "no such table"; without
-    /// `data/` it reports "unable to open". Rust gives the same text and
-    /// creates nothing.
+    /// Python output on empty roots. Since IOU-10 was fixed (2026-10-20) the
+    /// Python graph reads open read-only, so a missing graph is "unable to
+    /// open database file" whether or not `data/` exists, and neither server
+    /// creates anything.
     #[test]
     fn status_without_stores_matches_python_messages() {
         let dir = tempfile::tempdir().unwrap();
@@ -265,7 +265,7 @@ mod tests {
 
         fs::create_dir_all(cfg.root.join("data")).unwrap();
         let text = status_text(&cfg, &MetaCache::default());
-        assert_eq!(text.lines().nth(2), Some("Graph: unavailable (no such table: nodes)"));
+        assert_eq!(text.lines().nth(2), Some("Graph: unavailable (unable to open database file)"));
         assert!(!cfg.graph_db.exists(), "status must never create the graph store");
         assert!(!cfg.search_db.exists(), "status must never create the search index");
     }
@@ -284,5 +284,20 @@ mod tests {
         let bare = tempfile::tempdir().unwrap();
         let cfg2 = Config::resolve_from(Some(bare.path().to_path_buf()), |_| None);
         assert_eq!(stamp(&cfg2, &MetaCache::default()), "[index unavailable · ledger rev ?]");
+    }
+
+    /// Final review minor 7: the 5 s freshness reuse was not keyed by index
+    /// generation, so for 5 s after a promote the stamp described the OLD
+    /// index's staleness.
+    #[test]
+    fn freshness_is_recomputed_when_the_index_is_replaced() {
+        let (_d, cfg) = root_with_files();
+        search_db(&cfg.search_db, "mock", "m", &[chunk("a", "wiki/a.md", "2000-01-01T00:00:00.5")], &[]);
+        let cache = MetaCache::default();
+        assert_eq!(freshness(&cfg, &cache), Freshness::Newer(5));
+        let next = cfg.root.join("next.sqlite");
+        search_db(&next, "mock", "m", &[chunk("a", "wiki/a.md", "2999-01-01T00:00:00")], &[]);
+        fs::rename(&next, &cfg.search_db).unwrap();
+        assert_eq!(freshness(&cfg, &cache), Freshness::Newer(0), "a promoted index is never judged by the old verdict");
     }
 }

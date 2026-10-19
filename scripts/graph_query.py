@@ -1,3 +1,4 @@
+from pathlib import Path
 import sqlite3
 from typing import Dict, Any, List, Optional
 import json
@@ -5,8 +6,14 @@ from scripts.config import PROJECT_ROOT
 
 DB_PATH = str(PROJECT_ROOT / "data" / "graph.sqlite")
 
+def _connect_ro(db_path: str) -> sqlite3.Connection:
+    """Read-only, and never creates the store (IOU-10: a read-write connect
+    planted an empty data/graph.sqlite whenever the graph was missing)."""
+    return sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+
+
 def get_stats(db_path: str = DB_PATH) -> Dict[str, int]:
-    conn = sqlite3.connect(db_path)
+    conn = _connect_ro(db_path)
     cursor = conn.cursor()
     
     cursor.execute("SELECT COUNT(*) FROM nodes")
@@ -19,7 +26,7 @@ def get_stats(db_path: str = DB_PATH) -> Dict[str, int]:
     return {"nodes": node_count, "edges": edge_count}
 
 def get_node(path_or_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
-    conn = sqlite3.connect(db_path)
+    conn = _connect_ro(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -37,7 +44,7 @@ def get_neighbours(path_or_id: str, depth: int = 1, db_path: str = DB_PATH) -> L
     if not node:
         return []
     
-    conn = sqlite3.connect(db_path)
+    conn = _connect_ro(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -67,7 +74,7 @@ def trace_node(path_or_id: str, depth: int = 2, db_path: str = DB_PATH) -> Dict[
             return
         visited.add(current_id)
         
-        conn = sqlite3.connect(db_path)
+        conn = _connect_ro(db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         

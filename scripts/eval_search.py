@@ -27,8 +27,10 @@ def _resolve(path: str) -> str:
     CWD-independent. Absolute paths are returned unchanged."""
     return path if os.path.isabs(path) else str(PROJECT_ROOT / path)
 
-def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
-    filepath = _resolve(filepath)
+def load_gold_dataset(filepath: str | None) -> List[Dict[str, Any]]:
+    # `None` (DEFAULT_GOLD) means the instrument, resolved now: callers that
+    # passed the sentinel through failed with a NoneType error (IOU-11).
+    filepath = _resolve(filepath or _default_gold())
     if not os.path.exists(filepath):
         print(f"Error: Gold dataset '{filepath}' not found.")
         sys.exit(1)
@@ -49,7 +51,8 @@ def load_gold_dataset(filepath: str) -> List[Dict[str, Any]]:
                 print(f"Warning: Skipping malformed JSON line {lineno}")
     return dataset
 
-def validate_gold_dataset(filepath: str, quiet: bool = False) -> bool:
+def validate_gold_dataset(filepath: str | None, quiet: bool = False) -> bool:
+    filepath = filepath or _default_gold()
     dataset = load_gold_dataset(filepath)
     if not dataset:
         print("Error: No valid queries found in gold dataset to validate.")

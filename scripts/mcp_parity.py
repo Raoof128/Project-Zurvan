@@ -298,6 +298,11 @@ def _write_store() -> Path:
     for d in ("wiki/decisions", "wiki/claims", "wiki/notes", "data"):
         (root / d).mkdir(parents=True, exist_ok=True)
     (root / "wiki" / "decisions" / "evidence.md").write_text("the evidence line for the parity claim\n", encoding="utf-8")
+    # Outside the read allow-list, plus a planted symlink to it at a fixed
+    # resource (wiki/overview.md: writes append to log.md, never to this).
+    (root / "sources").mkdir(exist_ok=True)
+    (root / "sources" / "legal.md").write_text("PARITY SECRET LEGAL TEXT\n", encoding="utf-8")
+    os.symlink(root / "sources" / "legal.md", root / "wiki" / "overview.md")
     return root
 
 
@@ -333,6 +338,10 @@ def run_writes(args, env: dict) -> list[dict]:
         ("claim_add_bad_evidence", "zurvan_claim_add", {"text": "c", "source": "wiki/decisions/evidence.md",
                                                         "evidence": "not in the file", "confidence": "low", "tags": []}),
         ("question_add", "zurvan_question_add", {"question": "Parity question?", "reason": "r", "tags": ["parity"]}),
+        # Both servers hold a claim's source to the read allow-list.
+        ("claim_add_source_refused", "zurvan_claim_add", {"text": "leak", "source": "sources/legal.md",
+                                                          "evidence": "PARITY SECRET LEGAL TEXT", "confidence": "high",
+                                                          "tags": []}),
     ]
     try:
         peers = {}
@@ -344,8 +353,19 @@ def run_writes(args, env: dict) -> list[dict]:
             ta, _, _ = observe(peers["a"], case)
             tb, b_flag, _ = observe(peers["b"], case)
             verdict, diff = compare(case, ta, tb, b_flag)
+            if "SECRET" in ta or "SECRET" in tb:
+                verdict = "FAIL"  # a refused source must never be quoted back
             rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
                          "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        # A symlink planted at a fixed resource is refused by both readers.
+        case = Case("writes:static_resource_symlink_refused", "writes", "resources/read", {"uri": "zurvan://wiki/overview"})
+        ta, _, _ = observe(peers["a"], case)
+        tb, b_flag, _ = observe(peers["b"], case)
+        verdict, diff = compare(case, ta, tb, b_flag)
+        if "SECRET" in ta or "SECRET" in tb or not tb.startswith("Error"):
+            verdict = "FAIL"
+        rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                     "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
         # set_project on the page decision_add created (same slug in both stores).
         # Python resolves a RELATIVE page against the process cwd, not the store
         # (measured: "not a decision page under wiki/decisions"), so each side

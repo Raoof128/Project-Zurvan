@@ -65,6 +65,21 @@ def test_bridge_reports_revision(store):
     assert reply["revision"] == kr.current(store).revision == 1
 
 
+def test_bridge_reports_the_revision_its_own_operation_minted(store):
+    # The revision used to be `kr.current()` read AFTER the call: with other
+    # sessions writing it could name their revision, and a write that minted
+    # nothing still reported one. It is now the revision the call committed.
+    (store / "wiki" / "src.md").write_text("the evidence is here\n")
+    first = _reply(_bridge(store, "decision_add", DECISION))
+    assert first["revision"] == 1
+    failed = _reply(_bridge(store, "claim_add", {"text": "c", "source": "wiki/src.md", "evidence": "not in the file",
+                                                 "confidence": "high", "tags": ["t"]}))
+    assert failed["text"].startswith("Failed to add claim")
+    assert failed["revision"] is None, "a write that minted nothing reports no revision"
+    second = _reply(_bridge(store, "decision_add", {**DECISION, "title": "T2"}))
+    assert second["revision"] == 2 == kr.current(store).revision
+
+
 def test_bridge_stdout_is_one_json_line(store):
     p = _bridge(store, "remember", {"type": "note", "title": "N", "body": "b", "tags": ["x"]})
     reply = _reply(p)  # asserts one line

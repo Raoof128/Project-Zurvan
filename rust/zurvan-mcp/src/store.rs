@@ -135,12 +135,10 @@ fn compute_graph(path: &Path, generation: Generation) -> Result<GraphMeta, Strin
 /// Python's messages for a graph store it cannot read, without its side
 /// effect: with `data/` present Python creates the file and then finds no
 /// table; without `data/` it cannot open the path at all.
-fn graph_missing_message(path: &Path) -> String {
-    if path.parent().is_some_and(|p| p.is_dir()) {
-        "no such table: nodes".into()
-    } else {
-        "unable to open database file".into()
-    }
+/// Python's text for a missing graph store. Its graph reads open read-only
+/// since IOU-10 (2026-10-20), so the text no longer depends on the data dir.
+fn graph_missing_message(_path: &Path) -> String {
+    "unable to open database file".into()
 }
 
 #[derive(Default)]
@@ -149,7 +147,8 @@ pub struct MetaCache {
     graph: Mutex<Option<Arc<GraphMeta>>>,
     computations: AtomicUsize,
     /// Freshness verdict and when it was taken (status.rs, 5 s reuse).
-    pub(crate) freshness: Mutex<Option<(std::time::Instant, crate::status::Freshness)>>,
+    /// Keyed by the index file's generation: a promote invalidates it at once.
+    pub(crate) freshness: Mutex<Option<(std::time::Instant, Option<Generation>, crate::status::Freshness)>>,
 }
 
 impl MetaCache {

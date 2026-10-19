@@ -22,6 +22,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 const MAGIC: &[u8; 8] = b"ZVEC0001";
 const HEADER: usize = 128;
@@ -31,6 +32,11 @@ const BLOCK_ROWS: usize = 8192;
 pub const KEYWORD_WEIGHT: f64 = 0.2;
 
 static TMP_NONCE: AtomicU64 = AtomicU64::new(0);
+
+/// A build marker older than this belongs to a dead builder.
+const MARKER_STALE: Duration = Duration::from_secs(15 * 60);
+/// The longest a server waits for another process's build before its own.
+const BUILD_WAIT: Duration = Duration::from_secs(180);
 
 /// Binds the cache to EVERYTHING that defines the vectors: the source
 /// manifest, the published file's identity, its build time, and the embedding
@@ -332,6 +338,7 @@ pub struct Loader {
     building: Mutex<()>,
     /// Used only when `data/cache/` cannot be written (final review I3).
     fallback: Option<PathBuf>,
+    builds: std::sync::atomic::AtomicUsize,
 }
 
 impl Default for Loader {
@@ -344,7 +351,55 @@ impl Loader {
     /// `None` = the store's cache or nothing (`build-cache` must not succeed
     /// somewhere the server would not look first).
     pub fn with_fallback(fallback: Option<PathBuf>) -> Loader {
-        Loader { current: Mutex::new(None), building: Mutex::new(()), fallback }
+        Loader { current: Mutex::new(None), building: Mutex::new(()), fallback, builds: Default::default() }
+    }
+
+    /// Build the store's cache unless another PROCESS is already building the
+    /// same key (final review minor 8: N servers each wrote ~490 MB per
+    /// promote). The builder holds `vectors-<key>.zvec.building`, created
+    /// O_EXCL; everyone else waits for the finished file. A marker older than
+    /// `MARKER_STALE`, or a wait longer than `BUILD_WAIT`, is taken over.
+    fn build_once(&self, cfg: &Config, conn: &Connection, key: &str, rows: u64, on_progress: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&cfg.cache_dir).map_err(|e| e.to_string())?;
+        let marker = cfg.cache_dir.join(format!("{}.building", cache_name(key)));
+        let done = cache_path(cfg, key);
+        let waited_since = Instant::now();
+        loop {
+            // The other builder may have finished since the last look.
+            if VectorCache::open(&done, key, rows).is_ok() {
+                return Ok(done);
+            }
+            match std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&marker) {
+                Ok(_) => {
+                    // ...including between that look and taking the marker.
+                    if VectorCache::open(&done, key, rows).is_ok() {
+                        let _ = std::fs::remove_file(&marker);
+                        return Ok(done);
+                    }
+                    self.builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let built = build(cfg, conn, key, on_progress);
+                    let _ = std::fs::remove_file(&marker);
+                    return built;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = std::fs::metadata(&marker)
+                        .and_then(|m| m.modified())
+                        .map(|t| t.elapsed().unwrap_or_default() > MARKER_STALE)
+                        .unwrap_or(false);
+                    if stale || waited_since.elapsed() > BUILD_WAIT {
+                        let _ = std::fs::remove_file(&marker);
+                        continue;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+    }
+
+    /// Cache files this loader built (tests; doctor).
+    pub fn builds(&self) -> usize {
+        self.builds.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn current(&self) -> Option<Arc<VectorCache>> {
@@ -362,7 +417,13 @@ impl Loader {
         }
         let rows = meta.embeddings as u64;
         let cache = match VectorCache::open(&cache_path(cfg, &key), &key, rows) {
-            Ok(c) => c,
+            Ok(c) => {
+                // A dir created loose before the 0700 fix is tightened here too
+                // (final review minor 5); best-effort, the file itself is 0600.
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&cfg.cache_dir, std::fs::Permissions::from_mode(0o700));
+                c
+            }
             Err(_) => match self
                 .fallback
                 .as_ref()
@@ -373,7 +434,7 @@ impl Loader {
                 None => {
                     // Built from exactly the generation the key names (I2).
                     let conn = crate::store::open_at(&cfg.search_db, meta.generation)?;
-                    let built = match build(cfg, &conn, &key, on_progress) {
+                    let built = match self.build_once(cfg, &conn, &key, rows, on_progress) {
                         Ok(p) => p,
                         Err(e1) => {
                             let fix = format!(
@@ -383,7 +444,10 @@ impl Loader {
                             let Some(dir) = self.fallback.as_ref() else {
                                 return Err(format!("cannot write {} ({e1}); {fix}", cfg.cache_dir.display()));
                             };
-                            match private_dir(dir).and_then(|_| build_in(dir, &conn, &key, on_progress)) {
+                            match private_dir(dir).and_then(|_| {
+                                self.builds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                build_in(dir, &conn, &key, on_progress)
+                            }) {
                                 Ok(p) => {
                                     prune(dir, 2);
                                     p
@@ -666,5 +730,75 @@ mod tests {
         let mut left: Vec<String> = std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         left.sort();
         assert_eq!(left, vec!["unrelated.txt", "vectors-c.zvec", "vectors-d.zvec"]);
+    }
+
+    /// Final review minor 5: only `build` tightened the cache dir, so a dir
+    /// created loose (0755) before that fix stayed listable by other accounts.
+    #[test]
+    fn opening_an_existing_cache_tightens_a_loose_cache_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(6, 1), &ids(6), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        Loader::with_fallback(None).get(&cfg, &meta, &|_, _| {}).unwrap();
+        chmod(&cfg.cache_dir, 0o755);
+        let again = Loader::with_fallback(None);
+        again.get(&cfg, &meta, &|_, _| {}).unwrap();
+        assert_eq!(again.builds(), 0, "opened, not rebuilt");
+        assert_eq!(std::fs::metadata(&cfg.cache_dir).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+
+    /// Final review minor 8: every server rebuilt the ~490 MB cache after each
+    /// promote. A build in progress in another process (its marker) is now
+    /// waited for, not repeated.
+    #[test]
+    fn a_build_in_progress_elsewhere_is_waited_for_not_repeated() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(8, 2), &ids(8), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let key = cache_key(&meta);
+        std::fs::create_dir_all(&cfg.cache_dir).unwrap();
+        let marker = cfg.cache_dir.join(format!("vectors-{key}.zvec.building"));
+        std::fs::write(&marker, b"other process").unwrap();
+        let loader = Loader::with_fallback(None);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                build_in(&cfg.cache_dir, &open_ro(&cfg.search_db).unwrap(), &key, &|_, _| {}).unwrap();
+                std::fs::remove_file(&marker).unwrap();
+            });
+            let c = loader.get(&cfg, &meta, &|_, _| {}).unwrap();
+            assert_eq!(c.rows(), 8);
+        });
+        assert_eq!(loader.builds(), 0, "waited for the other builder instead of building again");
+    }
+
+    #[test]
+    fn a_stale_build_marker_is_taken_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(5, 3), &ids(5), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let key = cache_key(&meta);
+        std::fs::create_dir_all(&cfg.cache_dir).unwrap();
+        let marker = cfg.cache_dir.join(format!("vectors-{key}.zvec.building"));
+        let f = std::fs::File::create(&marker).unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600)).unwrap();
+        let loader = Loader::with_fallback(None);
+        assert_eq!(loader.get(&cfg, &meta, &|_, _| {}).unwrap().rows(), 5);
+        assert_eq!(loader.builds(), 1, "a dead builder's marker does not block forever");
+        assert!(!marker.exists(), "the build removes its marker");
+    }
+
+    #[test]
+    fn a_build_leaves_no_marker_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(4, 4), &ids(4), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let loader = Loader::with_fallback(None);
+        loader.get(&cfg, &meta, &|_, _| {}).unwrap();
+        assert_eq!(loader.builds(), 1);
+        let leftovers: Vec<_> = std::fs::read_dir(&cfg.cache_dir).unwrap().filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".building")).collect();
+        assert!(leftovers.is_empty());
     }
 }

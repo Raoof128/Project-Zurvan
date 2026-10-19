@@ -411,7 +411,7 @@ No query text is logged or written.
 | read-only gate | `ZURVAN_MCP_READONLY` read at call time; only exact `"0"` enables; same error string |
 | path safety | `is_safe_path`: reject absolute; canonicalise under `PROJECT_ROOT` (follows symlinks, so a link out of the tree is rejected); reject escape; reject first component eq-ignore-case `raw` unless `ZURVAN_MCP_ALLOW_RAW_READ=1` |
 | **read allow-list (new)** | a readable path must sit under `wiki/` (minus `wiki/traces/`), `docs/`, or `eval/`, or be one of `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md` — i.e. what the search index itself covers plus the four repo-root docs. Everything else (`.git/`, `.claude/`, `.remember/`, `.worktrees/`, `sources/`, `data/`, `scripts/`, `tests/`, `static/`, `templates/`, `dist/`) is refused with the same `failed safety checks` error shape. Applies to `zurvan_read_page`, `zurvan://file/{+path}` and the `source` argument of `zurvan_claim_add`. `wiki/traces/` is excluded because a full-mode trace twin carries raw query text (Z1a). Named test family `test_mcp_read_gate_*`, one case per path the 2026-10-19 probe reached. |
-| stdout purity | `#![deny(clippy::print_stdout, clippy::print_stderr)]` except in the transport; subprocess stdout is captured, never inherited |
+| stdout purity | `#![deny(clippy::print_stdout)]` on the library crate, enforced by `cargo clippy` (stderr stays the log channel; the binary's own subcommands print their reports); subprocess stdout is captured, never inherited |
 | published stores untouched | opened `READ_ONLY`; cache written only under `data/cache/`; a write-mode open of either store is a compile-time impossibility (no code path) |
 | one op per write | §6 |
 | no instrument leak | eval runs in Python unchanged; Rust returns its stdout verbatim |
@@ -448,9 +448,12 @@ and it means zero ledger logic is duplicated.
   honest. A warm resident Python worker was considered and rejected: it
   would be a second long-lived process holding ledger state, exactly the
   shape that produced orphaned mutations before.
-- The Rust side validates arguments (slug regex for `project`, enum values,
-  non-empty tags) *before* spawning, so a malformed call never reaches the
-  ledger. Validation errors use the Python server's current wording.
+- The Rust side validates arguments against the captured input schemas
+  (types, ranges, enum values; unknown keys dropped) *before* spawning.
+  Content rules such as the `project` slug are left to Python, whose own
+  `InvalidProjectError` text is the reference (Task 11 ruling; parity case
+  `writes:decision_add_bad_slug` shows the texts identical). A refused write
+  plans nothing, so it never reaches the ledger either way.
 
 ## 7. Smoother for the agent (no semantic change)
 
@@ -480,8 +483,12 @@ existing contract.
    Agents have learned these strings; they stay.
 7. **Startup never blocks the client.** `initialize` and `tools/list` answer
    immediately; the model and cache load in the background; a search that
-   arrives before they are ready waits on them (bounded, with a clear error
-   at 60 s) rather than failing.
+   arrives before they are ready waits on them rather than failing. Waits
+   inside one process are not time-bounded (one loader at a time; a failed
+   model load is reported, then retried after 60 s). A vector-cache build in
+   ANOTHER process is waited for up to 180 s through its
+   `vectors-<key>.zvec.building` marker, and a marker older than 15 minutes
+   is taken over (fix pass 2026-10-20).
 8. **Every retrieval result says which knowledge it answered from** — the
    one new species (§0.1). One header line on `zurvan_search` and
    `zurvan_context`:
@@ -502,8 +509,11 @@ existing contract.
    (tool-call provenance events), which remains unbuilt. The parity harness
    strips this line before diffing; `ZURVAN_MCP_STAMP=0` disables it.
 9. **Write results name the revision they minted.** The Python sentence
-   is kept and a final line is added: `Ledger revision: 752` — the bridge
-   reads `kr.current()` after the tool returns. Today an agent is told
+   is kept and a final line is added: `Ledger revision: 752` — the
+   revision the call's own operation committed (`Operation.minted_revision`,
+   fix pass 2026-10-20; it was `kr.current()` read afterwards, which could
+   name another session's write). A write that minted nothing has no such
+   line. Today an agent is told
    "added" and cannot reference what it added. (A final line rather than a
    reworded sentence so parity can strip it by prefix; plan decision.)
 
@@ -704,8 +714,10 @@ Named promises this document makes and does not pay:
   rewrite of the 14 descriptions is a separate, measurable change.
 - **IOU-4 `python-expand-determinism`** — sort the Python BFS frontier
   (§4.6) so expand/context parity becomes exact.
-- **IOU-5 `python-read-gate`** — the allow-list in the Python server
-  (§10, "outside this project"). Due before phase 1 closes.
+- **IOU-5 `python-read-gate`** — the allow-list in the Python server.
+  **PAID** 2026-10-20: `scripts/mcp_security.readable_target`, judged on
+  stored names (F_GETPATH on macOS), for read_page, file resources, the
+  fixed resources and the claim source; `tests/test_mcp_read_gate.py`.
 - **IOU-6 `index-health-in-stamp`** — carry `index_health`'s verdict in the
   §7.8 stamp so "built from rev 745" cannot hide a truncated index.
 - **IOU-7 `orient-tool`** — A12. **PAID** by plan Task 14 (`611d6d2`): in
@@ -722,11 +734,15 @@ Named promises this document makes and does not pay:
   `graph_query.get_stats` opens read-WRITE, so with `data/` present and the
   graph missing it CREATES an empty `data/graph.sqlite` (the invariant every
   other reader honours with `mode=ro`). Rust reproduces the message, not the
-  side effect.
+  side effect. **PAID** 2026-10-20: every graph read opens `mode=ro`; both
+  servers now say `unable to open database file`
+  (`tests/test_graph_query_readonly.py`).
 - **IOU-11 `python-validate-gold-none`** — found in Task 11:
   `tool_zurvan_validate_gold` passes `DEFAULT_GOLD = None` and returns
   `Error: expected str, bytes or os.PathLike object, not NoneType` on every
-  call. The bridge reproduces it faithfully.
+  call. The bridge reproduces it faithfully. **PAID** 2026-10-20: the loader
+  resolves the `None` default to the instrument at call time
+  (`tests/test_validate_gold_default.py`).
 - **IOU-12 `persist-store-metadata`** — measured at closure: the first
   `zurvan_status` in a fresh Rust process waits for the one full scan of
   `chunks` (6.5 s cold) that the startup warm-up performs. Caching the
@@ -793,6 +809,15 @@ the index); `self-test` 7/7; `e2e_mcp_smoke.py` on both servers with 0
 JSON-RPC parse failures and the live wiki untouched. Gate timings are one
 sample per case with both servers running side by side, so they are not a
 benchmark; the latency table above stands.
+
+Fix pass 2 (2026-10-20, after IOU-5/10/11 and the ten review minors): the
+parity gate is now 314 cases per protocol (two new write-path security
+cases), **312 PASS, 2 EXPECTED_DIVERGENCE, 0 FAIL** on both 2025-11-25 and
+2026-07-28. The 8 read-gate probes are PASS (both servers refuse them with
+the same text); the 2 remaining divergences are the eval tools' one-line
+prefix. Instrument unchanged A = B: hybrid top-1 0.72, top-3 0.74, MRR
+0.7372; keyword top-1 0.00, top-3 0.00, MRR 0.0022, the same before and
+after keyword search stopped scanning `docs/evaluation/retrieval/`.
 
 Re-scored (§10.1): agent latency **8/10** (first three calls ≈ 6.7 s cold,
 < 0.3 s warm; the cold first status keeps it off 9); answer identity **9/10**;

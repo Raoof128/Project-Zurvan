@@ -2020,6 +2020,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "chrono",
+ "libc",
  "memmap2",
  "rayon",
  "regex",

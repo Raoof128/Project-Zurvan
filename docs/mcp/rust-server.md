@@ -91,7 +91,9 @@ Paste the printed Python entry back and restart the client.
 - Search, context and orient results start with a **revision stamp**:
   `[index rev 745 built 2026-10-18T08:23Z · ledger rev 758 · 13 writes since · 18 files newer]`.
   It says what the index was built from, not that it is complete. `ZURVAN_MCP_STAMP=0` removes it.
-- Successful writes end with `Ledger revision: N`.
+- Successful writes end with `Ledger revision: N`, the revision that call
+  minted; a write that minted nothing (a refused claim, a bad slug) has no
+  such line.
 - Error texts are returned with **`isError: true`** (the Python server returns them unflagged).
 - **Progress notifications** when a call carries a `progressToken`: write and
   eval calls tick every 2 s, a first hybrid search reports the vector-cache build
@@ -100,8 +102,12 @@ Paste the printed Python entry back and restart the client.
 - **Reads are allow-listed.** `zurvan_read_page`, every `zurvan://` file
   resource, keyword search and the `source` of `zurvan_claim_add` read only `wiki/` (never `wiki/traces/`), `docs/`, `eval/` and
   `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, judged on the names the
-  filesystem stores. The Python server also serves `.git/`, `.claude/`,
-  `.remember/`, `sources/` and the rest of the repo.
+  filesystem stores, minus `docs/evaluation/retrieval/` (retriever reports,
+  excluded from the index too). Since 2026-10-20 the Python server applies
+  the same allow-list (IOU-5), so the two servers refuse the same paths.
+- **Invalid UTF-8 late in a file:** Rust decodes the whole file and reports
+  it as binary; Python decodes lazily and can serve a slice that ends before
+  the bad bytes. Treat a binary answer as "not a text page".
 
 ## Operations
 

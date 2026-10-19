@@ -1,29 +1,51 @@
 import os
-from scripts.mcp_security import is_safe_path
+from scripts import mcp_security
+from scripts.mcp_security import readable_target
 from scripts.graph_query import get_stats
 from scripts.config import PROJECT_ROOT
 
+UNSAFE_PATH_ERROR = "Error: Path {} failed safety checks (no absolute paths, no '../', raw/ blocked)."
+
+
+def _allow_raw() -> bool:
+    return os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
+
+
 def get_static_resource(path: str) -> str:
-    """Reads a static text file if it exists."""
-    if not os.path.exists(path):
-        return f"Error: Resource {path} not found."
+    """Reads a static text file if it exists.
+
+    A repo-relative `path` is held to the read allow-list and opened by its
+    canonical path, like every other reader: a symlink planted at
+    `wiki/log.md` used to be served whatever it pointed at."""
+    if os.path.isabs(path):
+        abs_path = path
+        target = path if os.path.exists(path) else None
+    else:
+        abs_path = str(PROJECT_ROOT / path)
+        if not os.path.lexists(abs_path):
+            return f"Error: Resource {abs_path} not found."
+        target = readable_target(path, False, PROJECT_ROOT)
+        if target is None:
+            return UNSAFE_PATH_ERROR.format(path)
+    if target is None or not os.path.exists(target):
+        return f"Error: Resource {abs_path} not found."
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(target, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
         return f"Error reading resource: {e}"
 
 def resource_wiki_index() -> str:
-    return get_static_resource(str(PROJECT_ROOT / "wiki" / "index.md"))
+    return get_static_resource("wiki/index.md")
 
 def resource_wiki_log() -> str:
-    return get_static_resource(str(PROJECT_ROOT / "wiki" / "log.md"))
+    return get_static_resource("wiki/log.md")
 
 def resource_wiki_overview() -> str:
-    return get_static_resource(str(PROJECT_ROOT / "wiki" / "overview.md"))
+    return get_static_resource("wiki/overview.md")
 
 def resource_wiki_open_questions() -> str:
-    return get_static_resource(str(PROJECT_ROOT / "wiki" / "open-questions.md"))
+    return get_static_resource("wiki/open-questions.md")
 
 def resource_graph_stats() -> str:
     try:
@@ -33,7 +55,7 @@ def resource_graph_stats() -> str:
         return f"Error: {e}"
 
 def resource_eval_baseline() -> str:
-    return get_static_resource(str(PROJECT_ROOT / "eval" / "README.md"))
+    return get_static_resource("eval/README.md")
 
 def read_file_slice(path: str, offset: int = 0, limit: int = 24000) -> str:
     """Return one character slice of a safe file, with a header naming the next.
@@ -42,11 +64,9 @@ def read_file_slice(path: str, offset: int = 0, limit: int = 24000) -> str:
     made large pages unreadable rather than merely expensive. Slicing keeps the
     per-call bound while leaving every byte reachable.
     """
-    allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
-    if not is_safe_path(path, allow_raw=allow_raw):
-        return f"Error: Path {path} failed safety checks (no absolute paths, no '../', raw/ blocked)."
-
-    abs_path = str(PROJECT_ROOT / path)
+    abs_path = readable_target(path, _allow_raw(), PROJECT_ROOT)
+    if abs_path is None:
+        return UNSAFE_PATH_ERROR.format(path)
     if not os.path.exists(abs_path):
         return f"Error: File {path} not found. Locate it with zurvan_search first."
 
@@ -70,12 +90,10 @@ def read_file_slice(path: str, offset: int = 0, limit: int = 24000) -> str:
 
 def resource_file(path: str) -> str:
     """Dynamic resource reader for safe relative paths (relative to PROJECT_ROOT)."""
-    allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
-    if not is_safe_path(path, allow_raw=allow_raw):
-        return f"Error: Path {path} failed safety checks (no absolute paths, no '../', raw/ blocked)."
-
-    # Resolve relative to the repo root so reads are CWD-independent.
-    abs_path = str(PROJECT_ROOT / path)
+    # The allow-list, judged on stored names; the canonical path is opened.
+    abs_path = readable_target(path, _allow_raw(), PROJECT_ROOT)
+    if abs_path is None:
+        return UNSAFE_PATH_ERROR.format(path)
     if not os.path.exists(abs_path):
         return f"Error: File {path} not found. Locate it with zurvan_search first."
 

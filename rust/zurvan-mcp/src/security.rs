@@ -134,7 +134,8 @@ pub fn is_safe_path(root: &Path, target: &str, allow_raw: bool) -> bool {
 }
 
 /// Safe AND on the allow-list: `wiki/` (no `traces` segment, any case),
-/// `docs/`, `eval/`, the four root docs; `raw/` only with the flag.
+/// `docs/` (minus `docs/evaluation/retrieval/`), `eval/`, the four root docs;
+/// `raw/` only with the flag.
 pub fn is_readable_path(root: &Path, target: &str, allow_raw: bool) -> bool {
     match rel_components(root, target) {
         Some(parts) => allowed(&parts, allow_raw),
@@ -153,7 +154,11 @@ fn allowed(parts: &[String], allow_raw: bool) -> bool {
     }
     match first.as_str() {
         "wiki" => !parts.iter().skip(1).any(|c| is_named(c, "traces")),
-        "docs" | "eval" => true,
+        // Excluded from the index (scripts/chunk.py EXCLUDED_PATH_PREFIXES) so
+        // reports about the retriever cannot feed it; they can quote the
+        // retired instrument, so they are not readable either.
+        "docs" => !(parts.len() >= 3 && is_named(&parts[1], "evaluation") && is_named(&parts[2], "retrieval")),
+        "eval" => true,
         name => parts.len() == 1 && ROOT_DOCS.contains(&name),
     }
 }
@@ -300,5 +305,21 @@ mod tests {
     fn error_texts_are_exact() {
         assert_eq!(READONLY_ERROR, "Error: MCP server is in read-only mode (set ZURVAN_MCP_READONLY=0 to enable writes). Write operation blocked.");
         assert_eq!(unsafe_path_error(".git/HEAD"), "Error: Path .git/HEAD failed safety checks (no absolute paths, no '../', raw/ blocked).");
+    }
+
+    /// Final review minor 9: `docs/evaluation/retrieval/` is excluded from the
+    /// index so reports about the retriever cannot feed it, and those reports
+    /// can quote the retired instrument. The read surface excludes it too.
+    #[test]
+    fn retrieval_reports_are_not_readable() {
+        let (_d, root) = fixture();
+        fs::create_dir_all(root.join("docs/evaluation/retrieval")).unwrap();
+        fs::write(root.join("docs/evaluation/retrieval/report.md"), "x").unwrap();
+        fs::write(root.join("docs/evaluation/other.md"), "x").unwrap();
+        assert!(!is_readable_path(&root, "docs/evaluation/retrieval/report.md", false));
+        assert!(!is_readable_path(&root, "docs/evaluation/retrieval", false));
+        assert!(!is_readable_path(&root, "docs/Evaluation/RETRIEVAL/report.md", false));
+        assert!(open_target(&root, "docs/evaluation/retrieval/report.md", false).is_err());
+        assert!(is_readable_path(&root, "docs/evaluation/other.md", false));
     }
 }

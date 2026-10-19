@@ -543,6 +543,10 @@ class Operation:
     eager: bool = False
     mutation_id: str | None = None
     depth: int = 0          # nesting depth; join-only, never used to commit
+    #: The revision this operation committed, set when it finishes; None
+    #: when it planned nothing (or was abandoned). Callers that report a
+    #: revision report THIS, not `current()` read later (another session's).
+    minted_revision: int | None = None
 
 
 @dataclass
@@ -925,10 +929,10 @@ def _finish(op: Operation, ok: bool, reason: str = "") -> None:
             abandon_mutation(op.mutation_id, "eager operation changed nothing",
                              root=op.root)
             return
-        commit_mutation(op.mutation_id, manifest_digest=live, root=op.root)
+        op.minted_revision = commit_mutation(op.mutation_id, manifest_digest=live, root=op.root)
         return
     if ok:
-        commit_mutation(op.mutation_id, root=op.root)
+        op.minted_revision = commit_mutation(op.mutation_id, root=op.root)
     else:
         abandon_mutation(op.mutation_id, reason, root=op.root)
 

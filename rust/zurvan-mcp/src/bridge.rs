@@ -18,6 +18,28 @@ pub const CLAIM_SOURCE_ERROR: &str =
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const EVAL_TIMEOUT: Duration = Duration::from_secs(1800);
 const PROGRESS_EVERY: Duration = Duration::from_secs(2);
+/// How long a timed-out bridge gets after SIGTERM before SIGKILL: a write
+/// killed outright can leave the ledger SUSPECT mid-operation.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+/// How much of the bridge's stderr an error carries.
+const STDERR_TAIL: usize = 2048;
+
+/// SIGTERM, a grace period, then SIGKILL; always reaped.
+fn stop(child: &mut std::process::Child) {
+    // SAFETY: kill(2) with our own child's pid and a constant signal.
+    unsafe {
+        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+    }
+    let asked = Instant::now();
+    while asked.elapsed() < STOP_GRACE {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
 
 /// Bridge tool name for an MCP tool, and whether it writes.
 pub fn bridge_tool(mcp_name: &str) -> Option<(&'static str, bool)> {
@@ -45,6 +67,8 @@ pub struct BridgeEnv {
     pub code_root: PathBuf,
     pub store_root: PathBuf,
     pub readonly: bool,
+    /// The client's own PYTHONPATH, kept after the code root.
+    pub extra_pythonpath: Option<String>,
 }
 
 impl BridgeEnv {
@@ -55,7 +79,13 @@ impl BridgeEnv {
             .filter(|p| !p.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("ZURVAN_BUILD_ROOT")));
-        BridgeEnv { python, code_root, store_root: cfg.root.clone(), readonly: crate::config::readonly() }
+        BridgeEnv {
+            python,
+            code_root,
+            store_root: cfg.root.clone(),
+            readonly: crate::config::readonly(),
+            extra_pythonpath: std::env::var("PYTHONPATH").ok().filter(|p| !p.is_empty()),
+        }
     }
 }
 
@@ -93,32 +123,49 @@ pub fn call(
     // registered project, and that stamp gates publication. Running in the
     // code checkout stamped "zurvan" (public) where Python stamps "unknown"
     // (security review 2026-10-19, reproduced by the parity harness).
+    // The code root first, then whatever the client already had (final
+    // review minor 3: the client's PYTHONPATH was overwritten).
+    let code = env.code_root.display().to_string();
+    let pythonpath = match env.extra_pythonpath.as_deref() {
+        Some(extra) if extra != code => format!("{code}:{extra}"),
+        _ => code,
+    };
     let mut child = Command::new(python)
         .arg(&script)
-        .env("PYTHONPATH", &env.code_root)
+        .env("PYTHONPATH", pythonpath)
         .env("ZURVAN_ROOT", &env.store_root)
         .env("ZURVAN_MCP_READONLY", if env.readonly { "1" } else { "0" })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("cannot start the Python bridge ({}): {e}", python.display()))?;
-    let request = json!({ "tool": tool, "args": args }).to_string();
-    child.stdin.take().map(|mut s| s.write_all(request.as_bytes())).transpose().map_err(|e| e.to_string())?;
     let mut stdout = child.stdout.take().expect("piped stdout");
     let reader = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = stdout.read_to_string(&mut s);
         s
     });
+    // stderr is drained (a full pipe would block the child) and its tail kept
+    // for the error text: "bad reply" with no cause was undiagnosable.
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        let tail = &buf[buf.len().saturating_sub(STDERR_TAIL)..];
+        String::from_utf8_lossy(tail).trim().to_string()
+    });
+    let request = json!({ "tool": tool, "args": args }).to_string();
+    // A child that exits before reading gives EPIPE here; it is reported with
+    // its exit status below, after the child is reaped, never left a zombie.
+    let wrote = child.stdin.take().map(|mut s| s.write_all(request.as_bytes())).transpose();
     let start = Instant::now();
     let mut last_tick = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait().map_err(|e| e.to_string())? {
-            Some(_) => break,
+            Some(status) => break status,
             None if start.elapsed() > timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child);
                 return Err(format!("the Python bridge timed out after {} s", timeout.as_secs_f64()));
             }
             None => {
@@ -129,10 +176,21 @@ pub fn call(
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
-    }
+    };
     let out = reader.join().unwrap_or_default();
-    let line = out.lines().rev().find(|l| !l.trim().is_empty()).ok_or("the Python bridge wrote no reply")?;
-    let reply: Value = serde_json::from_str(line).map_err(|e| format!("the Python bridge wrote a bad reply: {e}"))?;
+    let err_tail = err_reader.join().unwrap_or_default();
+    let why = |what: &str| {
+        if err_tail.is_empty() {
+            format!("the Python bridge {what} ({status})")
+        } else {
+            format!("the Python bridge {what} ({status}): {err_tail}")
+        }
+    };
+    if wrote.is_err() {
+        return Err(why("exited before reading its request"));
+    }
+    let line = out.lines().rev().find(|l| !l.trim().is_empty()).ok_or_else(|| why("wrote no reply"))?;
+    let reply: Value = serde_json::from_str(line).map_err(|e| why(&format!("wrote a bad reply ({e})")))?;
     if reply.get("ok") != Some(&Value::Bool(true)) {
         return Err(reply.get("error").and_then(Value::as_str).unwrap_or("unknown bridge error").to_string());
     }
@@ -158,6 +216,7 @@ mod tests {
             code_root: dir.path().to_path_buf(),
             store_root: dir.path().to_path_buf(),
             readonly: false,
+            extra_pythonpath: None,
         };
         (dir, env)
     }
@@ -168,7 +227,7 @@ mod tests {
 
     #[test]
     fn readonly_gate_never_spawns() {
-        let env = BridgeEnv { python: Some("/bin/false".into()), code_root: "/nonexistent".into(), store_root: "/nonexistent".into(), readonly: true };
+        let env = BridgeEnv { python: Some("/bin/false".into()), code_root: "/nonexistent".into(), store_root: "/nonexistent".into(), readonly: true, extra_pythonpath: None };
         let out = call(&env, "decision_add", &args(json!({"title": "T"})), Duration::from_secs(5), &|_, _| {}).unwrap();
         assert_eq!(out, (crate::security::READONLY_ERROR.to_string(), None));
     }
@@ -185,7 +244,7 @@ mod tests {
 
     #[test]
     fn missing_python_message() {
-        let env = BridgeEnv { python: None, code_root: "/x".into(), store_root: "/x".into(), readonly: false };
+        let env = BridgeEnv { python: None, code_root: "/x".into(), store_root: "/x".into(), readonly: false, extra_pythonpath: None };
         let (text, _) = call(&env, "remember", &Map::new(), Duration::from_secs(5), &|_, _| {}).unwrap();
         assert_eq!(text, MISSING_PYTHON);
         assert!(text.starts_with("Error"), "flagged isError by the A5 rule");
@@ -244,7 +303,7 @@ mod tests {
 
     #[test]
     fn claim_add_read_only_error_comes_before_the_source_check() {
-        let env = BridgeEnv { python: Some("/bin/false".into()), code_root: "/nonexistent".into(), store_root: "/nonexistent".into(), readonly: true };
+        let env = BridgeEnv { python: Some("/bin/false".into()), code_root: "/nonexistent".into(), store_root: "/nonexistent".into(), readonly: true, extra_pythonpath: None };
         let a = args(json!({"source": ".git/config"}));
         let (text, _) = call(&env, "claim_add", &a, Duration::from_secs(5), &|_, _| {}).unwrap();
         assert_eq!(text, crate::security::READONLY_ERROR, "Python's decorator order: read-only first");
@@ -257,5 +316,39 @@ mod tests {
         let (_d2, slow) = fake("sleep 5");
         let e = call(&slow, "remember", &Map::new(), Duration::from_millis(300), &|_, _| {}).unwrap_err();
         assert!(e.contains("timed out"), "{e}");
+    }
+
+    /// Final review minor 3: a timed-out write was SIGKILLed, which can leave
+    /// the ledger SUSPECT mid-operation. It now gets SIGTERM and a grace period.
+    #[test]
+    fn timeout_asks_the_child_to_stop_before_killing_it() {
+        let (dir, env) = fake("trap 'echo stopped > \"$(dirname \"$0\")/term\"; exit 0' TERM; cat >/dev/null; while :; do sleep 0.05; done");
+        let e = call(&env, "remember", &Map::new(), Duration::from_millis(300), &|_, _| {}).unwrap_err();
+        assert!(e.contains("timed out"), "{e}");
+        assert!(dir.path().join("scripts/term").exists(), "SIGTERM first, so a write can finish its ledger step");
+    }
+
+    #[test]
+    fn a_failed_bridge_reports_its_stderr_tail() {
+        let (_d, env) = fake("cat >/dev/null; echo 'ModuleNotFoundError: No module named yaml' >&2; exit 1");
+        let e = call(&env, "remember", &Map::new(), Duration::from_secs(10), &|_, _| {}).unwrap_err();
+        assert!(e.contains("No module named yaml"), "{e}");
+        assert!(e.contains("exit status: 1") || e.contains("exit code: 1"), "{e}");
+    }
+
+    #[test]
+    fn a_bridge_that_exits_before_reading_is_an_error_naming_its_status() {
+        let (_d, env) = fake("exit 3");
+        let big = args(json!({"body": "x".repeat(4 << 20)}));
+        let e = call(&env, "remember", &big, Duration::from_secs(10), &|_, _| {}).unwrap_err();
+        assert!(e.contains("exit status: 3") || e.contains("exit code: 3"), "{e}");
+    }
+
+    #[test]
+    fn pythonpath_is_prefixed_not_replaced() {
+        let (dir, mut env) = fake("cat >/dev/null; printf '{\"ok\": true, \"text\": \"%s\", \"revision\": null}\\n' \"$PYTHONPATH\"");
+        env.extra_pythonpath = Some("/opt/site-extra".into());
+        let (text, _) = call(&env, "remember", &Map::new(), Duration::from_secs(10), &|_, _| {}).unwrap();
+        assert_eq!(text, format!("{}:/opt/site-extra", dir.path().display()));
     }
 }

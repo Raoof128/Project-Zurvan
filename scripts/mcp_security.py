@@ -1,4 +1,6 @@
+import fcntl
 import os
+import sys
 from pathlib import Path
 
 from scripts.config import PROJECT_ROOT
@@ -55,3 +57,118 @@ def enforce_read_only(func):
             return "Error: MCP server is in read-only mode (set ZURVAN_MCP_READONLY=0 to enable writes). Write operation blocked."
         return func(*args, **kwargs)
     return wrapper
+
+
+# ---------------------------------------------------------------------------
+# The read allow-list (IOU-5), the same surface as the Rust server's
+# `rust/zurvan-mcp/src/security.rs`.
+#
+# On 2026-10-19 this server returned `.git/config`, `.claude/settings.json`,
+# `.remember/now.md` and an ingested legal document under `sources/` through
+# `zurvan_read_page`: `is_safe_path` is a deny-list of three rules. The
+# readable surface is now what the search index covers plus the four repo-root
+# documents, and it is judged on the names the filesystem STORES. APFS folds
+# case with full Unicode rules (`wiki/trace\u017f` opens `traces`), so any
+# check on the requested spelling passes what the filesystem opens.
+
+ROOT_DOCS = ("README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md")
+#: Under docs/ but excluded from the index (scripts/chunk.py) so retriever
+#: reports cannot feed the retriever; they may quote the retired instrument.
+EXCLUDED_DOCS = (("evaluation", "retrieval"),)
+
+
+def _stored_path(path: str) -> str | None:
+    """The existing `path` as the filesystem names it: symlinks followed and,
+    on macOS, the stored spelling of every component (F_GETPATH on an open
+    descriptor). None when it cannot be opened."""
+    if sys.platform == "darwin":
+        try:
+            fd = os.open(path, os.O_RDONLY)
+        except OSError:
+            return None
+        try:
+            raw = fcntl.fcntl(fd, fcntl.F_GETPATH, b"\0" * 1024)
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+        return raw.split(b"\0", 1)[0].decode("utf-8", "surrogateescape")
+    return os.path.realpath(path) if os.path.exists(path) else None
+
+
+def canonical_lenient(path: str) -> str | None:
+    """The longest existing ancestor as stored, then the missing remainder
+    normalised lexically. None (fail closed) for a dangling or looping
+    symlink, and for `..` after a component that does not exist."""
+    parts = Path(path).parts
+    base = None
+    existing = 0
+    probe = ""
+    for i, part in enumerate(parts):
+        probe = os.path.join(probe, part) if probe else part
+        if os.path.exists(probe):
+            stored = _stored_path(probe)
+            if stored is None:
+                return None
+            base, existing = stored, i + 1
+        else:
+            if os.path.islink(probe):
+                return None
+            break
+    if base is None:
+        return None
+    acc = base
+    for part in parts[existing:]:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            return None
+        acc = os.path.join(acc, part)
+    return acc
+
+
+def _named(component: str, name: str) -> bool:
+    return component.lower() == name
+
+
+def _allowed(parts: tuple, allow_raw: bool) -> bool:
+    if not parts:
+        return False
+    first = parts[0]
+    if _named(first, "raw"):
+        return allow_raw
+    if first == "wiki":
+        return not any(_named(p, "traces") for p in parts[1:])
+    if first == "docs":
+        return not any(len(parts) > len(ex) and all(_named(parts[1 + i], n) for i, n in enumerate(ex))
+                       for ex in EXCLUDED_DOCS)
+    if first == "eval":
+        return True
+    return len(parts) == 1 and first in ROOT_DOCS
+
+
+def readable_target(target_path: str, allow_raw: bool = False, root=None) -> str | None:
+    """The canonical absolute path a reader may open, or None. Allowed names
+    compare exactly (a case variant of `wiki` is judged by what it opens);
+    excluded names (`raw`, `traces`, `docs/evaluation/retrieval`) compare
+    case-insensitively."""
+    if not target_path or os.path.isabs(target_path):
+        return None
+    base = _stored_path(str(root if root is not None else PROJECT_ROOT))
+    if base is None:
+        return None
+    resolved = canonical_lenient(os.path.join(base, target_path))
+    if resolved is None:
+        return None
+    try:
+        rel = Path(resolved).relative_to(base)
+    except ValueError:
+        return None
+    return resolved if _allowed(rel.parts, allow_raw) else None
+
+
+def is_readable_path(target_path: str, allow_raw: bool = False, root=None) -> bool:
+    """Safe AND on the read allow-list: `wiki/` (no `traces` segment),
+    `docs/` (minus `docs/evaluation/retrieval/`), `eval/`, the four root
+    documents; `raw/` only with the flag."""
+    return readable_target(target_path, allow_raw, root) is not None

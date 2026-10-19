@@ -6,6 +6,8 @@ import datetime
 import hashlib
 import time
 from pathlib import Path
+
+from scripts.chunk import EXCLUDED_PATH_PREFIXES
 from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -44,6 +46,11 @@ def _search_internal(
         rel = os.path.relpath(filepath, base)
         # Skip derived trace mirrors: self-referential, pollute retrieval.
         if "traces" in rel.split(os.sep):
+            continue
+        # ...and what the index excludes (retriever reports, which can quote
+        # the retired instrument; the Rust server's read gate refuses them).
+        posix = rel.replace(os.sep, "/")
+        if any(posix == p or posix.startswith(p + "/") for p in EXCLUDED_PATH_PREFIXES):
             continue
         try:
             with open(filepath, 'r', encoding='utf-8') as f:

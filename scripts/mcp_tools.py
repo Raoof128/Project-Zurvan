@@ -5,7 +5,7 @@ import contextlib
 import functools
 from typing import List, Optional
 
-from scripts.mcp_security import enforce_read_only, is_safe_path
+from scripts.mcp_security import enforce_read_only, is_readable_path
 from scripts.context_export import search_memory, export_context
 from scripts.graph_query import get_stats, get_neighbours
 from scripts.graph_context import expand_graph_context
@@ -43,10 +43,21 @@ def mcp_operation(func):
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        global LAST_MINTED_REVISION
         from scripts import knowledge_revision as kr
-        with kr.operation(writer="mcp", caller=f"mcp:{func.__name__}"):
-            return func(*args, **kwargs)
+        LAST_MINTED_REVISION = None
+        with kr.operation(writer="mcp", caller=f"mcp:{func.__name__}") as op:
+            result = func(*args, **kwargs)
+        # Set by the operation's commit, which runs as the block exits.
+        LAST_MINTED_REVISION = getattr(op, "minted_revision", None)
+        return result
     return wrapper
+
+
+#: The revision the last `@mcp_operation` call committed (None if it minted
+#: nothing). The write bridge reports this rather than `current()`, which can
+#: already include another session's write.
+LAST_MINTED_REVISION = None
 
 
 # Every tool result lands in an agent's context window, so results are bounded
@@ -391,14 +402,20 @@ def tool_zurvan_decision_set_project(pages: List[str], project: str) -> str:
     return "\n".join([f"Set project to {project} on {len(changed)} page(s):"]
                      + [f"- {p}: was {old}" for p, old in changed])
 
+CLAIM_SOURCE_ERROR = "Error: Source path fails safety checks (e.g. no absolute paths, no ../, no raw/ without flag)."
+
+
 @_protocol_safe
 @enforce_read_only
 @mcp_operation
 def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str, tags: List[str]) -> str:
     """Manages claims."""
+    # The claim reads `source` to verify the evidence, so the source is held
+    # to the read allow-list: `is_safe_path` alone let a claim copy
+    # `.git/config` or a `sources/` document into a readable claim page.
     allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
-    if not is_safe_path(source, allow_raw=allow_raw):
-        return "Error: Source path fails safety checks (e.g. no absolute paths, no ../, no raw/ without flag)."
+    if not is_readable_path(source, allow_raw=allow_raw):
+        return CLAIM_SOURCE_ERROR
     
     if add_claim(text, source, evidence, confidence, tags):
         return f"Claim added successfully: {text}"

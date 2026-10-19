@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// `hybrid_search.MIN_HYBRID_SCORE`; inclusion needs strictly more.
 pub const MIN_HYBRID_SCORE: f64 = 0.2;
@@ -153,8 +153,22 @@ pub struct SearchState {
     pub cfg: Arc<Config>,
     pub meta: Arc<MetaCache>,
     pub loader: Loader,
-    embedder: OnceLock<Result<Arc<Embedder>, String>>,
+    embedder: Mutex<ModelSlot>,
+    /// How long a failed model load is reported before it is tried again.
+    model_retry: std::time::Duration,
+    load_model: Arc<dyn Fn() -> Result<Arc<Embedder>, String> + Send + Sync>,
 }
+
+/// The query model: not tried yet, loaded, or failed at a time (and retried
+/// after `model_retry`, so restoring the model needs no server restart).
+enum ModelSlot {
+    Untried,
+    Loaded(Arc<Embedder>),
+    Failed(std::time::Instant, String),
+}
+
+/// Final review minor 6: a failure used to be cached for the process's life.
+const MODEL_RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl SearchState {
     pub fn new(cfg: Config) -> Self {
@@ -162,21 +176,54 @@ impl SearchState {
     }
 
     pub fn with(cfg: Arc<Config>, meta: Arc<MetaCache>) -> Self {
-        SearchState { cfg, meta, loader: Loader::default(), embedder: OnceLock::new() }
+        SearchState {
+            cfg,
+            meta,
+            loader: Loader::default(),
+            embedder: Mutex::new(ModelSlot::Untried),
+            model_retry: MODEL_RETRY,
+            load_model: Arc::new(|| locate_model().and_then(|d| Embedder::load(&d)).map(Arc::new)),
+        }
+    }
+
+    /// A state whose model comes from `load` and whose failures are retried
+    /// after `retry` (tests; the server uses `new`).
+    pub fn with_model_loader(
+        cfg: Config,
+        retry: std::time::Duration,
+        load: impl Fn() -> Result<Arc<Embedder>, String> + Send + Sync + 'static,
+    ) -> Self {
+        let mut st = SearchState::new(cfg);
+        st.model_retry = retry;
+        st.load_model = Arc::new(load);
+        st
     }
 
     pub fn embedder(&self) -> Result<Arc<Embedder>, String> {
-        self.embedder
-            .get_or_init(|| locate_model().and_then(|d| Embedder::load(&d)).map(Arc::new))
-            .clone()
+        let mut slot = self.embedder.lock().unwrap();
+        match &*slot {
+            ModelSlot::Loaded(e) => return Ok(e.clone()),
+            ModelSlot::Failed(at, why) if at.elapsed() < self.model_retry => return Err(why.clone()),
+            _ => {}
+        }
+        let loaded = (self.load_model)();
+        *slot = match &loaded {
+            Ok(e) => ModelSlot::Loaded(e.clone()),
+            Err(why) => ModelSlot::Failed(std::time::Instant::now(), why.clone()),
+        };
+        loaded
+    }
+
+    fn model_loaded(&self) -> bool {
+        matches!(*self.embedder.lock().unwrap(), ModelSlot::Loaded(_))
     }
 
     /// The model's state for `zurvan_status` without loading it.
     pub fn model_status(&self) -> String {
-        match self.embedder.get() {
-            Some(Ok(_)) => "Model: loaded (all-MiniLM-L6-v2, candle CPU)".into(),
-            Some(Err(e)) => format!("Model: unavailable ({e})"),
-            None => match locate_model() {
+        match &*self.embedder.lock().unwrap() {
+            ModelSlot::Loaded(_) => "Model: loaded (all-MiniLM-L6-v2, candle CPU)".into(),
+            ModelSlot::Failed(_, e) => format!("Model: unavailable ({e})"),
+            ModelSlot::Untried => match locate_model() {
                 Ok(_) => "Model: available, loads on first hybrid search".into(),
                 Err(e) => format!("Model: unavailable ({e})"),
             },
@@ -196,7 +243,7 @@ impl SearchState {
             Space::Mock => Ok(mock(query)),
             Space::Real => {
                 // A first query may wait for the model: say so (0/1 then 1/1).
-                let cold = self.embedder.get().is_none();
+                let cold = !self.model_loaded();
                 if cold {
                     on_progress(0, 1);
                 }
@@ -548,5 +595,26 @@ mod tests {
         });
         assert!(calls > 50, "the storm ran ({calls} calls)");
         assert_eq!(mixed, 0, "{mixed} of {calls} calls mixed two generations");
+    }
+
+    /// Final review minor 6: a failed model load was cached for the life of
+    /// the process, so restoring the model needed a server restart.
+    #[test]
+    fn a_failed_model_load_is_retried_after_a_while() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (_d, cfg) = mock_store();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let a = attempts.clone();
+        let st = SearchState::with_model_loader(cfg, std::time::Duration::from_millis(200), move || {
+            a.fetch_add(1, Ordering::SeqCst);
+            Err("model not found at /nowhere (missing config.json)".to_string())
+        });
+        assert!(st.embedder().is_err());
+        assert!(st.embedder().is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1, "not retried inside the window");
+        assert!(st.model_status().starts_with("Model: unavailable (model not found"), "{}", st.model_status());
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        assert!(st.embedder().is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2, "retried after the window");
     }
 }

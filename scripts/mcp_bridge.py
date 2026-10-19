@@ -58,17 +58,13 @@ def main() -> int:
     with contextlib.redirect_stdout(sys.stderr):
         try:
             import scripts.mcp_tools as tools
-            from scripts import knowledge_revision as kr
 
             text = getattr(tools, name)(**args)
         except Exception as exc:  # the Python server would surface this as a tool error
             return reply(ok=False, error=f"{type(exc).__name__}: {exc}")
-        revision = None
-        if tool in WRITES:
-            try:
-                revision = kr.current().revision
-            except Exception:
-                revision = None  # a store with no ledger yet (nothing ever written)
+        # The revision THIS call minted (None when it wrote nothing), not
+        # `kr.current()`, which can already include another session's write.
+        revision = getattr(tools, "LAST_MINTED_REVISION", None) if tool in WRITES else None
     if tool in EVALS:
         text = EVAL_PREFIX + text
     return reply(ok=True, text=text, revision=revision)
