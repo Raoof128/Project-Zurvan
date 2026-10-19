@@ -22,10 +22,18 @@ ZURVAN_MCP_VERSION = "2.0.0"
 # must never be cached by a shared intermediary.
 _PRIVATE_5_MIN = CacheHint(ttl_ms=300_000, scope="private")
 
+# Sent on `initialize` so an agent without the Zurvan skill still learns the
+# workflow (design 2026-10-19 §7A A1). One file, shared with the Rust server,
+# so the reference implementation and its replacement say the same thing.
+_INSTRUCTIONS = (
+    __import__("pathlib").Path(__file__).resolve().parent.parent / "rust" / "zurvan-mcp" / "instructions.md"
+).read_text(encoding="utf-8")
+
 mcp = MCPServer(
     "Zurvan",
     title="Zurvan knowledge engine",
     description="Local-first knowledge base: hybrid search, a knowledge graph, and durable project memory.",
+    instructions=_INSTRUCTIONS,
     version=ZURVAN_MCP_VERSION,
     dependencies=["mcp"],
     cache_hints={

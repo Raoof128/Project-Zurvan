@@ -1,0 +1,742 @@
+{
+ "ttlMs": 0,
+ "cacheScope": "private",
+ "tools": [
+  {
+   "name": "zurvan_search",
+   "title": "Search Zurvan memory",
+   "description": "Search the Zurvan knowledge base and return ranked matches.\n\n    Use this first to orient yourself on any topic before answering or editing.\n    Returns a numbered list of matching wiki pages, each with a relevance score\n    and (in hybrid mode) the matched heading plus a short text snippet, so you\n    can judge relevance without opening every file.\n    ",
+   "inputSchema": {
+    "properties": {
+     "query": {
+      "description": "Natural-language or keyword query.",
+      "title": "Query",
+      "type": "string"
+     },
+     "hybrid": {
+      "default": true,
+      "description": "Blend FTS5 keyword scoring with local embeddings (best for conceptual queries). False = pure keyword scan.",
+      "title": "Hybrid",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results to return.",
+      "maximum": 50,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object",
+    "title": "zurvan_searchArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_searchOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_context",
+   "title": "Build a context bundle",
+   "description": "Build a ready-to-read Markdown context bundle for a topic.\n\n    Higher-level than zurvan_search: it gathers the top matches AND (when\n    graph=True) their graph neighbours into a single Markdown digest you can\n    read in one shot. Use this when you need to understand the decisions,\n    claims, and related concepts around a topic before making a change.\n    ",
+   "inputSchema": {
+    "properties": {
+     "topic": {
+      "description": "The subject to assemble context for.",
+      "title": "Topic",
+      "type": "string"
+     },
+     "hybrid": {
+      "default": true,
+      "description": "Use hybrid (keyword + embedding) retrieval.",
+      "title": "Hybrid",
+      "type": "boolean"
+     },
+     "graph": {
+      "default": true,
+      "description": "Also pull in linked graph neighbours of the top hits.",
+      "title": "Graph",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of seed matches.",
+      "maximum": 50,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "topic"
+    ],
+    "type": "object",
+    "title": "zurvan_contextArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_contextOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_read_page",
+   "title": "Read a knowledge-base page",
+   "description": "Read one knowledge-base file, in slices when it is large.\n\n    Use after zurvan_search to open only the page(s) you actually need instead\n    of pulling a large context bundle. Returns the raw Markdown (including\n    frontmatter). A file bigger than one slice is NOT refused: the result names\n    the offset to pass back to read the next part. On unsafe or missing paths it\n    returns an actionable error string rather than raising.\n    ",
+   "inputSchema": {
+    "properties": {
+     "path": {
+      "description": "Repo-relative file path (e.g. \"wiki/decisions/foo.md\" or \"docs/API.md\"). No absolute paths, no \"../\"; raw/ is blocked unless ZURVAN_MCP_ALLOW_RAW_READ=1.",
+      "title": "Path",
+      "type": "string"
+     },
+     "offset": {
+      "default": 0,
+      "description": "Character offset to start reading from. Use the offset the previous call reported to continue a large file.",
+      "minimum": 0,
+      "title": "Offset",
+      "type": "integer"
+     },
+     "limit": {
+      "default": 24000,
+      "description": "Maximum characters to return in this slice.",
+      "maximum": 24000,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "type": "object",
+    "title": "zurvan_read_pageArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_read_pageOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_graph_stats",
+   "title": "Graph size",
+   "description": "Return the knowledge graph size as structured {nodes, edges} counts.\n\n    Use as a quick health/size check of the graph before relying on graph tools.\n    Emits machine-readable structured output (plus a JSON text fallback).\n    ",
+   "inputSchema": {
+    "properties": {},
+    "type": "object",
+    "title": "zurvan_graph_statsArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "nodes": {
+      "title": "Nodes",
+      "type": "integer"
+     },
+     "edges": {
+      "title": "Edges",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "nodes",
+     "edges"
+    ],
+    "type": "object",
+    "description": "Structured node/edge counts for the knowledge graph.",
+    "title": "GraphStats"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_graph_neighbours",
+   "title": "Graph neighbours",
+   "description": "List one page of a node's direct (one-hop) graph neighbours.\n\n    Use after a search to see what a specific page links to or is linked from\n    (decisions, claims, concepts, sources). For multi-hop expansion use\n    zurvan_graph_expand instead.\n\n    Results are PAGED: hub nodes in this graph have thousands of edges, and\n    returning them all is a single result larger than most context windows. The\n    first line reports the range and total, and names the cursor for the rest.\n    ",
+   "inputSchema": {
+    "properties": {
+     "path_or_node_id": {
+      "description": "A wiki path (e.g. \"wiki/decisions/foo.md\") or a node id.",
+      "title": "Path Or Node Id",
+      "type": "string"
+     },
+     "limit": {
+      "default": 25,
+      "description": "Maximum neighbours to return in this page.",
+      "maximum": 200,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     },
+     "cursor": {
+      "default": 0,
+      "description": "Offset to resume from; the previous result names the next cursor when more remain.",
+      "minimum": 0,
+      "title": "Cursor",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path_or_node_id"
+    ],
+    "type": "object",
+    "title": "zurvan_graph_neighboursArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_graph_neighboursOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_graph_expand",
+   "title": "Expand graph neighbourhood",
+   "description": "Expand the graph around a node up to `depth` hops, one page at a time.\n\n    Use to discover nearby concepts and notes when building a comprehensive\n    picture. Each line is annotated with its hop distance, node type, and the\n    relation that connected it.\n\n    Results are ordered NEAREST-FIRST and PAGED, so a first page is the most\n    relevant part of the neighbourhood rather than an arbitrary slice.\n    ",
+   "inputSchema": {
+    "properties": {
+     "path_or_node_id": {
+      "description": "A wiki path or node id to expand from.",
+      "title": "Path Or Node Id",
+      "type": "string"
+     },
+     "depth": {
+      "default": 2,
+      "description": "Number of hops to traverse outward.",
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Depth",
+      "type": "integer"
+     },
+     "limit": {
+      "default": 25,
+      "description": "Maximum entries to return in this page.",
+      "maximum": 200,
+      "minimum": 1,
+      "title": "Limit",
+      "type": "integer"
+     },
+     "cursor": {
+      "default": 0,
+      "description": "Offset to resume from; the previous result names the next cursor when more remain.",
+      "minimum": 0,
+      "title": "Cursor",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "path_or_node_id"
+    ],
+    "type": "object",
+    "title": "zurvan_graph_expandArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_graph_expandOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_status",
+   "title": "Zurvan status",
+   "description": "Report corpus size, search-index freshness, and graph size.\n\n    Call this FIRST in a session. It answers the question every other tool\n    depends on: is the index current? A STALE index means search is answering\n    from out-of-date content, and a `mock` embedding provider means semantic\n    search is meaningless. Also reports whether write tools are enabled.\n    ",
+   "inputSchema": {
+    "properties": {},
+    "type": "object",
+    "title": "zurvan_statusArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_statusOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_eval_search",
+   "title": "Evaluate retrieval",
+   "description": "Run the retrieval-quality evaluation against the gold question set.\n\n    Use to confirm search is healthy after reindexing or large wiki changes.\n    Reports top-1/top-3 accuracy and mean reciprocal rank. Read-only and safe.\n    ",
+   "inputSchema": {
+    "properties": {
+     "hybrid": {
+      "default": true,
+      "description": "Evaluate the hybrid retriever (vs. pure keyword).",
+      "title": "Hybrid",
+      "type": "boolean"
+     },
+     "min_top3": {
+      "default": 0.6,
+      "description": "Minimum acceptable top-3 accuracy; the report flags a failure below this.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Min Top3",
+      "type": "number"
+     },
+     "max_queries": {
+      "anyOf": [
+       {
+        "maximum": 50,
+        "minimum": 1,
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Run only the first N gold queries. For a LIVENESS check \u2014 the full set is the only valid quality measurement.",
+      "title": "Max Queries"
+     }
+    },
+    "type": "object",
+    "title": "zurvan_eval_searchArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_eval_searchOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_validate_gold",
+   "title": "Validate gold set",
+   "description": "Validate that every path referenced by the gold question set still exists.\n\n    Use to catch a stale evaluation set after files are renamed or removed.\n    Read-only and safe.\n    ",
+   "inputSchema": {
+    "properties": {},
+    "type": "object",
+    "title": "zurvan_validate_goldArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_validate_goldOutput"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_remember",
+   "title": "Record a note",
+   "description": "Store a free-form project note in Zurvan memory for future agents.\n\n    Use for general observations that do not fit the structured node kinds. For\n    those, prefer the dedicated tools: zurvan_decision_add (architectural\n    choices), zurvan_claim_add (evidence-backed facts), zurvan_question_add\n    (open questions). Requires write mode (ZURVAN_MCP_READONLY=0).\n    ",
+   "inputSchema": {
+    "properties": {
+     "type": {
+      "description": "Category label for the note; preserved as its first tag.",
+      "enum": [
+       "note",
+       "insight",
+       "reference",
+       "todo",
+       "risk"
+      ],
+      "title": "Type",
+      "type": "string"
+     },
+     "title": {
+      "description": "Short, descriptive title.",
+      "title": "Title",
+      "type": "string"
+     },
+     "body": {
+      "description": "The note content (Markdown allowed).",
+      "title": "Body",
+      "type": "string"
+     },
+     "tags": {
+      "description": "Topical tags to aid later retrieval.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     }
+    },
+    "required": [
+     "type",
+     "title",
+     "body",
+     "tags"
+    ],
+    "type": "object",
+    "title": "zurvan_rememberArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_rememberOutput"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_decision_add",
+   "title": "Record a decision",
+   "description": "Record an architectural/engineering decision (ADR-style) in Zurvan.\n\n    Use whenever a non-trivial choice is made so future agents respect it.\n    Name the subject with `project`. Requires write mode (ZURVAN_MCP_READONLY=0).\n    ",
+   "inputSchema": {
+    "properties": {
+     "title": {
+      "description": "The decision, stated as an outcome (e.g. \"Use SQLite FTS5 for search\").",
+      "title": "Title",
+      "type": "string"
+     },
+     "reason": {
+      "description": "The rationale and any considered alternatives.",
+      "title": "Reason",
+      "type": "string"
+     },
+     "status": {
+      "description": "Lifecycle state of the decision.",
+      "enum": [
+       "proposed",
+       "accepted",
+       "rejected",
+       "superseded",
+       "deprecated"
+      ],
+      "title": "Status",
+      "type": "string"
+     },
+     "tags": {
+      "description": "Topical tags.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     },
+     "project": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The decision's SUBJECT project slug (lowercase letters, digits, '-', '_'), e.g. \"acme\". Written to the page's `project:` field, which gates publication. Omit only when the server runs inside that project's registered directory; otherwise it is stamped \"unknown\".",
+      "title": "Project"
+     }
+    },
+    "required": [
+     "title",
+     "reason",
+     "status",
+     "tags"
+    ],
+    "type": "object",
+    "title": "zurvan_decision_addArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_decision_addOutput"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_decision_set_project",
+   "title": "Set a decision's project",
+   "description": "Correct the `project:` subject of existing decisions INSIDE the ledger.\n\n    Use this, never a direct file edit, when a decision was stamped \"unknown\" or\n    with the wrong project. The slug is validated; only the frontmatter line\n    changes; one call is one ledger revision. Requires write mode.\n    ",
+   "inputSchema": {
+    "properties": {
+     "pages": {
+      "description": "Paths of decision pages under wiki/decisions.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Pages",
+      "type": "array"
+     },
+     "project": {
+      "description": "The subject project slug to set, e.g. \"acme\".",
+      "title": "Project",
+      "type": "string"
+     }
+    },
+    "required": [
+     "pages",
+     "project"
+    ],
+    "type": "object",
+    "title": "zurvan_decision_set_projectArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_decision_set_projectOutput"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_claim_add",
+   "title": "Record an evidenced claim",
+   "description": "Record an evidence-backed claim, anchored to a source file.\n\n    The `evidence` text MUST appear verbatim in the `source` file or the claim\n    is rejected (no fabricated citations). `source` must be a safe repo-relative\n    path. Requires write mode (ZURVAN_MCP_READONLY=0).\n    ",
+   "inputSchema": {
+    "properties": {
+     "text": {
+      "description": "The claim being asserted.",
+      "title": "Text",
+      "type": "string"
+     },
+     "source": {
+      "description": "Repo-relative path to the supporting file (no absolute paths, no \"../\", no raw/ unless ZURVAN_MCP_ALLOW_RAW_READ=1).",
+      "title": "Source",
+      "type": "string"
+     },
+     "evidence": {
+      "description": "An exact quote from the source file that supports the claim (must appear verbatim).",
+      "title": "Evidence",
+      "type": "string"
+     },
+     "confidence": {
+      "description": "How strongly the evidence supports the claim.",
+      "enum": [
+       "low",
+       "medium",
+       "high"
+      ],
+      "title": "Confidence",
+      "type": "string"
+     },
+     "tags": {
+      "description": "Topical tags.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     }
+    },
+    "required": [
+     "text",
+     "source",
+     "evidence",
+     "confidence",
+     "tags"
+    ],
+    "type": "object",
+    "title": "zurvan_claim_addArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_claim_addOutput"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_question_add",
+   "title": "Record an open question",
+   "description": "Record an open question / unknown for later investigation.\n\n    Use to capture gaps surfaced during research or editing. Requires write\n    mode (ZURVAN_MCP_READONLY=0).\n    ",
+   "inputSchema": {
+    "properties": {
+     "question": {
+      "description": "The open question.",
+      "title": "Question",
+      "type": "string"
+     },
+     "reason": {
+      "description": "Why it matters / what is blocked on it.",
+      "title": "Reason",
+      "type": "string"
+     },
+     "tags": {
+      "description": "Topical tags.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+     }
+    },
+    "required": [
+     "question",
+     "reason",
+     "tags"
+    ],
+    "type": "object",
+    "title": "zurvan_question_addArguments"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "type": "object",
+    "title": "zurvan_question_addOutput"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  }
+ ],
+ "resultType": "complete"
+}

@@ -1,0 +1,107 @@
+{
+ "initialize": {
+  "capabilities": {
+   "experimental": {},
+   "prompts": {
+    "listChanged": false
+   },
+   "resources": {
+    "listChanged": false,
+    "subscribe": false
+   },
+   "tools": {
+    "listChanged": false
+   }
+  },
+  "protocolVersion": "2025-11-25",
+  "serverInfo": {
+   "description": "Local-first knowledge base: hybrid search, a knowledge graph, and durable project memory.",
+   "name": "Zurvan",
+   "title": "Zurvan knowledge engine",
+   "version": "2.0.0"
+  }
+ },
+ "prompts": {
+  "cacheScope": "private",
+  "prompts": [
+   {
+    "arguments": [],
+    "description": "Orientation brief: how to interact with the Zurvan knowledge engine.",
+    "name": "zurvan_project_brief"
+   },
+   {
+    "arguments": [],
+    "description": "Checklist to gather relevant context before editing files.",
+    "name": "zurvan_pre_edit_context"
+   },
+   {
+    "arguments": [],
+    "description": "Reminder to persist new decisions/claims/notes after an edit.",
+    "name": "zurvan_post_edit_memory"
+   },
+   {
+    "arguments": [],
+    "description": "Workflow for researching a topic thoroughly using search + graph expand.",
+    "name": "zurvan_research_audit"
+   }
+  ],
+  "resultType": "complete",
+  "ttlMs": 0
+ },
+ "resourceTemplates": {
+  "cacheScope": "private",
+  "resourceTemplates": [
+   {
+    "description": "Read a single safe, repo-relative wiki/docs file (raw/ blocked by default; large files are sliced).",
+    "mimeType": "text/plain",
+    "name": "resource_file",
+    "uriTemplate": "zurvan://file/{+path}"
+   }
+  ],
+  "resultType": "complete",
+  "ttlMs": 0
+ },
+ "resources": {
+  "cacheScope": "private",
+  "resources": [
+   {
+    "description": "The wiki index \u2014 the table of contents for the knowledge base.",
+    "mimeType": "text/plain",
+    "name": "resource_wiki_index",
+    "uri": "zurvan://wiki/index"
+   },
+   {
+    "description": "Chronological activity log of ingestions and knowledge updates.",
+    "mimeType": "text/plain",
+    "name": "resource_wiki_log",
+    "uri": "zurvan://wiki/log"
+   },
+   {
+    "description": "High-level overview of the project's knowledge base.",
+    "mimeType": "text/plain",
+    "name": "resource_wiki_overview",
+    "uri": "zurvan://wiki/overview"
+   },
+   {
+    "description": "Currently tracked open questions and unknowns.",
+    "mimeType": "text/plain",
+    "name": "resource_wiki_open_questions",
+    "uri": "zurvan://wiki/open-questions"
+   },
+   {
+    "description": "Knowledge graph size (node and edge counts).",
+    "mimeType": "text/plain",
+    "name": "resource_graph_stats",
+    "uri": "zurvan://graph/stats"
+   },
+   {
+    "description": "The retrieval evaluation baseline (eval/README.md).",
+    "mimeType": "text/plain",
+    "name": "resource_eval_baseline",
+    "uri": "zurvan://eval/baseline"
+   }
+  ],
+  "resultType": "complete",
+  "ttlMs": 0
+ }
+}

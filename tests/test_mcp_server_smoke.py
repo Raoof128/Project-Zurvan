@@ -64,3 +64,17 @@ def test_list_results_carry_private_cache_hints():
     for method, hint in hints.items():
         assert hint.scope == "private", f"{method} must not be publicly cacheable"
         assert hint.ttl_ms > 0
+
+
+def test_initialize_carries_instructions():
+    # Design §7A A1: the server explains itself on `initialize`, so an agent
+    # without the Zurvan skill installed still learns the workflow. The text is
+    # shared with the Rust server (rust/zurvan-mcp/instructions.md), so the
+    # reference and the replacement say the same thing.
+    from pathlib import Path
+
+    import scripts.mcp_server as srv
+
+    expected = (Path(srv.__file__).resolve().parent.parent / "rust" / "zurvan-mcp" / "instructions.md").read_text(encoding="utf-8")
+    assert expected.strip(), "instructions.md is empty"
+    assert srv.mcp.instructions == expected
