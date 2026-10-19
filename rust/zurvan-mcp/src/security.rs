@@ -88,11 +88,18 @@ fn rel_of(root: &Path, resolved: &Path) -> Option<Vec<String>> {
     )
 }
 
+/// The root as the filesystem names it, so `strip_prefix` against canonical
+/// targets works whatever form the caller passed (`/var` vs `/private/var`).
+fn canonical_root(root: &Path) -> PathBuf {
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+}
+
 fn rel_components(root: &Path, target: &str) -> Option<Vec<String>> {
     if target.starts_with('/') || Path::new(target).is_absolute() {
         return None;
     }
-    rel_of(root, &canonical_lenient(&root.join(target))?)
+    let root = canonical_root(root);
+    rel_of(&root, &canonical_lenient(&root.join(target))?)
 }
 
 /// The path a reader may open: it must EXIST, its full canonical form must
@@ -103,8 +110,9 @@ pub fn open_target(root: &Path, target: &str, allow_raw: bool) -> Result<PathBuf
     if !is_readable_path(root, target, allow_raw) {
         return Err(Refusal::Unsafe);
     }
+    let root = canonical_root(root);
     let canonical = std::fs::canonicalize(root.join(target)).map_err(|_| Refusal::NotFound)?;
-    match rel_of(root, &canonical) {
+    match rel_of(&root, &canonical) {
         Some(parts) if allowed(&parts, allow_raw) => Ok(canonical),
         _ => Err(Refusal::Unsafe),
     }

@@ -88,7 +88,11 @@ pub fn keyword(root: &Path, query: &str, limit: usize) -> Vec<Hit> {
             if r.split('/').any(|seg| seg == "traces") {
                 return None;
             }
-            let content = read_universal(p).ok()?;
+            // The walk follows symlinked directories, as glob does; content
+            // is returned, so every file passes zurvan_read_page's gate and is
+            // read at its canonical path (security review 2026-10-19).
+            let target = crate::security::open_target(root, &r, false).ok()?;
+            let content = read_universal(&target).ok()?;
             let lower = content.to_lowercase();
             let score = tokens.iter().filter(|t| lower.contains(t.as_str())).count() as i64;
             (score > 0).then(|| Hit {
@@ -402,6 +406,23 @@ mod tests {
         let got: Vec<String> = hits.iter().map(|h| h.source_path.clone()).collect();
         assert_eq!(got, readdir, "equal scores keep traversal order; traces and undecodable files are skipped");
         assert!(hits.iter().all(|h| h.score == Score::I(1)));
+    }
+
+    /// Security review 2026-10-19: the walk follows symlinked directories
+    /// (as Python's glob does) and returns file content, so every walked file
+    /// must pass the same read gate as zurvan_read_page.
+    #[test]
+    fn keyword_reads_only_what_the_read_gate_allows() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.md"), "alpha outside the root").unwrap();
+        let wiki = dir.path().join("wiki");
+        fs::create_dir_all(wiki.join("Traces")).unwrap();
+        fs::write(wiki.join("ok.md"), "alpha").unwrap();
+        fs::write(wiki.join("Traces/t.md"), "alpha in a case-variant traces dir").unwrap();
+        std::os::unix::fs::symlink(outside.path(), wiki.join("link")).unwrap();
+        let got: Vec<String> = keyword(dir.path(), "alpha", 10).into_iter().map(|h| h.source_path).collect();
+        assert_eq!(got, vec!["wiki/ok.md".to_string()]);
     }
 
     #[test]

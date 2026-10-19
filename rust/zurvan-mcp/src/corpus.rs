@@ -12,13 +12,21 @@ use std::path::{Path, PathBuf};
 /// Paths (absolute, `base`-joined) of every `*.md` entry under `top`, in glob order.
 pub fn glob_md(top: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     if top.is_dir() {
-        visit(top, &mut out);
+        visit(top, &mut out, &mut seen);
     }
     out
 }
 
-fn visit(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Each REAL directory is walked once (by canonical path), so a symlink loop
+/// cannot repeat the corpus; the live store has no symlinks, so glob order is
+/// unaffected there.
+fn visit(dir: &Path, out: &mut Vec<PathBuf>, seen: &mut std::collections::HashSet<PathBuf>) {
+    let Ok(canonical) = std::fs::canonicalize(dir) else { return };
+    if !seen.insert(canonical) {
+        return;
+    }
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     let entries: Vec<(String, PathBuf)> = rd
         .filter_map(Result::ok)
@@ -34,7 +42,7 @@ fn visit(dir: &Path, out: &mut Vec<PathBuf>) {
     }
     for (_, path) in &entries {
         if path.is_dir() {
-            visit(path, out);
+            visit(path, out, seen);
         }
     }
 }
@@ -70,4 +78,24 @@ pub fn scan_markdown_files(root: &Path) -> Vec<String> {
         }
     }
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn glob_md_terminates_on_a_symlink_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let wiki = dir.path().join("wiki");
+        std::fs::create_dir_all(wiki.join("sub")).unwrap();
+        std::fs::write(wiki.join("a.md"), "x").unwrap();
+        std::fs::write(wiki.join("sub/b.md"), "x").unwrap();
+        std::os::unix::fs::symlink(&wiki, wiki.join("sub/loop")).unwrap();
+        let found = glob_md(&wiki);
+        // Each real directory is walked once: the OS stops a loop only after
+        // ~40 hops, collecting the same files again on every lap.
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().any(|p| p.ends_with("a.md")) && found.iter().any(|p| p.ends_with("sub/b.md")));
+    }
 }
