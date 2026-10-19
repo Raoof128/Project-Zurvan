@@ -5,8 +5,25 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+RUST_BIN = ROOT / "rust" / "zurvan-mcp" / "target" / "release" / "zurvan-mcp"
 
-def run_checks():
+
+def _rust_doctor() -> int:
+    """The Rust server checks itself: index, model, vector cache, write
+    bridge, both protocol lifecycles — each failing line followed by its fix."""
+    import subprocess
+    if not Path(RUST_BIN).exists():
+        print(f"❌ {RUST_BIN} is not built. Run: cargo build --release --manifest-path "
+              f"{ROOT / 'rust' / 'zurvan-mcp' / 'Cargo.toml'}")
+        return 1
+    p = subprocess.run([str(RUST_BIN), "doctor"], capture_output=True, text=True)
+    print(p.stdout, end="")
+    return 0 if p.returncode == 0 else 1
+
+
+def run_checks(engine: str = "python"):
+    if engine == "rust":
+        return _rust_doctor()
     errors = []
     warnings = []
 
@@ -85,4 +102,7 @@ def run_checks():
     return 0
 
 if __name__ == "__main__":
-    sys.exit(run_checks())
+    import argparse
+    parser = argparse.ArgumentParser(description="Check the Zurvan MCP setup")
+    parser.add_argument("--engine", choices=["python", "rust"], default="python")
+    sys.exit(run_checks(parser.parse_args().engine))

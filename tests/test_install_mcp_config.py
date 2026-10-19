@@ -115,3 +115,46 @@ def test_readonly_flag_reaches_the_env(client):
         "codex": lambda: get_codex_config(_CWD, readonly=False),
     }[client]()
     assert write["env"]["ZURVAN_MCP_READONLY"] == "0"
+
+
+# ── --engine rust (design 2026-10-19, plan Task 13) ──────────────────────────
+
+def _rust_entries(readonly=True):
+    return {
+        "claude-code": get_claude_code_config(_CWD, readonly=readonly, engine="rust")["mcpServers"]["zurvan"],
+        "cursor": get_cursor_config(_CWD, readonly=readonly, engine="rust")["mcpServers"]["zurvan"],
+        "codex": get_codex_config(_CWD, readonly=readonly, engine="rust"),
+    }
+
+
+@_pytest.mark.parametrize("client", ["claude-code", "cursor", "codex"])
+def test_rust_engine_config(client):
+    entry = _rust_entries()[client]
+    assert entry["command"] == "/repo/Zurvan/rust/zurvan-mcp/target/release/zurvan-mcp"
+    assert entry["args"] == ["serve"]
+    env = entry["env"]
+    assert _os.path.isabs(env["ZURVAN_PYTHON"]), "the write bridge needs an absolute interpreter"
+    assert env["ZURVAN_PYTHON"] not in ("python", "python3")
+    assert env["ZURVAN_EMBED_PROVIDER"] == "sentence_transformers"
+    assert env["ZURVAN_MCP_READONLY"] == "1"
+    assert _rust_entries(readonly=False)[client]["env"]["ZURVAN_MCP_READONLY"] == "0"
+
+
+def test_rust_engine_codex_renders():
+    from scripts.install_mcp_config import render_codex_cli, render_codex_toml
+    cfg = get_codex_config(_CWD, readonly=True, engine="rust")
+    assert 'command = "/repo/Zurvan/rust/zurvan-mcp/target/release/zurvan-mcp"' in render_codex_toml(cfg)
+    assert render_codex_cli(cfg).endswith("-- /repo/Zurvan/rust/zurvan-mcp/target/release/zurvan-mcp serve")
+
+
+@_pytest.mark.parametrize("client", ["claude-code", "cursor", "codex"])
+def test_python_engine_unchanged(client):
+    default = _server_entries()[client]
+    explicit = {
+        "claude-code": lambda: get_claude_code_config(_CWD, readonly=True, engine="python")["mcpServers"]["zurvan"],
+        "cursor": lambda: get_cursor_config(_CWD, readonly=True, engine="python")["mcpServers"]["zurvan"],
+        "codex": lambda: get_codex_config(_CWD, readonly=True, engine="python"),
+    }[client]()
+    assert default == explicit
+    assert default["args"][0].endswith("scripts/mcp_server.py")
+    assert "ZURVAN_PYTHON" not in default["env"]

@@ -41,40 +41,36 @@ def _env(cwd: str, readonly: bool) -> dict:
         "ZURVAN_EMBED_PROVIDER": "sentence_transformers",
     }
 
-def get_claude_code_config(cwd: str, readonly: bool):
-    return {
-        "mcpServers": {
-            "zurvan": {
-                "command": _interpreter(),
-                "args": _server_args(cwd),
-                "env": _env(cwd, readonly)
-            }
-        }
-    }
+def rust_binary(cwd: str) -> str:
+    """The Rust server (rust/zurvan-mcp), built with `cargo build --release`."""
+    return str(Path(cwd) / "rust" / "zurvan-mcp" / "target" / "release" / "zurvan-mcp")
 
-def get_cursor_config(cwd: str, readonly: bool):
-    return {
-        "mcpServers": {
-            "zurvan": {
-                "command": _interpreter(),
-                "args": _server_args(cwd),
-                "env": _env(cwd, readonly)
-            }
-        }
-    }
 
-def get_codex_config(cwd: str, readonly: bool):
+def _launch(cwd: str, readonly: bool, engine: str) -> dict:
+    """command / args / env for one engine. `python` is the reference server
+    (scripts/mcp_server.py); `rust` is the drop-in binary, whose write and eval
+    tools run through scripts/mcp_bridge.py with ZURVAN_PYTHON — absolute, for
+    the same reason the python engine's interpreter is (see _interpreter)."""
+    env = _env(cwd, readonly)
+    if engine == "rust":
+        return {"command": rust_binary(cwd), "args": ["serve"], "env": {**env, "ZURVAN_PYTHON": _interpreter()}}
+    if engine != "python":
+        raise ValueError(f"unknown engine {engine!r}")
+    return {"command": _interpreter(), "args": _server_args(cwd), "env": env}
+
+
+def get_claude_code_config(cwd: str, readonly: bool, engine: str = "python"):
+    return {"mcpServers": {"zurvan": _launch(cwd, readonly, engine)}}
+
+def get_cursor_config(cwd: str, readonly: bool, engine: str = "python"):
+    return {"mcpServers": {"zurvan": _launch(cwd, readonly, engine)}}
+
+def get_codex_config(cwd: str, readonly: bool, engine: str = "python"):
     """Codex stores MCP servers in ~/.codex/config.toml under [mcp_servers.<name>].
     Returns a plain dict describing the server; render_codex_toml() turns it into
     the TOML block and CLI command."""
-    return {
-        "name": "zurvan",
-        # Absolute interpreter path so the launch does not depend on Codex's PATH
-        # resolving to an interpreter that has the `mcp` package installed.
-        "command": _interpreter(),
-        "args": _server_args(cwd),
-        "env": _env(cwd, readonly),
-    }
+    # Absolute command path so the launch does not depend on Codex's PATH.
+    return {"name": "zurvan", **_launch(cwd, readonly, engine)}
 
 def render_codex_toml(config: dict) -> str:
     name = config["name"]
@@ -91,7 +87,7 @@ def render_codex_cli(config: dict) -> str:
     env_flags = " ".join(f"--env {k}={v}" for k, v in config["env"].items())
     return (
         f"codex mcp add {config['name']} {env_flags} "
-        f"-- {config['command']} {config['args'][0]}"
+        f"-- {config['command']} {' '.join(config['args'])}"
     )
 
 def main():
@@ -103,25 +99,30 @@ def main():
     group.add_argument("--write-mode", action="store_true", help="Enable write mode (WARNING: can modify your wiki!)")
     
     parser.add_argument("--force", action="store_true", help="Force overwrite of existing config files (mocked)")
-    
+    parser.add_argument("--engine", choices=["python", "rust"], default="python",
+                        help="python = scripts/mcp_server.py (reference); rust = rust/zurvan-mcp (drop-in, faster)")
+
     args = parser.parse_args()
-    
+
     if args.write_mode:
         print("\n⚠️  WARNING: Write mode is enabled. The agent will have permission to modify your Zurvan knowledge base.", file=sys.stderr)
         print("   Proceed with caution.\n", file=sys.stderr)
-        
+
     cwd = str(ROOT)
-    
+    if args.engine == "rust" and not Path(rust_binary(cwd)).exists():
+        print(f"⚠️  {rust_binary(cwd)} is not built yet. Build it first:\n"
+              f"   cargo build --release --manifest-path {ROOT / 'rust' / 'zurvan-mcp' / 'Cargo.toml'}\n", file=sys.stderr)
+
     if args.client == "claude-code":
-        config = get_claude_code_config(cwd, args.readonly)
+        config = get_claude_code_config(cwd, args.readonly, args.engine)
         print("Add the following to your claude.json (or equivalent config):")
         print("\n" + json.dumps(config, indent=2))
     elif args.client == "cursor":
-        config = get_cursor_config(cwd, args.readonly)
+        config = get_cursor_config(cwd, args.readonly, args.engine)
         print("Add the following to your Cursor MCP server settings:")
         print("\n" + json.dumps(config, indent=2))
     elif args.client == "codex":
-        config = get_codex_config(cwd, args.readonly)
+        config = get_codex_config(cwd, args.readonly, args.engine)
         print("Option A — run this command:\n")
         print(render_codex_cli(config))
         print("\nOption B — add this block to ~/.codex/config.toml:\n")

@@ -1,0 +1,138 @@
+# The Rust MCP server (`zurvan-mcp`)
+
+A drop-in replacement for `scripts/mcp_server.py`: the same 15 tools, 7
+resources and 4 prompts, the same argument schemas and the same answers, served
+by a native binary. Design: `docs/superpowers/specs/2026-10-19-rust-mcp-server-design.md`.
+The Python server stays as the reference implementation and the fallback.
+
+## What runs where
+
+| Tools | Engine |
+|---|---|
+| `zurvan_search`, `zurvan_context`, `zurvan_orient`, `zurvan_read_page`, `zurvan_status`, the three graph tools, all resources and prompts | Rust, native |
+| `zurvan_remember`, `zurvan_decision_add`, `zurvan_decision_set_project`, `zurvan_claim_add`, `zurvan_question_add`, `zurvan_eval_search`, `zurvan_validate_gold` | Python, one process per call through `scripts/mcp_bridge.py` |
+
+Writes stay in Python on purpose: each one goes through the same
+`scripts.mcp_tools` function and the same knowledge-ledger operation boundary as
+before, so a write is still exactly one mutation attributed `writer=mcp`. The
+eval tools measure the **Python** retriever and their output says so.
+
+## Build
+
+```bash
+cargo build --release --manifest-path rust/zurvan-mcp/Cargo.toml
+```
+
+The binary is `rust/zurvan-mcp/target/release/zurvan-mcp` (about 10 MB). It
+needs no network at run time and no Python for reads. Query embeddings use the
+`all-MiniLM-L6-v2` weights already in the Hugging Face cache
+(`~/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2/`);
+`ZURVAN_MODEL_DIR` points elsewhere.
+
+## Install
+
+Print the config for your client and paste it where the generator says:
+
+```bash
+python scripts/install_mcp_config.py --client claude-code --write-mode --engine rust
+```
+
+```bash
+python scripts/install_mcp_config.py --client codex --write-mode --engine rust
+```
+
+The Rust entry differs from the Python one in two places: `command` is the
+binary (with `args = ["serve"]`), and `env` gains `ZURVAN_PYTHON`, the absolute
+interpreter the write bridge runs. Restart the client afterwards; a server that
+is already running keeps its old command.
+
+## Verify
+
+```bash
+rust/zurvan-mcp/target/release/zurvan-mcp doctor
+```
+
+```bash
+rust/zurvan-mcp/target/release/zurvan-mcp self-test
+```
+
+```bash
+python scripts/e2e_mcp_smoke.py --server rust/zurvan-mcp/target/release/zurvan-mcp
+```
+
+`doctor` checks the root, the index and its freshness, `index_health`, the
+graph, the ledger, the model, the vector cache, the write bridge and both MCP
+lifecycles; every non-OK line is followed by a `fix:` line. `self-test` drives
+the binary over stdio and never writes. `python scripts/doctor_mcp.py --engine
+rust` runs the same doctor.
+
+To compare the two servers on your own store (read-only; writes use throwaway
+stores the harness creates and removes):
+
+```bash
+python scripts/mcp_parity.py --root ~/Desktop/Raouf/Zurvan --only listing,status,graph,search_hybrid
+```
+
+The console and the report (`~/.zurvan/parity/<time>.json`) carry case ids,
+verdicts and sizes only — never page content, never an instrument query.
+
+## Roll back
+
+```bash
+python scripts/install_mcp_config.py --client claude-code --write-mode --engine python
+```
+
+Paste the printed Python entry back and restart the client.
+
+## What an agent sees that is new
+
+- `initialize` carries server **instructions** (the workflow, the paging
+  contract, the write rules) — the Python server now sends the same text.
+- Search, context and orient results start with a **revision stamp**:
+  `[index rev 745 built 2026-10-18T08:23Z · ledger rev 758 · 13 writes since · 18 files newer]`.
+  It says what the index was built from, not that it is complete. `ZURVAN_MCP_STAMP=0` removes it.
+- Successful writes end with `Ledger revision: N`.
+- Error texts are returned with **`isError: true`** (the Python server returns them unflagged).
+- **Progress notifications** when a call carries a `progressToken`: write and
+  eval calls tick every 2 s, a first hybrid search reports the vector-cache build
+  and the model load.
+- `zurvan_status` adds `Serving:`, `Ledger:`, `Model:` and `Vector cache:` lines.
+- **Reads are allow-listed.** `zurvan_read_page`, `zurvan://file/…` and keyword
+  search read only `wiki/` (never `wiki/traces/`), `docs/`, `eval/` and
+  `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, judged on the names the
+  filesystem stores. The Python server also serves `.git/`, `.claude/`,
+  `.remember/`, `sources/` and the rest of the repo.
+
+## Operations
+
+- **Vector cache.** The first hybrid search after an index rebuild (or the
+  background warm-up at start) writes `data/cache/vectors-<key>.zvec`: the
+  index's vectors as one memory-mapped matrix, about 490 MB, built in about 9 s.
+  The key binds the index file's identity, build time and embedding space, so a
+  rebuilt index gets a new cache; the newest two are kept. The directory is 0700
+  and the files 0600. `zurvan-mcp build-cache` builds it ahead of time.
+- **Hot reload.** `zurvan index search` promotes a new index atomically; the
+  server notices on its next call and serves the new generation, waiting for the
+  new cache rather than mixing generations.
+- **Environment.** `ZURVAN_ROOT` (or `--root`) picks the store;
+  `ZURVAN_SEARCH_DB` the index; `ZURVAN_MCP_READONLY` (writes only when exactly
+  `0`); `ZURVAN_MCP_ALLOW_RAW_READ`; `ZURVAN_PYTHON` (write bridge);
+  `ZURVAN_CODE_ROOT` (where `scripts/` lives, default: the checkout the binary
+  was built from); `ZURVAN_MODEL_DIR`; `ZURVAN_MCP_STAMP`.
+
+## Measured (2026-10-19, live store, index rev 745, 303,080 chunks)
+
+| | Python server | Rust server |
+|---|---|---|
+| hybrid search p50 / p95 | 11,844 / 27,983 ms (6.8 s warm on a quiet machine) | 129 / 194 ms |
+| keyword search p50 / p95 | several seconds | 618 / 1,224 ms |
+| context p50 / p95 | 10,962 / 27,662 ms | 174 / 283 ms |
+| `zurvan_status` p50 / p95 | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 6.5 s on a fresh process's first call |
+| physical footprint after 100 searches | — | 137 MB (+ the 465 MiB file-backed vector map, clean) |
+
+Parity on the same store, every group, on both MCP protocol versions: 312 cases,
+302 identical, 10 expected divergences (the read allow-list refusing what Python
+serves, and the eval tools' one-line prefix), 0 failures. The instrument scores
+the same on both servers. Targets **not** met: hybrid p95 under 150 ms, keyword
+under 400 ms, and the first `zurvan_status` of a fresh process, which waits for
+the start-up metadata scan. Design §10.4 has the full table.

@@ -5,6 +5,9 @@
 approved … Answer open questions with your recommendations"). Gauntleted
 by builder check + simurgh-arise pass. Open questions answered in §12.
 Plan: `docs/superpowers/plans/2026-10-19-rust-mcp-server.md`.
+**Implemented** on branch `rust-mcp` (plan Tasks 0–14, 2026-10-19); live
+gate green on both protocols (§10.4). Cut-over of the harness configs is
+**not done**: it waits for the whole-branch review and the merge.
 **Scope:** replace `scripts/mcp_server.py` (+ `mcp_tools.py`, `mcp_resources.py`,
 `mcp_prompts.py`, `mcp_security.py`) with a native binary that speaks the same
 MCP surface, is an order of magnitude faster on every call, and is smoother
@@ -705,17 +708,76 @@ Named promises this document makes and does not pay:
   (§10, "outside this project"). Due before phase 1 closes.
 - **IOU-6 `index-health-in-stamp`** — carry `index_health`'s verdict in the
   §7.8 stamp so "built from rev 745" cannot hide a truncated index.
-- **IOU-7 `orient-tool`** — A12, paid by phase 7 if Raouf says yes to Q5;
-  otherwise stays an IOU with the measured cost (+~350 tokens/session).
+- **IOU-7 `orient-tool`** — A12. **PAID** by plan Task 14 (`611d6d2`): in
+  both servers; measured schema cost +1,053 characters (~+263 tokens/session).
 - **IOU-8 `python-instructions`** — give the Python server the same A1
-  `instructions` text so the reference and the fallback explain themselves
-  too; one argument to `MCPServer(...)`. Scheduled in plan Task 3.
+  `instructions` text. **PAID** by plan Task 3 (`903023e`).
 - **IOU-9 `python-fts-rowid`** — the spike found Python's FTS stage costs
   5.3 s p50 because it selects `chunk_id` from an external-content FTS
   table (one `chunks` lookup per matching row). Selecting `rowid` returns
   the identical score set at 0.2 s. Same results, so no ranking change, but
   it touches the retrieval path, so it ships with a before/after
   `eval_search` entry in CHANGELOG.md. Not in this project.
+- **IOU-10 `python-graph-stats-creates-db`** — found in Task 5:
+  `graph_query.get_stats` opens read-WRITE, so with `data/` present and the
+  graph missing it CREATES an empty `data/graph.sqlite` (the invariant every
+  other reader honours with `mode=ro`). Rust reproduces the message, not the
+  side effect.
+- **IOU-11 `python-validate-gold-none`** — found in Task 11:
+  `tool_zurvan_validate_gold` passes `DEFAULT_GOLD = None` and returns
+  `Error: expected str, bytes or os.PathLike object, not NoneType` on every
+  call. The bridge reproduces it faithfully.
+- **IOU-12 `persist-store-metadata`** — measured at closure: the first
+  `zurvan_status` in a fresh Rust process waits for the one full scan of
+  `chunks` (6.5 s cold) that the startup warm-up performs. Caching the
+  per-generation metadata next to the vector cache would make the first call
+  as fast as the rest (8 ms).
+- **IOU-13 `keyword-scan-speed`** — Rust keyword mode is 618 / 1,224 ms
+  p50 / p95 against the 400 ms target: it reads all 235 MB of corpus files per
+  query, now through the read gate. An FTS5 keyword mode (IOU-1) would make it
+  milliseconds but changes results.
+
+## 10.4 Closure measurements (2026-10-19, live store, index rev 745)
+
+Parity gate, `scripts/mcp_parity.py`, every group, on **both** protocols:
+
+| Protocol | Cases | PASS | NEAR_TIE | EXPECTED_DIVERGENCE | FAIL | Instrument (hybrid) A = B |
+|---|---|---|---|---|---|---|
+| 2025-11-25 | 312 | 302 | 0 | 10 | 0 | top-1 0.72, top-3 0.74, MRR 0.7372 |
+| 2026-07-28 | 312 | 302 | 0 | 10 | 0 | top-1 0.72, top-3 0.74, MRR 0.7372 |
+
+The 10 expected divergences are the 8 read-gate probes (Rust refuses what
+Python serves, IOU-5) and the 2 eval tools (Rust's text is Python's plus the
+one-line "Evaluates the Python reference retriever" prefix, exactly).
+
+Latency, Rust measured against itself (the machine shared only with other
+sessions' idle servers); Python from the same-day A/B runs:
+
+| Tool | Python p50 / p95 | Rust p50 / p95 | §1 target |
+|---|---|---|---|
+| hybrid search | 11,844 / 27,983 ms (6.8 s quiet) | 129 / 194 ms | < 150 ms — p50 met, p95 not |
+| keyword search | ~5,000–15,000 ms | 618 / 1,224 ms | < 400 ms — **not met** (IOU-13) |
+| context | 10,962 / 27,662 ms | 174 / 283 ms | < 400 ms — met |
+| orient | 18,149 / 22,447 ms | 138 / 208 ms | — |
+| status | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 6.5 s first call | < 100 ms — met warm, **not** first call (IOU-12) |
+| graph neighbours / expand | 3.3 / 17 · 4.4 / 89 ms | 2.5 / 15 · 4.1 / 59 ms | < 20 ms p50 — met |
+| read_page | 0.9 / 1.1 ms | 0.2 / 0.3 ms | < 5 ms — met |
+
+Memory after 100 hybrid searches (`vmmap -summary`): physical footprint
+**137.4 MB** (peak 142.8); the vector cache is one 464.8 MiB file-backed
+mapping, 454.4 MiB resident, 0 dirty. Target < 300 MB heap — met.
+
+Retrieval invariance (§9.3): the coherent snapshot refused
+`SNAPSHOT_NOT_READY` (search built from revision 745, knowledge revision
+beyond it), so there is no snapshot id; the evidence is the A/B run on the
+identical rev-745 bytes, with identical metrics on both protocols.
+
+Re-scored (§10.1): agent latency **8/10** (first three calls ≈ 6.7 s cold,
+< 0.3 s warm; the cold first status keeps it off 9); answer identity **9/10**;
+read surface **8/10** in Rust, still 3/10 in Python until IOU-5; freshness
+legibility **8/10**; invariant preservation **9/10** (ledger rows equal in
+parity, and the publication-control defect the review found is fixed and
+tested); agent readiness **8/10**.
 
 ## 10.3 Spike verdict (phase 0, 2026-10-19)
 

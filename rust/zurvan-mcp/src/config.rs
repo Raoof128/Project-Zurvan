@@ -21,7 +21,7 @@ fn non_empty(v: Option<String>) -> Option<String> {
 }
 
 /// `Path.resolve()` for an existing path; the path unchanged otherwise.
-fn resolve(p: PathBuf) -> PathBuf {
+fn resolved(p: PathBuf) -> PathBuf {
     p.canonicalize().unwrap_or(p)
 }
 
@@ -34,7 +34,7 @@ impl Config {
         let root = root_flag
             .or_else(|| non_empty(getenv("ZURVAN_ROOT")).map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from(env!("ZURVAN_BUILD_ROOT")));
-        let root = resolve(root);
+        let root = resolved(root);
         let data = root.join("data");
         let search_db = non_empty(getenv("ZURVAN_SEARCH_DB"))
             .map(PathBuf::from)

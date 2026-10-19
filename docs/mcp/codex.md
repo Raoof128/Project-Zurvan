@@ -34,6 +34,12 @@ args = ["/absolute/path/to/Project-Zurvan/scripts/mcp_server.py"]
 env = { PYTHONPATH = "/absolute/path/to/Project-Zurvan", ZURVAN_MCP_READONLY = "1", ZURVAN_MCP_TRANSPORT = "stdio", ZURVAN_MCP_ALLOW_RAW_READ = "0", ZURVAN_EMBED_PROVIDER = "mock" }
 ```
 
+## Rust engine (faster drop-in)
+`python scripts/install_mcp_config.py --client codex --write-mode --engine rust`
+prints the `[mcp_servers.zurvan]` block and `codex mcp add` command for the
+Rust server (`rust/zurvan-mcp`): same tools and answers, about 50× faster
+search. Build, verify and roll back: [rust-server.md](rust-server.md).
+
 ## Verify
 ```bash
 codex mcp get zurvan     # shows the configured server

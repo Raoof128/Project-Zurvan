@@ -36,5 +36,10 @@ If you want Claude Code to act as an autonomous researcher that can add claims, 
 2. Change `"ZURVAN_MCP_READONLY"` to `"0"` in your configuration.
 3. Test it by asking Claude Code: `Can you add a decision to Zurvan about our choice of framework?`
 
+## Rust engine (faster drop-in)
+`python scripts/install_mcp_config.py --client claude-code --write-mode --engine rust`
+prints an entry for the Rust server (`rust/zurvan-mcp`): same tools and
+answers, about 50× faster search. Build, verify and roll back: [rust-server.md](rust-server.md).
+
 ## Verifying
 After restarting Claude Code, you can type `/mcp` or `mcp servers` (depending on the version) to ensure the `zurvan` server is connected and the tools are exposed.
