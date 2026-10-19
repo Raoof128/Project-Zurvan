@@ -22,49 +22,53 @@ pub fn unsafe_path_error(path: &str) -> String {
     format!("Error: Path {path} failed safety checks (no absolute paths, no '../', raw/ blocked).")
 }
 
-const ROOT_DOCS: [&str; 4] = ["README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md"];
-const MAX_SYMLINK_HOPS: usize = 40;
-
-/// `os.path.realpath`: resolve component by component, following symlinks
-/// that exist and keeping the rest lexically, applying `..` to the RESOLVED
-/// prefix (so `link/..` is the link target's parent, as in Python).
-pub fn resolve_lenient(path: &Path) -> Option<PathBuf> {
-    let mut hops = 0usize;
-    resolve_into(PathBuf::new(), path, &mut hops)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    Unsafe,
+    NotFound,
 }
 
-fn resolve_into(mut acc: PathBuf, path: &Path, hops: &mut usize) -> Option<PathBuf> {
-    for comp in path.components() {
+const ROOT_DOCS: [&str; 4] = ["README.md", "AGENTS.md", "CLAUDE.md", "CHANGELOG.md"];
+
+/// The path the filesystem itself would name: the longest existing ancestor
+/// through `std::fs::canonicalize` (realpath(3): symlinks followed AND, on a
+/// case-insensitive volume, the names as stored), then the non-existent
+/// remainder normalised lexically.
+///
+/// Checks must run on stored names. Security review 2026-10-19: APFS folds
+/// case with full Unicode rules, so `wiki/trace\u{17f}` (long s) opens the
+/// real `traces` directory while any comparison against the REQUESTED string
+/// sees a different name. Measured: libc realpath returns `traces`.
+pub fn canonical_lenient(path: &Path) -> Option<PathBuf> {
+    let comps: Vec<Component> = path.components().collect();
+    let mut probe = PathBuf::new();
+    let mut base: Option<PathBuf> = None;
+    let mut existing = 0usize;
+    for comp in &comps {
+        probe.push(comp);
+        match std::fs::canonicalize(&probe) {
+            Ok(c) => {
+                base = Some(c);
+                existing += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    let mut acc = base?;
+    for comp in &comps[existing..] {
         match comp {
-            Component::RootDir | Component::Prefix(_) => acc = PathBuf::from("/"),
             Component::CurDir => {}
             Component::ParentDir => {
                 acc.pop();
             }
-            Component::Normal(name) => {
-                let next = acc.join(name);
-                match std::fs::symlink_metadata(&next) {
-                    Ok(m) if m.file_type().is_symlink() => {
-                        *hops += 1;
-                        if *hops > MAX_SYMLINK_HOPS {
-                            return None;
-                        }
-                        let target = std::fs::read_link(&next).ok()?;
-                        acc = resolve_into(acc, &target, hops)?;
-                    }
-                    _ => acc = next,
-                }
-            }
+            Component::Normal(name) => acc.push(name),
+            Component::RootDir | Component::Prefix(_) => return None,
         }
     }
     Some(acc)
 }
 
-fn rel_components(root: &Path, target: &str) -> Option<Vec<String>> {
-    if target.starts_with('/') || Path::new(target).is_absolute() {
-        return None;
-    }
-    let resolved = resolve_lenient(&root.join(target))?;
+fn rel_of(root: &Path, resolved: &Path) -> Option<Vec<String>> {
     let rel = resolved.strip_prefix(root).ok()?;
     Some(
         rel.components()
@@ -74,6 +78,28 @@ fn rel_components(root: &Path, target: &str) -> Option<Vec<String>> {
             })
             .collect(),
     )
+}
+
+fn rel_components(root: &Path, target: &str) -> Option<Vec<String>> {
+    if target.starts_with('/') || Path::new(target).is_absolute() {
+        return None;
+    }
+    rel_of(root, &canonical_lenient(&root.join(target))?)
+}
+
+/// The path a reader may open: it must EXIST, its full canonical form must
+/// stay under `root`, and the allow-list is applied to that canonical form.
+/// Readers open the returned path, never the requested string, so nothing
+/// between the check and the open can be re-interpreted.
+pub fn open_target(root: &Path, target: &str, allow_raw: bool) -> Result<PathBuf, Refusal> {
+    if !is_readable_path(root, target, allow_raw) {
+        return Err(Refusal::Unsafe);
+    }
+    let canonical = std::fs::canonicalize(root.join(target)).map_err(|_| Refusal::NotFound)?;
+    match rel_of(root, &canonical) {
+        Some(parts) if allowed(&parts, allow_raw) => Ok(canonical),
+        _ => Err(Refusal::Unsafe),
+    }
 }
 
 fn is_named(c: &str, name: &str) -> bool {
@@ -94,7 +120,17 @@ pub fn is_safe_path(root: &Path, target: &str, allow_raw: bool) -> bool {
 /// Safe AND on the allow-list: `wiki/` (no `traces` segment, any case),
 /// `docs/`, `eval/`, the four root docs; `raw/` only with the flag.
 pub fn is_readable_path(root: &Path, target: &str, allow_raw: bool) -> bool {
-    let Some(parts) = rel_components(root, target) else { return false };
+    match rel_components(root, target) {
+        Some(parts) => allowed(&parts, allow_raw),
+        None => false,
+    }
+}
+
+/// The allow-list over root-relative components. Allowed names compare
+/// exactly (a case variant fails closed); excluded names compare
+/// case-insensitively (a case variant is still excluded). The components are
+/// the STORED names wherever the path exists (`canonical_lenient`).
+fn allowed(parts: &[String], allow_raw: bool) -> bool {
     let Some(first) = parts.first() else { return false };
     if is_named(first, "raw") {
         return allow_raw;
@@ -158,12 +194,21 @@ mod tests {
         assert!(!is_readable_path(&root, "wiki/sub/Traces/y.md", false));
     }
 
+    /// Checks run on STORED names, so on a case-insensitive volume a case
+    /// variant is judged as the entry it actually opens: an allowed page stays
+    /// that page, and nothing outside the allow-list becomes reachable.
     #[test]
-    fn allow_list_fails_closed_on_case_variant() {
+    fn case_variants_are_judged_by_stored_names() {
         let (_d, root) = fixture();
-        assert!(!is_readable_path(&root, "WIKI/index.md", false));
         assert!(!is_readable_path(&root, ".GIT/HEAD", false));
-        assert!(!is_readable_path(&root, "readme.md", false));
+        assert!(!is_readable_path(&root, "Sources/x.md", false));
+        assert!(!is_readable_path(&root, "wiki/../.Claude/settings.json", false));
+        if root.join("WIKI").exists() {
+            assert_eq!(open_target(&root, "WIKI/index.md", false).unwrap(), root.join("wiki/index.md"));
+            assert_eq!(open_target(&root, "readme.md", false).unwrap(), root.join("README.md"));
+        } else {
+            assert!(!is_readable_path(&root, "WIKI/index.md", false));
+        }
     }
 
     #[test]
@@ -187,6 +232,32 @@ mod tests {
         assert!(!is_safe_path(&root, "../outside.md", false));
         assert!(!is_safe_path(&root, "wiki/escape/passwd", false));
         assert!(!is_safe_path(&root, "wiki/../../outside.md", false));
+    }
+
+    /// Security review 2026-10-19: APFS folds case with full Unicode rules, so
+    /// "trace\u{17f}" (long s) opens the real `traces` directory. Measured on
+    /// this machine before the fix: the ASCII comparison let it through.
+    #[test]
+    fn unicode_case_variant_of_traces_is_refused() {
+        let (_d, root) = fixture();
+        if !root.join("wiki/TRACES").exists() {
+            return; // case-sensitive filesystem: the variant cannot open the directory
+        }
+        assert!(!is_readable_path(&root, "wiki/trace\u{17f}/x.md", false));
+        assert!(!is_readable_path(&root, "wiki/TRACE\u{17f}/x.md", false));
+        assert!(open_target(&root, "wiki/trace\u{17f}/x.md", false).is_err());
+    }
+
+    #[test]
+    fn open_target_returns_the_canonical_path() {
+        let (_d, root) = fixture();
+        assert_eq!(open_target(&root, "wiki/./index.md", false).unwrap(), root.join("wiki/index.md"));
+        assert_eq!(open_target(&root, "docs/../wiki/index.md", false).unwrap(), root.join("wiki/index.md"));
+        assert_eq!(open_target(&root, "wiki/missing.md", false), Err(Refusal::NotFound));
+        assert_eq!(open_target(&root, ".git/HEAD", false), Err(Refusal::Unsafe));
+        // A nonexistent intermediate never reaches the symlink behind it.
+        assert!(open_target(&root, "wiki/nope/../escape/passwd", false).is_err());
+        assert_eq!(open_target(&root, "wiki/escape/passwd", false), Err(Refusal::Unsafe));
     }
 
     #[test]
