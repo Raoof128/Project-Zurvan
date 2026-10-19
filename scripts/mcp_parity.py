@@ -274,6 +274,121 @@ def context_cases(root: Path) -> list[Case]:
     return cases
 
 
+EVAL_PREFIX = "Evaluates the Python reference retriever, not this server.\n"
+
+
+def eval_cases(root: Path) -> list[Case]:
+    """B runs the same Python eval through its bridge and says so: B's text
+    must be EXACTLY the prefix plus A's text."""
+    same_plus_prefix = lambda a, b: b == EVAL_PREFIX + a  # noqa: E731
+    return [tool("eval:eval_search@2", "eval", "zurvan_eval_search", {"hybrid": True, "min_top3": 0.0, "max_queries": 2},
+                 expected_divergence=same_plus_prefix),
+            tool("eval:validate_gold", "eval", "zurvan_validate_gold", {}, expected_divergence=same_plus_prefix)]
+
+
+def _write_store() -> Path:
+    import tempfile
+    root = Path(tempfile.mkdtemp(prefix="zurvan-parity-writes-"))
+    for d in ("wiki/decisions", "wiki/claims", "wiki/notes", "data"):
+        (root / d).mkdir(parents=True, exist_ok=True)
+    (root / "wiki" / "decisions" / "evidence.md").write_text("the evidence line for the parity claim\n", encoding="utf-8")
+    return root
+
+
+def _ledger_rows(store: Path) -> list[tuple]:
+    import sqlite3
+    db = store / "data" / "registry.sqlite"
+    if not db.exists():
+        return []
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT state, writer, caller, implicit, store_project, completed_paths FROM mutations ORDER BY rowid").fetchall()
+    finally:
+        con.close()
+    # Claim pages carry a fresh random id per write (claim-<hex>.md): mask it.
+    name = lambda x: re.sub(r"^claim-[0-9a-f]+\.md$", "claim-<id>.md", Path(x).name)  # noqa: E731
+    return [(s, w, c, i, p, sorted(name(x) for x in json.loads(cp or "[]"))) for s, w, c, i, p, cp in rows]
+
+
+def run_writes(args, env: dict) -> list[dict]:
+    """Writes against two FRESH throwaway stores (one per server), never the
+    live one: same calls, then the same texts and the same ledger rows."""
+    import shutil
+    rows: list[dict] = []
+    stores = {"a": _write_store(), "b": _write_store()}
+    calls = [
+        ("remember", "zurvan_remember", {"type": "note", "title": "Parity note", "body": "body", "tags": ["parity"]}),
+        ("decision_add", "zurvan_decision_add", {"title": "Parity decision", "reason": "because", "status": "accepted",
+                                                 "tags": ["parity"], "project": "zurvan"}),
+        ("decision_add_bad_slug", "zurvan_decision_add", {"title": "Bad slug", "reason": "r", "status": "accepted",
+                                                          "tags": [], "project": "ClientX"}),
+        ("claim_add", "zurvan_claim_add", {"text": "a parity claim", "source": "wiki/decisions/evidence.md",
+                                           "evidence": "the evidence line", "confidence": "high", "tags": ["parity"]}),
+        ("claim_add_bad_evidence", "zurvan_claim_add", {"text": "c", "source": "wiki/decisions/evidence.md",
+                                                        "evidence": "not in the file", "confidence": "low", "tags": []}),
+        ("question_add", "zurvan_question_add", {"question": "Parity question?", "reason": "r", "tags": ["parity"]}),
+    ]
+    try:
+        peers = {}
+        for side, store in stores.items():
+            e = {**env, "ZURVAN_ROOT": str(store), "ZURVAN_MCP_READONLY": "0"}
+            peers[side] = Peer(args.a if side == "a" else args.b, e, args.protocol)
+        for label, name, targs in calls:
+            case = tool(f"writes:{label}", "writes", name, targs)
+            ta, _, _ = observe(peers["a"], case)
+            tb, b_flag, _ = observe(peers["b"], case)
+            verdict, diff = compare(case, ta, tb, b_flag)
+            rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                         "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        # set_project on the page decision_add created (same slug in both stores).
+        # Python resolves a RELATIVE page against the process cwd, not the store
+        # (measured: "not a decision page under wiki/decisions"), so each side
+        # gets its own absolute path and its store path is masked afterwards.
+        page = sorted(p.name for p in (stores["a"] / "wiki" / "decisions").glob("*.md") if p.name != "evidence.md")[0]
+        texts = {}
+        for side in ("a", "b"):
+            case = tool("writes:decision_set_project", "writes", "zurvan_decision_set_project",
+                        {"pages": [str(stores[side] / "wiki" / "decisions" / page)], "project": "acme"})
+            text, flag, _ = observe(peers[side], case)
+            texts[side] = (text.replace(str(stores[side].resolve()), "<STORE>").replace(str(stores[side]), "<STORE>"), flag)
+        (ta, _), (tb, b_flag) = texts["a"], texts["b"]
+        verdict, diff = compare(case, ta, tb, b_flag)
+        if ta.startswith("Error"):
+            verdict = "FAIL"  # the success path is the one under test
+        rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                     "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        for p in peers.values():
+            p.close()
+        la, lb = _ledger_rows(stores["a"]), _ledger_rows(stores["b"])
+        if args.show_diff and la != lb:
+            for ra, rb in zip(la, lb):
+                print(f"    A {ra}\n    B {rb}")
+        rows.append({"case_id": "writes:ledger_rows", "group": "writes",
+                     "verdict": "PASS" if la == lb and la else "FAIL",
+                     "a_chars": len(la), "b_chars": len(lb), "diff_lines": 0 if la == lb else max(len(la), len(lb))})
+        # Read-only: both refuse with the same text and write nothing.
+        ro = {"a": _write_store(), "b": _write_store()}
+        stores.update({"ro_a": ro["a"], "ro_b": ro["b"]})
+        for side in ("a", "b"):
+            peers[side] = Peer(args.a if side == "a" else args.b, {**env, "ZURVAN_ROOT": str(ro[side]), "ZURVAN_MCP_READONLY": "1"}, args.protocol)
+        case = tool("writes:readonly_refusal", "writes", "zurvan_question_add", {"question": "q?", "reason": "r", "tags": []})
+        ta, _, _ = observe(peers["a"], case)
+        tb, b_flag, _ = observe(peers["b"], case)
+        verdict, diff = compare(case, ta, tb, b_flag)
+        if _ledger_rows(ro["a"]) or _ledger_rows(ro["b"]):
+            verdict = "FAIL"
+        rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                     "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        for p in peers.values():
+            p.close()
+    finally:
+        for s in stores.values():
+            shutil.rmtree(s, ignore_errors=True)
+    for r in rows:
+        print(f"{r['verdict']:<20} {r['case_id']}  (a {r['a_chars']} ch, b {r['b_chars']} ch, diff {r['diff_lines']})")
+    return rows
+
+
 _RESULT_HEAD = re.compile(r"^(\d+)\. (.+) \(score ([^)]*)\)$")
 
 
@@ -332,6 +447,7 @@ CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "search_hybrid": search_cases(True),
     "search_keyword": search_cases(False),
     "context": context_cases,
+    "eval": eval_cases,
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,
 }
@@ -402,19 +518,26 @@ def main(argv=None) -> int:
     env.update({"PYTHONPATH": str(REPO), "ZURVAN_MCP_READONLY": "1", "ZURVAN_MCP_ALLOW_RAW_READ": "0"})
     env.setdefault("ZURVAN_EMBED_PROVIDER", "sentence_transformers")
     env.setdefault("ZURVAN_EMBED_MODEL", "all-MiniLM-L6-v2")
+    # The Rust server's write/eval bridge: this interpreter, this checkout's scripts.
+    env.setdefault("ZURVAN_PYTHON", sys.executable)
+    env.setdefault("ZURVAN_CODE_ROOT", str(REPO))
     if args.root:
         env["ZURVAN_ROOT"] = str(root)
 
     cases: list[Case] = []
     for g in groups:
+        if g == "writes":
+            continue  # its own throwaway stores, below
         builder = CASE_BUILDERS.get(g)
         if builder is None:
             print(f"SKIP group {g}: no cases in this build")
             continue
         cases += builder(root)
 
-    a, b = Peer(args.a, env, args.protocol), Peer(args.b, env, args.protocol)
     rows, times = [], {}
+    if "writes" in groups:
+        rows += run_writes(args, env)
+    a, b = Peer(args.a, env, args.protocol), Peer(args.b, env, args.protocol)
     metric_rows: dict[str, list] = {}
     try:
         for case in cases:

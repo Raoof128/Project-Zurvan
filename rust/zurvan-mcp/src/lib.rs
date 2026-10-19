@@ -6,6 +6,7 @@
 #![deny(clippy::print_stdout)]
 
 pub mod args;
+pub mod bridge;
 pub mod config;
 pub mod context;
 pub mod corpus;

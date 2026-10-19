@@ -3,6 +3,7 @@
 //! blocking thread, and the error flag of design §7A (A5).
 
 use crate::args::validate;
+use crate::bridge;
 use crate::config::Config;
 use crate::context;
 use crate::pages;
@@ -124,8 +125,21 @@ impl ZurvanServer {
     /// Run one already-validated tool call. Blocking: callers run it on a
     /// blocking thread.
     pub fn dispatch(&self, name: &str, args: &Map<String, Value>) -> ToolOutput {
+        self.dispatch_with_progress(name, args, &|_, _| {})
+    }
+
+    pub fn dispatch_with_progress(&self, name: &str, args: &Map<String, Value>, progress: &dyn Fn(u64, u64)) -> ToolOutput {
         let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let i = |k: &str| args.get(k).and_then(Value::as_i64);
+        if let Some((tool, writes)) = bridge::bridge_tool(name) {
+            let env = bridge::BridgeEnv::from_env(&self.cfg);
+            let timeout = if writes { bridge::WRITE_TIMEOUT } else { bridge::EVAL_TIMEOUT };
+            return ToolOutput::Text(match bridge::call(&env, tool, args, timeout, progress) {
+                Ok((text, Some(rev))) if writes && !is_error_text(&text) => format!("{text}\nLedger revision: {rev}"),
+                Ok((text, _)) => text,
+                Err(e) => format!("Error: {e}"),
+            });
+        }
         match name {
             "zurvan_read_page" => ToolOutput::Text(pages::read_page(&self.cfg, &s("path"), i("offset"), i("limit"))),
             "zurvan_status" => ToolOutput::Text(format!(

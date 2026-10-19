@@ -83,6 +83,19 @@ def test_harness_flags_a_planted_difference(tmp_path):
     assert verdicts["listing:tools/list"] == "FAIL"
 
 
+def test_writes_parity_on_throwaway_stores(tmp_path):
+    """Both servers write into their OWN fresh stores (the harness makes and
+    removes them): same texts after the Rust 'Ledger revision:' line is
+    stripped, same ledger rows, same read-only refusal."""
+    report = tmp_path / "writes.json"
+    p = _run(["--only", "writes", "--report", str(report)], timeout=600)
+    assert p.returncode == 0, p.stdout[-3000:] + p.stderr[-1500:]
+    verdicts = {r["case_id"]: r["verdict"] for r in json.loads(report.read_text())}
+    assert verdicts["writes:ledger_rows"] == "PASS"
+    assert verdicts["writes:decision_set_project"] == "PASS"
+    assert set(verdicts.values()) == {"PASS"}
+
+
 def test_both_protocols_on_fixture_root(tmp_path):
     root = _fixture_root(tmp_path)
     for proto in ("2025-11-25", "2026-07-28"):
