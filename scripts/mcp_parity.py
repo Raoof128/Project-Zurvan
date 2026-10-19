@@ -204,8 +204,15 @@ def read_gate_cases(root: Path) -> list[Case]:
     return cases
 
 
+def status_cases(root: Path) -> list[Case]:
+    return [tool("status:zurvan_status", "status", "zurvan_status", {}),
+            tool("status:zurvan_graph_stats", "status", "zurvan_graph_stats", {}),
+            Case("status:resource:zurvan://graph/stats", "status", "resources/read", {"uri": "zurvan://graph/stats"})]
+
+
 CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "listing": listing_cases,
+    "status": status_cases,
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,
 }

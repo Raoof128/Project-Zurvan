@@ -24,7 +24,9 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config::resolve(root);
     match cmd.as_str() {
         "serve" => {
-            let running = ZurvanServer::new(cfg).serve(rmcp::transport::stdio()).await?;
+            let server = ZurvanServer::new(cfg);
+            server.warm();
+            let running = server.serve(rmcp::transport::stdio()).await?;
             running.waiting().await?;
             Ok(())
         }

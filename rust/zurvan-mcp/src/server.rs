@@ -5,6 +5,8 @@
 use crate::args::validate;
 use crate::config::Config;
 use crate::pages;
+use crate::status;
+use crate::store::MetaCache;
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData, GetPromptRequestParams,
     GetPromptResponse, GetPromptResult, Implementation, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
@@ -70,11 +72,22 @@ fn surface() -> Surface {
 pub struct ZurvanServer {
     cfg: Arc<Config>,
     surface: Arc<Surface>,
+    meta: Arc<MetaCache>,
 }
 
 impl ZurvanServer {
     pub fn new(cfg: Config) -> Self {
-        ZurvanServer { cfg: Arc::new(cfg), surface: Arc::new(surface()) }
+        ZurvanServer { cfg: Arc::new(cfg), surface: Arc::new(surface()), meta: Arc::new(MetaCache::default()) }
+    }
+
+    /// Compute store metadata off the request path, so the first
+    /// `zurvan_status` does not pay the one full scan of `chunks`.
+    pub fn warm(&self) {
+        let me = self.clone();
+        std::thread::spawn(move || {
+            let _ = me.meta.index(&me.cfg);
+            let _ = me.meta.graph(&me.cfg);
+        });
     }
 
     /// Run one already-validated tool call. Blocking: callers run it on a
@@ -84,12 +97,24 @@ impl ZurvanServer {
         let i = |k: &str| args.get(k).and_then(Value::as_i64);
         match name {
             "zurvan_read_page" => ToolOutput::Text(pages::read_page(&self.cfg, &s("path"), i("offset"), i("limit"))),
+            "zurvan_status" => ToolOutput::Text(status::status_text(&self.cfg, &self.meta)),
+            // Python raises here and the SDK masks an unexpected exception's
+            // message: the result is exactly "Error executing tool <name>",
+            // isError, no structured content (captured 2026-10-19).
+            "zurvan_graph_stats" => match self.meta.graph(&self.cfg) {
+                Ok(g) => ToolOutput::Stats { nodes: g.nodes, edges: g.edges },
+                Err(_) => ToolOutput::ArgError("Error executing tool zurvan_graph_stats".into()),
+            },
             other => ToolOutput::Text(format!("Error: {other} not implemented in this build.")),
         }
     }
 
+    /// `resource_graph_stats` (no thousands separators, as Python).
     pub fn graph_stats_text(&self) -> String {
-        "Error: graph stats not implemented in this build.".to_string()
+        match self.meta.graph(&self.cfg) {
+            Ok(g) => format!("Graph stats: {} nodes, {} edges", g.nodes, g.edges),
+            Err(e) => format!("Error: {e}"),
+        }
     }
 }
 

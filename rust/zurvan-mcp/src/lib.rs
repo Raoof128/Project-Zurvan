@@ -7,7 +7,12 @@
 
 pub mod args;
 pub mod config;
+pub mod corpus;
 pub mod pages;
 pub mod security;
 pub mod server;
+pub mod status;
+pub mod store;
+#[cfg(test)]
+pub mod testutil;
 pub mod text;
