@@ -12,6 +12,9 @@ use std::time::{Duration, Instant};
 
 pub const MISSING_PYTHON: &str =
     "Error: write tools need ZURVAN_PYTHON (an absolute interpreter path); run scripts/install_mcp_config.py --engine rust.";
+/// `tool_zurvan_claim_add`'s own refusal text for an unsafe source, verbatim.
+pub const CLAIM_SOURCE_ERROR: &str =
+    "Error: Source path fails safety checks (e.g. no absolute paths, no ../, no raw/ without flag).";
 pub const WRITE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const EVAL_TIMEOUT: Duration = Duration::from_secs(1800);
 const PROGRESS_EVERY: Duration = Duration::from_secs(2);
@@ -70,6 +73,16 @@ pub fn call(
     // the exact text Python's enforce_read_only returns.
     if is_write(tool) && env.readonly {
         return Ok((READONLY_ERROR.to_string(), None));
+    }
+    // Design §5: `claim_add` reads its `source` to verify the evidence, so the
+    // source is held to the same allow-list as `zurvan_read_page`. Python
+    // checks only `is_safe_path`, which let a claim copy `.git/config` or a
+    // `sources/` document into a readable claim page (final review I1).
+    if tool == "claim_add" {
+        let source = args.get("source").and_then(Value::as_str).unwrap_or("");
+        if !crate::security::is_readable_path(&env.store_root, source, crate::config::allow_raw()) {
+            return Ok((CLAIM_SOURCE_ERROR.to_string(), None));
+        }
     }
     let Some(python) = env.python.as_ref() else {
         return Ok((MISSING_PYTHON.to_string(), None));
@@ -204,6 +217,37 @@ mod tests {
         let here = std::env::current_dir().unwrap().canonicalize().unwrap();
         assert_eq!(std::path::PathBuf::from(&cwd), here);
         assert_ne!(std::path::PathBuf::from(&cwd), dir.path().canonicalize().unwrap(), "not the code root");
+    }
+
+    /// Final review 2026-10-19 (I1): design §5 applies the read allow-list to
+    /// `zurvan_claim_add`'s `source`. Python checks only `is_safe_path`, so a
+    /// claim quoting `.git/config` or `sources/` succeeded, copied the secret
+    /// into a readable claim page, and made success-vs-failure a guess oracle.
+    #[test]
+    fn claim_add_source_is_allow_listed() {
+        let (dir, env) = fake("cat >/dev/null; echo '{\"ok\": true, \"text\": \"Claim added successfully: leak\", \"revision\": 1}'");
+        for (p, body) in [(".git/config", "SECRET"), ("sources/legal.md", "SECRET"), ("wiki/a.md", "ok")] {
+            let f = dir.path().join(p);
+            std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+            std::fs::write(f, body).unwrap();
+        }
+        for refused in [".git/config", "sources/legal.md", "wiki/traces/x.md", "../x", "/etc/passwd"] {
+            let a = args(json!({"text": "leak", "source": refused, "evidence": "SECRET"}));
+            let (text, rev) = call(&env, "claim_add", &a, Duration::from_secs(10), &|_, _| {}).unwrap();
+            assert_eq!(text, CLAIM_SOURCE_ERROR, "{refused}");
+            assert_eq!(rev, None, "{refused}");
+        }
+        let a = args(json!({"text": "leak", "source": "wiki/a.md", "evidence": "ok"}));
+        let (text, _) = call(&env, "claim_add", &a, Duration::from_secs(10), &|_, _| {}).unwrap();
+        assert_eq!(text, "Claim added successfully: leak", "an allowed source still reaches Python");
+    }
+
+    #[test]
+    fn claim_add_read_only_error_comes_before_the_source_check() {
+        let env = BridgeEnv { python: Some("/bin/false".into()), code_root: "/nonexistent".into(), store_root: "/nonexistent".into(), readonly: true };
+        let a = args(json!({"source": ".git/config"}));
+        let (text, _) = call(&env, "claim_add", &a, Duration::from_secs(5), &|_, _| {}).unwrap();
+        assert_eq!(text, crate::security::READONLY_ERROR, "Python's decorator order: read-only first");
     }
 
     #[test]

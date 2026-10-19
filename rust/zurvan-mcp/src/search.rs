@@ -5,7 +5,7 @@
 use crate::config::Config;
 use crate::corpus::{glob_md, rel};
 use crate::embed::{locate_model, mock, Embedder, Space};
-use crate::store::{open_ro, MetaCache};
+use crate::store::{open_at, MetaCache, GENERATION_CHANGED, GENERATION_RETRIES};
 use crate::text::{budget, read_universal, snippet, RESULT_CHAR_BUDGET};
 use crate::vectors::{Loader, VectorCache, KEYWORD_WEIGHT};
 use rayon::prelude::*;
@@ -225,6 +225,29 @@ impl SearchState {
         limit: usize,
         on_progress: &dyn Fn(u64, u64),
     ) -> Result<Result<Vec<Hit>, String>, String> {
+        // The metadata, the vector cache and the connection that scores and
+        // hydrates must be ONE generation. A promote landing between them is
+        // detected (`open_at`) and the call starts again on the new one.
+        let changed = |r: &Result<Result<Vec<Hit>, String>, String>| match r {
+            Err(e) | Ok(Err(e)) => e.contains(GENERATION_CHANGED),
+            Ok(Ok(_)) => false,
+        };
+        let mut out = self.hybrid_once(query, limit, on_progress);
+        for _ in 0..GENERATION_RETRIES {
+            if !changed(&out) {
+                break;
+            }
+            out = self.hybrid_once(query, limit, on_progress);
+        }
+        out
+    }
+
+    fn hybrid_once(
+        &self,
+        query: &str,
+        limit: usize,
+        on_progress: &dyn Fn(u64, u64),
+    ) -> Result<Result<Vec<Hit>, String>, String> {
         if !self.cfg.search_db.exists() {
             return Ok(Ok(Vec::new())); // Python prints to stderr and returns []
         }
@@ -238,7 +261,7 @@ impl SearchState {
             Ok(c) => c,
             Err(why) => return Ok(Err(format!("vector cache: {why}"))),
         };
-        let conn = open_ro(&self.cfg.search_db).map_err(|e| e.to_string())?;
+        let conn = open_at(&self.cfg.search_db, meta.generation)?;
         let kw = fts_scores(&conn, &cache, query).map_err(|e| e.to_string())?;
         let top = cache.top_k(&qv, &kw, limit);
         if top.is_empty() {
@@ -466,5 +489,64 @@ mod tests {
             format!("1. wiki/a.md (score 2)\n   Alpha beta\n2. docs/b.md (score 0.82)\n   heading: Head\n   {}…\n3. docs/c.md (score 0.82)", "x".repeat(200))
         );
         assert_eq!(format_results(&[]), "No matches found.");
+    }
+
+    /// Final review 2026-10-19 (I2), reproduced over stdio at 1,866 of 6,064
+    /// calls: a promote between reading the generation and opening the index
+    /// by path scored one generation's vectors against the other's text. Two
+    /// generations share chunk ids but not text; a semantic score of ~1 can
+    /// only come from the matrix whose text IS the query, so the hit's text
+    /// must carry the query's word.
+    #[test]
+    fn hybrid_never_mixes_generations_under_promotion() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        const N: usize = 60;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::resolve_from(Some(dir.path().to_path_buf()), |_| None);
+        let ids: Vec<String> = (0..N).map(|i| format!("{i:064x}")).collect();
+        let build = |path: &std::path::Path, word: &str| {
+            let texts: Vec<String> = (0..N).map(|i| format!("{word} entry {i}")).collect();
+            let chunks: Vec<Chunk> = (0..N)
+                .map(|i| Chunk { chunk_id: &ids[i], source_path: "wiki/p.md", heading: None, text: &texts[i], indexed_at: "2026-10-18T00:00:00", vector: mock(&texts[i]) })
+                .collect();
+            search_db(path, "mock", "deterministic_hash", &chunks, &[("built_from_revision", "1")]);
+        };
+        let (a, b) = (dir.path().join("A.sqlite"), dir.path().join("B.sqlite"));
+        build(&a, "alpha");
+        build(&b, "beta");
+        fs::create_dir_all(cfg.search_db.parent().unwrap()).unwrap();
+        fs::copy(&a, &cfg.search_db).unwrap();
+        let stop = AtomicBool::new(false);
+        let st = SearchState::new(cfg.clone());
+        let (mut calls, mut mixed) = (0usize, 0usize);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let tmp = cfg.search_db.with_extension("tmp");
+                for i in 0.. {
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    fs::copy(if i % 2 == 0 { &b } else { &a }, &tmp).unwrap();
+                    fs::rename(&tmp, &cfg.search_db).unwrap();
+                    std::thread::sleep(std::time::Duration::from_micros(300));
+                }
+            });
+            let t0 = std::time::Instant::now();
+            while t0.elapsed() < std::time::Duration::from_secs(3) {
+                for word in ["alpha", "beta"] {
+                    let q = format!("{word} entry {}", calls % N);
+                    calls += 1;
+                    let Ok(Ok(hits)) = st.hybrid_or_unavailable(&q, 3, &|_, _| {}) else { continue };
+                    if let Some(h) = hits.first() {
+                        if h.semantic > 0.99 && !h.text.starts_with(word) {
+                            mixed += 1;
+                        }
+                    }
+                }
+            }
+            stop.store(true, Ordering::SeqCst);
+        });
+        assert!(calls > 50, "the storm ran ({calls} calls)");
+        assert_eq!(mixed, 0, "{mixed} of {calls} calls mixed two generations");
     }
 }

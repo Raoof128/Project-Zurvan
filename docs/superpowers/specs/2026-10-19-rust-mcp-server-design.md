@@ -772,6 +772,17 @@ Retrieval invariance (§9.3): the coherent snapshot refused
 beyond it), so there is no snapshot id; the evidence is the A/B run on the
 identical rev-745 bytes, with identical metrics on both protocols.
 
+Final whole-branch review (fresh reviewer, 2026-10-19) found no Critical and
+four Important defects, each reproduced and then fixed test-first:
+`zurvan_claim_add`'s `source` was not held to the §5 allow-list (a claim could
+copy `.git/config` into a readable page); a promote between reading the
+generation and opening the index by path mixed two generations in one call
+(1,866 of 6,064 calls in a promote storm; 0 after); hybrid search needed a
+writable `data/cache/` (now a private temp-dir fallback); and the fixed
+`wiki/` and `eval/` resources read a planted symlink. §9.3's coherent-snapshot
+check is **UNVERIFIED** for this closure (no snapshot could be pinned); the
+identity evidence is the A/B run above, not a Z0 measurement.
+
 Re-scored (§10.1): agent latency **8/10** (first three calls ≈ 6.7 s cold,
 < 0.3 s warm; the cold first status keeps it off 9); answer identity **9/10**;
 read surface **8/10** in Rust, still 3/10 in Python until IOU-5; freshness

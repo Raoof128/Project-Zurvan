@@ -11,7 +11,7 @@
 //! with identical bytes. The map is file-backed page cache, not heap.
 
 use crate::config::Config;
-use crate::store::{open_ro, IndexMeta};
+use crate::store::IndexMeta;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use rusqlite::Connection;
@@ -52,11 +52,39 @@ pub fn cache_key(meta: &IndexMeta) -> String {
     Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn cache_path(cfg: &Config, key: &str) -> PathBuf {
-    cfg.cache_dir.join(format!("vectors-{key}.zvec"))
+fn cache_name(key: &str) -> String {
+    format!("vectors-{key}.zvec")
 }
 
-/// Stream `embeddings` (with each chunk's rowid) into a new cache file.
+fn cache_path(cfg: &Config, key: &str) -> PathBuf {
+    cfg.cache_dir.join(cache_name(key))
+}
+
+/// Where a server that cannot write `data/cache/` keeps its cache: one
+/// directory per user under the temp dir (per-user on macOS already).
+pub fn default_fallback_dir() -> PathBuf {
+    std::env::temp_dir().join("zurvan-mcp-vectors")
+}
+
+/// Make `dir` a private directory this account owns: created 0700, never a
+/// symlink, and chmod-able (only the owner can chmod), so a directory planted
+/// under a shared temp name by another account is refused, not used.
+fn private_dir(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e.to_string()),
+    }
+    let m = std::fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+    if !m.file_type().is_dir() {
+        return Err(format!("{} is not a private directory", dir.display()));
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
+}
+
+/// Stream `embeddings` (with each chunk's rowid) into a new cache file in
+/// the store's `data/cache/`.
 pub fn build(cfg: &Config, conn: &Connection, key: &str, on_progress: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
     std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&cfg.cache_dir).map_err(|e| e.to_string())?;
     // DirBuilder's mode applies only to directories it creates; an existing
@@ -65,9 +93,14 @@ pub fn build(cfg: &Config, conn: &Connection, key: &str, on_progress: &dyn Fn(u6
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&cfg.cache_dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
     }
+    build_in(&cfg.cache_dir, conn, key, on_progress)
+}
+
+/// The cache file itself, written to a temp name in `dir`, fsynced, renamed.
+fn build_in(dir: &Path, conn: &Connection, key: &str, on_progress: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
     let total: i64 = conn.query_row("SELECT count(*) FROM embeddings", [], |r| r.get(0)).map_err(|e| e.to_string())?;
-    let final_path = cache_path(cfg, key);
-    let tmp = cfg.cache_dir.join(format!(
+    let final_path = dir.join(cache_name(key));
+    let tmp = dir.join(format!(
         "vectors-{key}.zvec.tmp-{}-{}",
         std::process::id(),
         TMP_NONCE.fetch_add(1, Ordering::SeqCst)
@@ -294,13 +327,26 @@ pub fn prune(cache_dir: &Path, keep: usize) {
 /// The loaded cache for the index generation being served: reused while the
 /// key matches; otherwise opened from disk or built (blocking the caller),
 /// one builder at a time per process.
-#[derive(Default)]
 pub struct Loader {
     current: Mutex<Option<Arc<VectorCache>>>,
     building: Mutex<()>,
+    /// Used only when `data/cache/` cannot be written (final review I3).
+    fallback: Option<PathBuf>,
+}
+
+impl Default for Loader {
+    fn default() -> Self {
+        Loader::with_fallback(Some(default_fallback_dir()))
+    }
 }
 
 impl Loader {
+    /// `None` = the store's cache or nothing (`build-cache` must not succeed
+    /// somewhere the server would not look first).
+    pub fn with_fallback(fallback: Option<PathBuf>) -> Loader {
+        Loader { current: Mutex::new(None), building: Mutex::new(()), fallback }
+    }
+
     pub fn current(&self) -> Option<Arc<VectorCache>> {
         self.current.lock().unwrap().clone()
     }
@@ -314,14 +360,47 @@ impl Loader {
         if let Some(c) = self.current().filter(|c| c.key() == key) {
             return Ok(c);
         }
-        let path = cache_path(cfg, &key);
-        let cache = match VectorCache::open(&path, &key, meta.embeddings as u64) {
+        let rows = meta.embeddings as u64;
+        let cache = match VectorCache::open(&cache_path(cfg, &key), &key, rows) {
             Ok(c) => c,
-            Err(_) => {
-                let conn = open_ro(&cfg.search_db).map_err(|e| e.to_string())?;
-                let built = build(cfg, &conn, &key, on_progress)?;
-                VectorCache::open(&built, &key, meta.embeddings as u64)?
-            }
+            Err(_) => match self
+                .fallback
+                .as_ref()
+                .filter(|d| d.is_dir() && private_dir(d).is_ok())
+                .and_then(|d| VectorCache::open(&d.join(cache_name(&key)), &key, rows).ok())
+            {
+                Some(c) => c,
+                None => {
+                    // Built from exactly the generation the key names (I2).
+                    let conn = crate::store::open_at(&cfg.search_db, meta.generation)?;
+                    let built = match build(cfg, &conn, &key, on_progress) {
+                        Ok(p) => p,
+                        Err(e1) => {
+                            let fix = format!(
+                                "run `zurvan-mcp build-cache` as an account that can write {}",
+                                cfg.cache_dir.display()
+                            );
+                            let Some(dir) = self.fallback.as_ref() else {
+                                return Err(format!("cannot write {} ({e1}); {fix}", cfg.cache_dir.display()));
+                            };
+                            match private_dir(dir).and_then(|_| build_in(dir, &conn, &key, on_progress)) {
+                                Ok(p) => {
+                                    prune(dir, 2);
+                                    p
+                                }
+                                Err(e2) => {
+                                    return Err(format!(
+                                        "cannot write {} ({e1}) or {} ({e2}); {fix}",
+                                        cfg.cache_dir.display(),
+                                        dir.display()
+                                    ))
+                                }
+                            }
+                        }
+                    };
+                    VectorCache::open(&built, &key, rows)?
+                }
+            },
         };
         prune(&cfg.cache_dir, 2);
         let cache = Arc::new(cache);
@@ -463,6 +542,70 @@ mod tests {
         let (c, _) = built(&cfg);
         let got: Vec<&str> = c.top_k(&v, &HashMap::new(), 3).iter().map(|r| c.chunk_id(r.row)).collect();
         assert_eq!(got, vec![idv[3].as_str(), idv[1].as_str(), idv[4].as_str()]); // a, b, c
+    }
+
+    fn chmod(p: &std::path::Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    /// Final review 2026-10-19 (I3): the Python server searched a store it
+    /// could not write; Rust lost semantic search whenever `data/cache/` was
+    /// not writable (a sandboxed session). It now builds a private cache in
+    /// the user's temp directory instead, and never writes the store.
+    #[test]
+    fn unwritable_cache_dir_falls_back_to_a_private_temp_cache() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(12, 9), &ids(12), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let data = cfg.cache_dir.parent().unwrap().to_path_buf();
+        chmod(&data, 0o555);
+        let tmp = tempfile::tempdir().unwrap();
+        let fallback = tmp.path().join("zurvan-mcp-vectors");
+        let got = Loader::with_fallback(Some(fallback.clone())).get(&cfg, &meta, &|_, _| {});
+        chmod(&data, 0o755);
+        let cache = got.expect("served from the fallback cache");
+        assert_eq!(cache.rows(), 12);
+        assert!(!cfg.cache_dir.exists(), "the store was not written");
+        assert_eq!(std::fs::metadata(&fallback).unwrap().permissions().mode() & 0o777, 0o700);
+        let file = fallback.join(format!("vectors-{}.zvec", cache.key()));
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn cache_failure_names_the_path_and_the_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(4, 3), &ids(4), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let data = cfg.cache_dir.parent().unwrap().to_path_buf();
+        chmod(&data, 0o555);
+        let tmp = tempfile::tempdir().unwrap();
+        chmod(tmp.path(), 0o555);
+        let got = Loader::with_fallback(Some(tmp.path().join("zurvan-mcp-vectors"))).get(&cfg, &meta, &|_, _| {});
+        chmod(&data, 0o755);
+        chmod(tmp.path(), 0o755);
+        let err = got.err().expect("nowhere writable");
+        assert!(err.contains(&cfg.cache_dir.display().to_string()), "{err}");
+        assert!(err.contains("zurvan-mcp build-cache"), "{err}");
+    }
+
+    #[test]
+    fn a_fallback_dir_owned_by_someone_else_is_refused() {
+        // /tmp is shared on Linux: a directory planted under the fallback name
+        // by another account must never hold our cache. A directory we do not
+        // own is simulated by one that is not a directory at all.
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = build_db(dir.path(), &vectors(4, 3), &ids(4), "7");
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let data = cfg.cache_dir.parent().unwrap().to_path_buf();
+        chmod(&data, 0o555);
+        let tmp = tempfile::tempdir().unwrap();
+        let planted = tmp.path().join("zurvan-mcp-vectors");
+        std::os::unix::fs::symlink(tmp.path(), &planted).unwrap();
+        let got = Loader::with_fallback(Some(planted)).get(&cfg, &meta, &|_, _| {});
+        chmod(&data, 0o755);
+        assert!(got.is_err(), "a symlinked fallback dir is refused");
     }
 
     #[test]

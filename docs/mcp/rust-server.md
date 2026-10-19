@@ -97,8 +97,8 @@ Paste the printed Python entry back and restart the client.
   eval calls tick every 2 s, a first hybrid search reports the vector-cache build
   and the model load.
 - `zurvan_status` adds `Serving:`, `Ledger:`, `Model:` and `Vector cache:` lines.
-- **Reads are allow-listed.** `zurvan_read_page`, `zurvan://file/…` and keyword
-  search read only `wiki/` (never `wiki/traces/`), `docs/`, `eval/` and
+- **Reads are allow-listed.** `zurvan_read_page`, every `zurvan://` file
+  resource, keyword search and the `source` of `zurvan_claim_add` read only `wiki/` (never `wiki/traces/`), `docs/`, `eval/` and
   `README.md`, `AGENTS.md`, `CLAUDE.md`, `CHANGELOG.md`, judged on the names the
   filesystem stores. The Python server also serves `.git/`, `.claude/`,
   `.remember/`, `sources/` and the rest of the repo.
@@ -111,9 +111,18 @@ Paste the printed Python entry back and restart the client.
   The key binds the index file's identity, build time and embedding space, so a
   rebuilt index gets a new cache; the newest two are kept. The directory is 0700
   and the files 0600. `zurvan-mcp build-cache` builds it ahead of time.
+  A server that cannot write `data/cache/` (a sandboxed session) builds a
+  private copy in the temp directory instead (`zurvan-mcp-vectors/`, 0700,
+  refused if it is a symlink or owned by another account) and never writes
+  the store; if neither place is writable, hybrid search falls back to
+  keyword results and the notice names both paths and the fix.
 - **Hot reload.** `zurvan index search` promotes a new index atomically; the
   server notices on its next call and serves the new generation, waiting for the
-  new cache rather than mixing generations.
+  new cache rather than mixing generations: every connection is checked
+  against the generation its metadata and vectors came from, and a call that
+  a promote lands in starts again on the new one (twice at most; under a
+  storm of promotes it answers `the search index was replaced during this
+  call; call again`).
 - **Environment.** `ZURVAN_ROOT` (or `--root`) picks the store;
   `ZURVAN_SEARCH_DB` the index; `ZURVAN_MCP_READONLY` (writes only when exactly
   `0`); `ZURVAN_MCP_ALLOW_RAW_READ`; `ZURVAN_PYTHON` (write bridge);

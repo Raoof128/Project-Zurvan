@@ -104,9 +104,18 @@ pub fn read_page(cfg: &Config, path: &str, offset: Option<i64>, limit: Option<i6
     read_file_slice(cfg, path, offset, limit)
 }
 
-/// `get_static_resource` for the fixed wiki/eval resources.
-fn static_resource(abs: &Path) -> String {
-    match read_universal(abs) {
+/// `get_static_resource` for the fixed wiki/eval resources. The file is held
+/// to the read allow-list and opened by its canonical path, like every other
+/// reader (final review I4: a symlink planted at `wiki/log.md` was served).
+fn static_resource(cfg: &Config, rel: &str) -> String {
+    let abs = cfg.root.join(rel);
+    let target = match open_target(&cfg.root, rel, false) {
+        Ok(p) => p,
+        Err(Refusal::NotFound) => return format!("Error: Resource {} not found.", abs.display()),
+        Err(Refusal::Unsafe) => return unsafe_path_error(rel),
+    };
+    let abs: &Path = &abs;
+    match read_universal(&target) {
         Ok(s) => s,
         Err(ReadError::NotFound) => format!("Error: Resource {} not found.", abs.display()),
         Err(ReadError::Binary) => "Error reading resource: 'utf-8' codec can't decode the file".to_string(),
@@ -118,14 +127,14 @@ fn static_resource(abs: &Path) -> String {
 /// A resource's text, or `None` for an unknown URI (a JSON-RPC error).
 /// `graph_stats` is supplied by the caller (it needs the graph store).
 pub fn resource(cfg: &Config, uri: &str, graph_stats: impl FnOnce() -> String) -> Option<String> {
-    let wiki = |name: &str| static_resource(&cfg.root.join("wiki").join(name));
+    let wiki = |name: &str| static_resource(cfg, &format!("wiki/{name}"));
     Some(match uri {
         "zurvan://wiki/index" => wiki("index.md"),
         "zurvan://wiki/log" => wiki("log.md"),
         "zurvan://wiki/overview" => wiki("overview.md"),
         "zurvan://wiki/open-questions" => wiki("open-questions.md"),
         "zurvan://graph/stats" => graph_stats(),
-        "zurvan://eval/baseline" => static_resource(&cfg.root.join("eval").join("README.md")),
+        "zurvan://eval/baseline" => static_resource(cfg, "eval/README.md"),
         other => match other.strip_prefix("zurvan://file/") {
             Some(path) if !path.is_empty() => resource_file(cfg, path),
             _ => return None,
@@ -155,4 +164,37 @@ pub fn prompt(name: &str) -> Option<(&'static str, &'static str)> {
         ),
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Final review 2026-10-19 (I4): the fixed `wiki/` and `eval/` resources
+    /// read the joined path directly, so a symlink planted at `wiki/log.md`
+    /// or `eval/README.md` served whatever it pointed at, while
+    /// `zurvan_read_page` refused the same file.
+    #[test]
+    fn static_resources_open_only_allow_listed_canonical_files() {
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "OUTSIDE SECRET").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for d in ["wiki", "eval", ".git"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join(".git/config"), "GIT CONFIG SECRET").unwrap();
+        std::fs::write(root.join("wiki/index.md"), "# Index\n").unwrap();
+        std::os::unix::fs::symlink(outside.path().join("secret.md"), root.join("wiki/log.md")).unwrap();
+        std::os::unix::fs::symlink(root.join(".git/config"), root.join("eval/README.md")).unwrap();
+        let cfg = Config::resolve_from(Some(root.to_path_buf()), |_| None);
+        assert_eq!(resource(&cfg, "zurvan://wiki/index", String::new).unwrap(), "# Index\n");
+        for uri in ["zurvan://wiki/log", "zurvan://eval/baseline"] {
+            let text = resource(&cfg, uri, String::new).unwrap();
+            assert!(!text.contains("SECRET"), "{uri} served {text:?}");
+            assert!(text.starts_with("Error"), "{uri}: {text:?}");
+        }
+        let missing = resource(&cfg, "zurvan://wiki/overview", String::new).unwrap();
+        assert_eq!(missing, format!("Error: Resource {} not found.", cfg.root.join("wiki/overview.md").display()));
+    }
 }

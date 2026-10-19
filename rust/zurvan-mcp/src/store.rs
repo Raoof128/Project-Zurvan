@@ -20,6 +20,26 @@ pub fn open_ro(path: &Path) -> rusqlite::Result<Connection> {
     )
 }
 
+pub const GENERATION_CHANGED: &str = "the search index was replaced during this call; call again";
+/// Fresh attempts after a promote lands mid-call, before reporting it.
+pub const GENERATION_RETRIES: usize = 2;
+
+/// Open `path` read-only and prove the file opened is generation `expected`.
+///
+/// SQLite opens its file descriptor inside `open`, and a promote replaces the
+/// path with a NEW inode (`os.replace`), never rewriting the old one. So if
+/// the path still names `expected` after the open, the descriptor is
+/// `expected` too, and every query on this connection reads that generation,
+/// whatever is promoted later. Final review I2: opening by path after the
+/// generation was read scored one generation's vectors against another's text.
+pub fn open_at(path: &Path, expected: Generation) -> Result<Connection, String> {
+    let conn = open_ro(path).map_err(|e| e.to_string())?;
+    match generation(path) {
+        Ok(g) if g == expected => Ok(conn),
+        _ => Err(GENERATION_CHANGED.to_string()),
+    }
+}
+
 /// What an atomic promote changes: a new inode (and usually size/mtime).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Generation {
@@ -70,7 +90,7 @@ fn meta_value(conn: &Connection, table: &str, key: &str) -> Option<String> {
 /// One pass over `chunks` (the 1.2 GB table has no index on `indexed_at`, so
 /// `MAX(indexed_at)` alone was a 5.5 s full scan in Python's status).
 fn compute_index(path: &Path, generation: Generation) -> Result<IndexMeta, String> {
-    let conn = open_ro(path).map_err(|e| e.to_string())?;
+    let conn = open_at(path, generation)?;
     let (chunks, files, max_indexed_at): (i64, i64, Option<String>) = conn
         .query_row("SELECT count(*), count(DISTINCT source_path), MAX(indexed_at) FROM chunks", [], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -143,15 +163,25 @@ impl MetaCache {
     }
 
     pub fn index_at(&self, path: &Path) -> Result<Arc<IndexMeta>, String> {
-        let generation = generation(path).map_err(|_| "unable to open database file".to_string())?;
         let mut slot = self.index.lock().unwrap();
-        if let Some(m) = slot.as_ref().filter(|m| m.generation == generation) {
-            return Ok(m.clone());
+        let mut attempt = 0;
+        loop {
+            let generation = generation(path).map_err(|_| "unable to open database file".to_string())?;
+            if let Some(m) = slot.as_ref().filter(|m| m.generation == generation) {
+                return Ok(m.clone());
+            }
+            self.computations.fetch_add(1, Ordering::SeqCst);
+            match compute_index(path, generation) {
+                Ok(meta) => {
+                    let meta = Arc::new(meta);
+                    *slot = Some(meta.clone());
+                    return Ok(meta);
+                }
+                // Promoted between the stat and the open: describe the new one.
+                Err(e) if e == GENERATION_CHANGED && attempt < GENERATION_RETRIES => attempt += 1,
+                Err(e) => return Err(e),
+            }
         }
-        self.computations.fetch_add(1, Ordering::SeqCst);
-        let meta = Arc::new(compute_index(path, generation)?);
-        *slot = Some(meta.clone());
-        Ok(meta)
     }
 
     pub fn graph(&self, cfg: &Config) -> Result<Arc<GraphMeta>, String> {
@@ -196,6 +226,22 @@ mod tests {
 
     fn cfg_for(root: &std::path::Path) -> Config {
         Config::resolve_from(Some(root.to_path_buf()), |_| None)
+    }
+
+    /// Final review 2026-10-19 (I2): a connection opened by PATH after the
+    /// generation was read can be a newer file. `open_at` proves the file it
+    /// opened is still the generation the caller's metadata describes.
+    #[test]
+    fn open_at_refuses_a_promoted_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        search_db(&cfg.search_db, "mock", "deterministic_hash", &[chunk("a", "wiki/x.md")], &[]);
+        let g1 = generation(&cfg.search_db).unwrap();
+        assert!(open_at(&cfg.search_db, g1).is_ok());
+        let next = dir.path().join("next.sqlite");
+        search_db(&next, "mock", "deterministic_hash", &[chunk("b", "wiki/y.md")], &[]);
+        std::fs::rename(&next, &cfg.search_db).unwrap();
+        assert_eq!(open_at(&cfg.search_db, g1).err().as_deref(), Some(GENERATION_CHANGED));
     }
 
     #[test]

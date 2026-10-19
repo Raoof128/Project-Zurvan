@@ -33,7 +33,9 @@ async fn main() -> anyhow::Result<()> {
         "build-cache" => {
             let meta = zurvan_mcp::store::MetaCache::default().index(&cfg).map_err(anyhow::Error::msg)?;
             let t = std::time::Instant::now();
-            let loader = zurvan_mcp::vectors::Loader::default();
+            // The store's cache only: a fallback build would "succeed" where
+            // the server does not look first.
+            let loader = zurvan_mcp::vectors::Loader::with_fallback(None);
             let cache = loader
                 .get(&cfg, &meta, &|n, total| eprintln!("  {n}/{total} vectors"))
                 .map_err(anyhow::Error::msg)?;
