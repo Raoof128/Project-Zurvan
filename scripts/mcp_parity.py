@@ -79,10 +79,10 @@ def meta_2026() -> dict:
 
 
 class Peer:
-    def __init__(self, cmd: str, env: dict, protocol: str):
+    def __init__(self, cmd: str, env: dict, protocol: str, cwd: Path = REPO):
         self.protocol = protocol
         self.proc = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=subprocess.DEVNULL, env=env, cwd=str(REPO), text=True, bufsize=1)
+                                     stderr=subprocess.DEVNULL, env=env, cwd=str(cwd), text=True, bufsize=1)
         self.lines: "queue.Queue[str]" = queue.Queue()
         threading.Thread(target=self._pump, daemon=True).start()
         self.next_id = 0
@@ -366,6 +366,37 @@ def run_writes(args, env: dict) -> list[dict]:
         rows.append({"case_id": "writes:ledger_rows", "group": "writes",
                      "verdict": "PASS" if la == lb and la else "FAIL",
                      "a_chars": len(la), "b_chars": len(lb), "diff_lines": 0 if la == lb else max(len(la), len(lb))})
+        # A decision with NO project= takes its subject from the server's
+        # working directory (memory.resolve_project). Launched from a foreign
+        # directory, both must stamp the same subject — a bridge that ran in
+        # the code checkout would stamp the (public) zurvan project instead.
+        import tempfile
+        foreign = Path(tempfile.mkdtemp(prefix="zurvan-parity-foreign-cwd-"))
+        fs = {"a": _write_store(), "b": _write_store()}
+        stores.update({"foreign": foreign, "fs_a": fs["a"], "fs_b": fs["b"]})
+        texts = {}
+        for side in ("a", "b"):
+            p = Peer(args.a if side == "a" else args.b, {**env, "ZURVAN_ROOT": str(fs[side]), "ZURVAN_MCP_READONLY": "0"},
+                     args.protocol, cwd=foreign)
+            case = tool("writes:decision_add_no_project_foreign_cwd", "writes", "zurvan_decision_add",
+                        {"title": "Subject from cwd", "reason": "r", "status": "accepted", "tags": []})
+            text, flag, _ = observe(p, case)
+            # The "unknown" warning names the page inside each side's own store.
+            texts[side] = (text.replace(str(fs[side].resolve()), "<STORE>").replace(str(fs[side]), "<STORE>"), flag)
+            p.close()
+        stamp = {}
+        for side in ("a", "b"):
+            page = next((fs[side] / "wiki" / "decisions").glob("subject-from-cwd*.md"), None)
+            stamp[side] = next((l for l in page.read_text().splitlines() if l.startswith("project:")), None) if page else None
+        (ta, _), (tb, b_flag) = texts["a"], texts["b"]
+        verdict, diff = compare(case, ta, tb, b_flag)
+        if stamp["a"] != stamp["b"] or stamp["a"] is None:
+            verdict = "FAIL"
+        rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                     "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        if args.show_diff and verdict != "PASS":
+            print(f"    project stamps: A {stamp['a']!r}  B {stamp['b']!r}")
+
         # Read-only: both refuse with the same text and write nothing.
         ro = {"a": _write_store(), "b": _write_store()}
         stores.update({"ro_a": ro["a"], "ro_b": ro["b"]})

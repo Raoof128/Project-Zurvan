@@ -75,9 +75,13 @@ pub fn call(
         return Ok((MISSING_PYTHON.to_string(), None));
     };
     let script = env.code_root.join("scripts").join("mcp_bridge.py");
+    // The bridge inherits the SERVER's working directory (no current_dir):
+    // `decision_add` without project= stamps the subject from the cwd's
+    // registered project, and that stamp gates publication. Running in the
+    // code checkout stamped "zurvan" (public) where Python stamps "unknown"
+    // (security review 2026-10-19, reproduced by the parity harness).
     let mut child = Command::new(python)
         .arg(&script)
-        .current_dir(&env.code_root)
         .env("PYTHONPATH", &env.code_root)
         .env("ZURVAN_ROOT", &env.store_root)
         .env("ZURVAN_MCP_READONLY", if env.readonly { "1" } else { "0" })
@@ -187,6 +191,19 @@ mod tests {
         call(&env, "question_add", &args(json!({"question": "q?"})), Duration::from_secs(10), &|_, _| {}).unwrap();
         let req: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("scripts/request.json")).unwrap()).unwrap();
         assert_eq!(req, json!({"tool": "question_add", "args": {"question": "q?"}}));
+    }
+
+    /// Security review 2026-10-19: `decision_add` without `project=` stamps
+    /// the subject from the WORKING DIRECTORY's registered project, which gates
+    /// publication. The bridge must run where the server runs, never in the
+    /// code checkout (a registered, public project).
+    #[test]
+    fn bridge_runs_in_the_servers_working_directory() {
+        let (dir, env) = fake("cat >/dev/null; printf '{\"ok\": true, \"text\": \"%s\", \"revision\": null}\\n' \"$(pwd -P)\"");
+        let (cwd, _) = call(&env, "decision_add", &Map::new(), Duration::from_secs(10), &|_, _| {}).unwrap();
+        let here = std::env::current_dir().unwrap().canonicalize().unwrap();
+        assert_eq!(std::path::PathBuf::from(&cwd), here);
+        assert_ne!(std::path::PathBuf::from(&cwd), dir.path().canonicalize().unwrap(), "not the code root");
     }
 
     #[test]
