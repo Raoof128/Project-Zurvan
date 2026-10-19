@@ -6,4 +6,5 @@
 #![deny(clippy::print_stdout)]
 
 pub mod config;
+pub mod security;
 pub mod text;
