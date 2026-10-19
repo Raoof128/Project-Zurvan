@@ -783,6 +783,17 @@ writable `data/cache/` (now a private temp-dir fallback); and the fixed
 check is **UNVERIFIED** for this closure (no snapshot could be pinned); the
 identity evidence is the A/B run above, not a Z0 measurement.
 
+Post-fix end-to-end re-run (2026-10-20, binary `8ea25bf`, live index rev 785,
+303,453 chunks): the parity gate again gave 312 cases per protocol, 302 PASS,
+10 EXPECTED_DIVERGENCE, 0 FAIL on both 2025-11-25 and 2026-07-28, with the
+instrument identical A = B (top-1 0.72, top-3 0.74, MRR 0.7372). Also green:
+`cargo test` (94 passed) plus the ignored candle-vs-Python embedding parity
+test run explicitly; `zurvan-mcp doctor` PASS (one WARN: 5 files newer than
+the index); `self-test` 7/7; `e2e_mcp_smoke.py` on both servers with 0
+JSON-RPC parse failures and the live wiki untouched. Gate timings are one
+sample per case with both servers running side by side, so they are not a
+benchmark; the latency table above stands.
+
 Re-scored (§10.1): agent latency **8/10** (first three calls ≈ 6.7 s cold,
 < 0.3 s warm; the cold first status keeps it off 9); answer identity **9/10**;
 read surface **8/10** in Rust, still 3/10 in Python until IOU-5; freshness
