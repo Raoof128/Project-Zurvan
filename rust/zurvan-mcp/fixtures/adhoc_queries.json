@@ -1,0 +1,22 @@
+[
+ "how does the knowledge ledger mint a revision",
+ "why is the search index rebuilt atomically",
+ "which embedding model does the production index use",
+ "what does the boundary egress gate scan",
+ "how are MCP write tools blocked in read-only mode",
+ "what happens when a decision is stamped with project unknown",
+ "how do measurement snapshots freeze a store",
+ "why was the keyword weight lowered in hybrid fusion",
+ "what is a SUSPECT store and how is it reconciled",
+ "how does graph expansion order its results",
+ "what does zurvan status report",
+ "how are retrieval traces pruned",
+ "why must stdout stay clean in the MCP server",
+ "what is the sealed holdout evaluation",
+ "how is a claim anchored to its source",
+ "what does public_repo_guard block",
+ "ingest a markdown document from another project",
+ "sqlite-vec full scan instead of KNN",
+ "open questions file is tracked and public",
+ "!!! ??? ..."
+]

@@ -27,6 +27,9 @@ from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = ROOT / "scripts" / "mcp_server.py"
+# `--server CMD` runs the same smoke against another server (e.g. the Rust
+# binary at rust/zurvan-mcp/target/release/zurvan-mcp). Default: the Python one.
+SERVER_CMD: list[str] = [sys.executable, str(SERVER)]
 
 
 REQUIRED_TOOLS = {
@@ -114,8 +117,8 @@ async def start_session(readonly: bool = True, root: str | None = None):
         env["ZURVAN_ROOT"] = root
 
     params = StdioServerParameters(
-        command=sys.executable,
-        args=[str(SERVER)],
+        command=SERVER_CMD[0],
+        args=SERVER_CMD[1:],
         env=env,
         cwd=str(ROOT),
     )
@@ -322,7 +325,19 @@ async def write_mode_smoke() -> None:
 
 
 async def main() -> None:
-    if not SERVER.exists():
+    import argparse
+    import shlex
+
+    global SERVER_CMD
+    parser = argparse.ArgumentParser(description="Zurvan MCP end-to-end smoke test")
+    parser.add_argument("--server", help="server command line (default: the Python server)")
+    args = parser.parse_args()
+    if args.server:
+        SERVER_CMD = shlex.split(args.server)
+        if not Path(SERVER_CMD[0]).exists() and shutil.which(SERVER_CMD[0]) is None:
+            raise SystemExit(f"Missing MCP server command: {SERVER_CMD[0]}")
+        print(f"server: {args.server}")
+    elif not SERVER.exists():
         raise SystemExit(f"Missing MCP server: {SERVER}")
 
     await readonly_smoke()
