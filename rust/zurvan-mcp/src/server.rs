@@ -6,6 +6,7 @@ use crate::args::validate;
 use crate::config::Config;
 use crate::pages;
 use crate::graph;
+use crate::search::{self, SearchState};
 use crate::status;
 use crate::store::{self, MetaCache};
 use rmcp::model::{
@@ -74,21 +75,49 @@ pub struct ZurvanServer {
     cfg: Arc<Config>,
     surface: Arc<Surface>,
     meta: Arc<MetaCache>,
+    search: Arc<SearchState>,
 }
 
 impl ZurvanServer {
     pub fn new(cfg: Config) -> Self {
-        ZurvanServer { cfg: Arc::new(cfg), surface: Arc::new(surface()), meta: Arc::new(MetaCache::default()) }
+        let cfg = Arc::new(cfg);
+        let meta = Arc::new(MetaCache::default());
+        let search = Arc::new(SearchState::with(cfg.clone(), meta.clone()));
+        ZurvanServer { cfg, surface: Arc::new(surface()), meta, search }
     }
 
-    /// Compute store metadata off the request path, so the first
-    /// `zurvan_status` does not pay the one full scan of `chunks`.
+    /// Load everything a first call would otherwise wait for — store
+    /// metadata (one full scan of `chunks`), the vector cache (built once per
+    /// index generation) and the embedder — off the request path (§7.7).
     pub fn warm(&self) {
         let me = self.clone();
         std::thread::spawn(move || {
-            let _ = me.meta.index(&me.cfg);
             let _ = me.meta.graph(&me.cfg);
+            if let Ok(meta) = me.meta.index(&me.cfg) {
+                let _ = me.search.loader.get(&me.cfg, &meta, &|_, _| {});
+                if crate::embed::Space::for_index(meta.provider.as_deref(), meta.model.as_deref()) == crate::embed::Space::Real {
+                    let _ = me.search.embedder();
+                }
+            }
         });
+    }
+
+    /// `tool_zurvan_search`, led by the §7.8 stamp. Errors stay unstamped so
+    /// the A5 error flag (text starts with "Error") still holds.
+    fn search_tool(&self, query: &str, hybrid: bool, limit: usize) -> String {
+        match self.search.search(query, hybrid, limit, &|_, _| {}) {
+            Err(e) => format!("Error searching Zurvan for '{query}': {e}"),
+            Ok((hits, notice)) => {
+                let mut parts = Vec::new();
+                let stamp = status::stamp(&self.cfg, &self.meta);
+                if !stamp.is_empty() {
+                    parts.push(stamp);
+                }
+                parts.extend(notice);
+                parts.push(search::format_results(&hits));
+                parts.join("\n")
+            }
+        }
     }
 
     /// Run one already-validated tool call. Blocking: callers run it on a
@@ -98,7 +127,17 @@ impl ZurvanServer {
         let i = |k: &str| args.get(k).and_then(Value::as_i64);
         match name {
             "zurvan_read_page" => ToolOutput::Text(pages::read_page(&self.cfg, &s("path"), i("offset"), i("limit"))),
-            "zurvan_status" => ToolOutput::Text(status::status_text(&self.cfg, &self.meta)),
+            "zurvan_status" => ToolOutput::Text(format!(
+                "{}\n{}\n{}",
+                status::status_text(&self.cfg, &self.meta),
+                self.search.model_status(),
+                self.search.cache_status()
+            )),
+            "zurvan_search" => {
+                let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
+                let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
+                ToolOutput::Text(self.search_tool(&s("query"), hybrid, limit))
+            }
             "zurvan_graph_neighbours" => {
                 let conn = store::open_graph(&self.cfg);
                 ToolOutput::Text(graph::neighbours_tool(conn.as_ref().map_err(Clone::clone), &s("path_or_node_id"), i("limit"), i("cursor")))

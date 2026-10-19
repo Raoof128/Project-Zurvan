@@ -239,10 +239,87 @@ def graph_cases(root: Path) -> list[Case]:
     return cases
 
 
+def _instrument() -> list[dict]:
+    """The RETIRED 50-item instrument: it may MEASURE, never gate a promotion.
+    Read from ~/.zurvan/instruments only; items are named by index."""
+    from scripts.instruments import gold_path
+    return [json.loads(l) for l in gold_path().read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def _adhoc() -> list[str]:
+    return json.loads((REPO / "rust" / "zurvan-mcp" / "fixtures" / "adhoc_queries.json").read_text(encoding="utf-8"))
+
+
+def search_cases(hybrid: bool) -> Callable[[Path], list[Case]]:
+    group = "search_hybrid" if hybrid else "search_keyword"
+
+    def build(root: Path) -> list[Case]:
+        cases = [tool(f"{group}:instrument#{i}", group, "zurvan_search",
+                      {"query": item["query"], "hybrid": hybrid, "limit": 10})
+                 for i, item in enumerate(_instrument())]
+        cases += [tool(f"{group}:adhoc#{i}", group, "zurvan_search", {"query": q, "hybrid": hybrid, "limit": 10})
+                  for i, q in enumerate(_adhoc())]
+        return cases
+    return build
+
+
+_RESULT_HEAD = re.compile(r"^(\d+)\. (.+) \(score ([^)]*)\)$")
+
+
+def result_blocks(text: str) -> list[tuple[str, str, str]]:
+    """[(path, displayed score, whole block without its rank number)]."""
+    blocks: list[list[str]] = []
+    for line in text.split("\n"):
+        if _RESULT_HEAD.match(line):
+            blocks.append([line])
+        elif blocks:
+            blocks[-1].append(line)
+    out = []
+    for b in blocks:
+        m = _RESULT_HEAD.match(b[0])
+        out.append((m.group(2), m.group(3), "\n".join([f"{m.group(2)} (score {m.group(3)})"] + b[1:])))
+    return out
+
+
+def near_tie_only(a: str, b: str) -> bool:
+    """Same results, and every position where the order differs holds two
+    results whose displayed scores are equal. The 1e-6 rule of design §9.1
+    cannot be applied to 2-decimal text, so an equal DISPLAYED score is the
+    (looser, stated) proxy."""
+    ba, bb = result_blocks(a), result_blocks(b)
+    if not ba or sorted(x[2] for x in ba) != sorted(x[2] for x in bb):
+        return False
+    return all(x[2] == y[2] or x[1] == y[1] for x, y in zip(ba, bb))
+
+
+def retrieval_metrics(rows: list[tuple[int, str, str]]) -> dict:
+    """top-1 / top-3 / MRR from each server's own result paths, with the
+    eval's own matchers (scripts.metrics)."""
+    from scripts.metrics import (calculate_accuracy, calculate_mean_reciprocal_rank,
+                                 calculate_reciprocal_rank, calculate_top_k_hit)
+    gold = _instrument()
+    out = {}
+    for side in ("a", "b"):
+        top1 = top3 = 0
+        rrs = []
+        for index, ta, tb in rows:
+            retrieved = [p for p, _, _ in result_blocks(ta if side == "a" else tb)]
+            expected = gold[index]["expected_paths"]
+            top1 += calculate_top_k_hit(expected, retrieved, 1)
+            top3 += calculate_top_k_hit(expected, retrieved, 3)
+            rrs.append(calculate_reciprocal_rank(expected, retrieved))
+        n = len(rows)
+        out[side] = {"queries": n, "top1": calculate_accuracy(top1, n), "top3": calculate_accuracy(top3, n),
+                     "mrr": round(calculate_mean_reciprocal_rank(rrs), 6)}
+    return out
+
+
 CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "listing": listing_cases,
     "status": status_cases,
     "graph": graph_cases,
+    "search_hybrid": search_cases(True),
+    "search_keyword": search_cases(False),
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,
 }
@@ -283,6 +360,8 @@ def compare(case: Case, a: str, b: str, b_flag) -> tuple[str, int]:
         return "FAIL", max(diff, 1)  # A5: B must flag exactly its error texts
     if na == nb:
         return "PASS", 0
+    if case.group == "search_hybrid" and near_tie_only(na, nb):
+        return "NEAR_TIE", diff
     if case.expected_divergence and case.expected_divergence(a, b):
         return "EXPECTED_DIVERGENCE", diff
     return "FAIL", diff
@@ -295,7 +374,8 @@ def main(argv=None) -> int:
     ap.add_argument("--root", help="ZURVAN_ROOT for both servers (read-only)")
     ap.add_argument("--only", default=",".join(CASE_BUILDERS))
     ap.add_argument("--protocol", default="2025-11-25", choices=("2025-11-25", "2026-07-28"))
-    ap.add_argument("--bench", type=int, default=0, help="repeat each case N times and report p50/p95")
+    ap.add_argument("--bench", type=int, default=0, help="repeat each case N more times and report p50/p95")
+    ap.add_argument("--bench-sides", default="a,b", help="which servers the --bench repeats time (a, b or a,b)")
     ap.add_argument("--report", help="JSON report path (default ~/.zurvan/parity/<ts>.json)")
     ap.add_argument("--show-diff", action="store_true", help="print diffs (LOCAL debugging only; may show content)")
     args = ap.parse_args(argv)
@@ -323,13 +403,22 @@ def main(argv=None) -> int:
 
     a, b = Peer(args.a, env, args.protocol), Peer(args.b, env, args.protocol)
     rows, times = [], {}
+    metric_rows: dict[str, list] = {}
     try:
         for case in cases:
             ta, a_flag, da = observe(a, case)
             tb, b_flag, db = observe(b, case)
             verdict, diff = compare(case, ta, tb, b_flag)
+            if case.group.startswith("search_") and ":instrument#" in case.case_id:
+                index = int(case.case_id.rsplit("#", 1)[1])
+                metric_rows.setdefault(case.group, []).append((index, normalise(case.group, ta), normalise(case.group, tb)))
             rows.append({"case_id": case.case_id, "group": case.group, "verdict": verdict,
                          "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+            if case.method != "<initialize>":
+                # The parity pass itself is one latency sample per side.
+                key = case.bench_key or case.method
+                times.setdefault((key, "a"), []).append(da)
+                times.setdefault((key, "b"), []).append(db)
             print(f"{verdict:<20} {case.case_id}  (a {len(ta)} ch, b {len(tb)} ch, diff {diff})")
             if args.show_diff and verdict != "PASS":
                 for l in difflib.unified_diff(normalise(case.norm or case.group, ta).split("\n"),
@@ -339,15 +428,26 @@ def main(argv=None) -> int:
             if args.bench and case.method != "<initialize>":
                 key = case.bench_key or case.method
                 for _ in range(args.bench):
-                    times.setdefault((key, "a"), []).append(observe(a, case)[2])
-                    times.setdefault((key, "b"), []).append(observe(b, case)[2])
+                    if "a" in args.bench_sides:
+                        times.setdefault((key, "a"), []).append(observe(a, case)[2])
+                    if "b" in args.bench_sides:
+                        times.setdefault((key, "b"), []).append(observe(b, case)[2])
     finally:
         a.close()
         b.close()
 
-    counts = {v: sum(1 for r in rows if r["verdict"] == v) for v in ("PASS", "EXPECTED_DIVERGENCE", "FAIL")}
-    print(f"\n{len(rows)} cases: {counts['PASS']} PASS, {counts['EXPECTED_DIVERGENCE']} EXPECTED_DIVERGENCE, "
-          f"{counts['FAIL']} FAIL  (protocol {args.protocol})")
+    counts = {v: sum(1 for r in rows if r["verdict"] == v) for v in ("PASS", "NEAR_TIE", "EXPECTED_DIVERGENCE", "FAIL")}
+    print(f"\n{len(rows)} cases: {counts['PASS']} PASS, {counts['NEAR_TIE']} NEAR_TIE, "
+          f"{counts['EXPECTED_DIVERGENCE']} EXPECTED_DIVERGENCE, {counts['FAIL']} FAIL  (protocol {args.protocol})")
+    metrics_differ = False
+    for group, mrows in metric_rows.items():
+        m = retrieval_metrics(mrows)
+        print(f"{group} on the instrument ({m['a']['queries']} items): "
+              f"A top1 {m['a']['top1']:.2f} top3 {m['a']['top3']:.2f} MRR {m['a']['mrr']:.4f} | "
+              f"B top1 {m['b']['top1']:.2f} top3 {m['b']['top3']:.2f} MRR {m['b']['mrr']:.4f}")
+        if m["a"] != m["b"]:
+            metrics_differ = True
+            print(f"FAIL {group}: retrieval metrics differ between A and B")
     if times:
         print("\nlatency ms (p50 / p95), A vs B:")
         for key in sorted({k for k, _ in times}):
@@ -355,14 +455,15 @@ def main(argv=None) -> int:
                 v = sorted(v)
                 return v[max(0, min(len(v) - 1, int(round(p / 100 * len(v) + 0.5)) - 1))] * 1000
             ta, tb = times[(key, "a")], times[(key, "b")]
-            print(f"  {key:<28} A {pct(ta, 50):9.1f} / {pct(ta, 95):9.1f}   B {pct(tb, 50):9.1f} / {pct(tb, 95):9.1f}")
+            print(f"  {key:<28} A {pct(ta, 50):9.1f} / {pct(ta, 95):9.1f} (n={len(ta)})   "
+                  f"B {pct(tb, 50):9.1f} / {pct(tb, 95):9.1f} (n={len(tb)})")
 
     report = Path(args.report) if args.report else Path.home() / ".zurvan" / "parity" / f"{time.strftime('%Y%m%dT%H%M%S')}.json"
     report.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     report.write_text(json.dumps(rows, indent=1))
     os.chmod(report, 0o600)
     print(f"report: {report}")
-    return 1 if counts["FAIL"] else 0
+    return 1 if counts["FAIL"] or metrics_differ else 0
 
 
 if __name__ == "__main__":

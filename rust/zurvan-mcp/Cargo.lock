@@ -2022,6 +2022,7 @@ dependencies = [
  "chrono",
  "memmap2",
  "rayon",
+ "regex",
  "rmcp",
  "rusqlite",
  "serde",

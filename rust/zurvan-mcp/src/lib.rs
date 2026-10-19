@@ -11,6 +11,7 @@ pub mod corpus;
 pub mod embed;
 pub mod graph;
 pub mod pages;
+pub mod search;
 pub mod security;
 pub mod server;
 pub mod status;
