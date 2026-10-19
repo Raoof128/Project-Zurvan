@@ -51,16 +51,24 @@ pub fn canonical_lenient(path: &Path) -> Option<PathBuf> {
                 base = Some(c);
                 existing += 1;
             }
-            Err(_) => break,
+            Err(_) => {
+                // A symlink that does not resolve (dangling, or a loop) names a
+                // place this function cannot see: fail closed rather than judge
+                // the link's own name.
+                if std::fs::symlink_metadata(&probe).is_ok_and(|m| m.file_type().is_symlink()) {
+                    return None;
+                }
+                break;
+            }
         }
     }
     let mut acc = base?;
     for comp in &comps[existing..] {
         match comp {
             Component::CurDir => {}
-            Component::ParentDir => {
-                acc.pop();
-            }
+            // `..` after a component that does not exist cannot be resolved by
+            // the filesystem; a lexical pop would judge a path nothing opens.
+            Component::ParentDir => return None,
             Component::Normal(name) => acc.push(name),
             Component::RootDir | Component::Prefix(_) => return None,
         }
@@ -258,6 +266,26 @@ mod tests {
         // A nonexistent intermediate never reaches the symlink behind it.
         assert!(open_target(&root, "wiki/nope/../escape/passwd", false).is_err());
         assert_eq!(open_target(&root, "wiki/escape/passwd", false), Err(Refusal::Unsafe));
+    }
+
+    /// Security review 2026-10-19 (second pass): `..` after a component that
+    /// does not exist was applied lexically, and a dangling symlink was pushed
+    /// as a plain name. Neither can be read through open_target, but the
+    /// lenient gate answered "allowed"; it now fails closed.
+    #[test]
+    fn parent_dir_after_missing_component_is_refused() {
+        let (_d, root) = fixture();
+        assert!(!is_readable_path(&root, "wiki/nope/../index.md", false));
+        assert!(!is_readable_path(&root, "wiki/nope/../escape/passwd", false));
+        assert!(!is_safe_path(&root, "wiki/nope/../../.git/config", false));
+    }
+
+    #[test]
+    fn dangling_symlink_is_refused() {
+        let (_d, root) = fixture();
+        std::os::unix::fs::symlink("/nonexistent-zurvan-target/x.md", root.join("wiki/dangling.md")).unwrap();
+        assert!(!is_readable_path(&root, "wiki/dangling.md", false));
+        assert!(!is_safe_path(&root, "wiki/dangling.md", false));
     }
 
     #[test]
