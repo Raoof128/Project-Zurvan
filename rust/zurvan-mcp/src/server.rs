@@ -14,8 +14,8 @@ use crate::store::{self, MetaCache};
 use rmcp::model::{
     CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData, GetPromptRequestParams,
     GetPromptResponse, GetPromptResult, Implementation, InitializeResult, ListPromptsResult, ListResourceTemplatesResult,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt, ReadResourceRequestParams, ReadResourceResponse,
-    ReadResourceResult, Resource, ResourceContents, ResourceTemplate, ServerCapabilities, ServerConfig, Tool,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, Prompt, ReadResourceRequestParams,
+    ReadResourceResponse, ReadResourceResult, Resource, ResourceContents, ResourceTemplate, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{RoleServer, ServerHandler};
@@ -106,8 +106,8 @@ impl ZurvanServer {
 
     /// `tool_zurvan_search`, led by the §7.8 stamp. Errors stay unstamped so
     /// the A5 error flag (text starts with "Error") still holds.
-    fn search_tool(&self, query: &str, hybrid: bool, limit: usize) -> String {
-        match self.search.search(query, hybrid, limit, &|_, _| {}) {
+    fn search_tool(&self, query: &str, hybrid: bool, limit: usize, progress: &dyn Fn(u64, u64)) -> String {
+        match self.search.search(query, hybrid, limit, progress) {
             Err(e) => format!("Error searching Zurvan for '{query}': {e}"),
             Ok((hits, notice)) => {
                 let mut parts = Vec::new();
@@ -153,7 +153,7 @@ impl ZurvanServer {
                 let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
                 let graph = args.get("graph").and_then(Value::as_bool).unwrap_or(true);
                 let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
-                ToolOutput::Text(match context::bundle(&self.search, &topic, hybrid, graph, limit) {
+                ToolOutput::Text(match context::bundle(&self.search, &topic, hybrid, graph, limit, progress) {
                     Err(e) => format!("Error building context for '{topic}': {e}"),
                     Ok((text, notice)) => {
                         let mut parts = Vec::new();
@@ -170,7 +170,7 @@ impl ZurvanServer {
             "zurvan_search" => {
                 let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
                 let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
-                ToolOutput::Text(self.search_tool(&s("query"), hybrid, limit))
+                ToolOutput::Text(self.search_tool(&s("query"), hybrid, limit, progress))
             }
             "zurvan_graph_neighbours" => {
                 let conn = store::open_graph(&self.cfg);
@@ -254,7 +254,7 @@ impl ServerHandler for ZurvanServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let name = request.name.to_string();
         let Some(schema) = self.surface.schemas.get(&name).cloned() else {
@@ -264,10 +264,35 @@ impl ServerHandler for ZurvanServer {
             Ok(a) => a,
             Err(text) => return Ok(to_result(ToolOutput::ArgError(text)).into()),
         };
+        // §7A A6: progress only when the caller asked for it with a token —
+        // vector-cache builds, model loads and bridge calls report through it.
+        let token = context
+            .meta
+            .get_progress_token()
+            .or_else(|| request.meta.as_ref().and_then(|m| m.get_progress_token()));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, u64)>();
+        let forwarder = token.map(|tok| {
+            let peer = context.peer.clone();
+            tokio::spawn(async move {
+                while let Some((done, total)) = rx.recv().await {
+                    let p = ProgressNotificationParam::new(tok.clone(), done as f64).with_total(total as f64);
+                    let _ = peer.notify_progress(p).await;
+                }
+            })
+        });
         let me = self.clone();
-        let out = tokio::task::spawn_blocking(move || me.dispatch(&name, &args))
-            .await
-            .unwrap_or_else(|e| ToolOutput::Text(format!("Error: tool task failed: {e}")));
+        let out = tokio::task::spawn_blocking(move || {
+            let report = |done: u64, total: u64| {
+                let _ = tx.send((done, total));
+            };
+            me.dispatch_with_progress(&name, &args, &report)
+        })
+        .await
+        .unwrap_or_else(|e| ToolOutput::Text(format!("Error: tool task failed: {e}")));
+        // The sender is gone with the closure; let the last notes out before the result.
+        if let Some(f) = forwarder {
+            let _ = f.await;
+        }
         Ok(to_result(out).into())
     }
 

@@ -115,6 +115,8 @@ async def start_session(readonly: bool = True, root: str | None = None):
     )
     if root:
         env["ZURVAN_ROOT"] = root
+    # The Rust server's write tools run through scripts/mcp_bridge.py with this interpreter.
+    env.setdefault("ZURVAN_PYTHON", sys.executable)
 
     params = StdioServerParameters(
         command=SERVER_CMD[0],
@@ -193,7 +195,20 @@ async def readonly_smoke() -> None:
 
     async with await start_session(readonly=True) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
+            init = await session.initialize()
+
+            # §7A A1: the server explains itself without a skill file.
+            if not (getattr(init, "instructions", None) or "").strip():
+                raise AssertionError("initialize carried no instructions")
+            print("✅ Server instructions present on initialize")
+
+            # §7A A5: an error text is flagged isError (the Rust server; the
+            # Python reference returns its error strings unflagged).
+            if SERVER_CMD[-1] != str(SERVER):
+                refused = await session.call_tool("zurvan_read_page", {"path": "../outside.md"})
+                if not getattr(refused, "isError", getattr(refused, "is_error", False)):
+                    raise AssertionError("a refused read was not flagged isError")
+                print("✅ Error results flagged isError")
 
             tools_result = await session.list_tools()
             tool_names = {tool.name for tool in tools_result.tools}

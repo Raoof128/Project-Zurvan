@@ -34,8 +34,15 @@ fn node_line(n: &Expanded) -> String {
 /// The bundle text (unbudgeted, unstamped) and the semantic-fallback notice,
 /// if any. The caller budgets it to 24,000 characters as
 /// `tool_zurvan_context` does, then prepends the stamp.
-pub fn bundle(st: &SearchState, topic: &str, hybrid: bool, graph: bool, limit: usize) -> Result<(String, Option<String>), String> {
-    let (candidates, notice) = st.search(topic, hybrid, limit * 3, &|_, _| {})?;
+pub fn bundle(
+    st: &SearchState,
+    topic: &str,
+    hybrid: bool,
+    graph: bool,
+    limit: usize,
+    on_progress: &dyn Fn(u64, u64),
+) -> Result<(String, Option<String>), String> {
+    let (candidates, notice) = st.search(topic, hybrid, limit * 3, on_progress)?;
     let mut results = dedupe_sources(candidates, 2);
     results.truncate(limit);
 
@@ -118,7 +125,7 @@ mod tests {
     fn no_matches_text() {
         let dir = tempfile::tempdir().unwrap();
         let st = SearchState::new(Config::resolve_from(Some(dir.path().to_path_buf()), |_| None));
-        let (text, notice) = bundle(&st, "anything", true, true, 10).unwrap();
+        let (text, notice) = bundle(&st, "anything", true, true, 10, &|_, _| {}).unwrap();
         assert_eq!(text, "# Zurvan Context Bundle: anything\n\n## Search Matches\n\nNo matching context found.");
         assert!(notice.is_none());
     }
@@ -129,7 +136,7 @@ mod tests {
             ("a1", "wiki/a.md", "ledger revision one"), ("a2", "wiki/a.md", "ledger revision two"),
             ("a3", "wiki/a.md", "ledger revision three"), ("b1", "wiki/b.md", "ledger revision four"),
         ]);
-        let (text, _) = bundle(&st, "ledger revision", true, false, 10).unwrap();
+        let (text, _) = bundle(&st, "ledger revision", true, false, 10, &|_, _| {}).unwrap();
         assert_eq!(text.matches("### Source: wiki/a.md").count(), 2);
         assert_eq!(text.matches("### Source: wiki/b.md").count(), 1);
         assert!(text.contains("```markdown\nledger revision"));
@@ -139,11 +146,11 @@ mod tests {
     fn truncation_marker_at_1000_chars() {
         let long = "é".repeat(1500);
         let (_d, st) = store(&[("x", "wiki/x.md", &long)]);
-        let (text, _) = bundle(&st, &long, true, false, 10).unwrap();
+        let (text, _) = bundle(&st, &long, true, false, 10, &|_, _| {}).unwrap();
         assert!(text.contains(&format!("```markdown\n{}\n...[truncated]...\n```\n", "é".repeat(1000))), "{}", &text[..200]);
         let short = "é".repeat(1000);
         let (_d2, st2) = store(&[("y", "wiki/y.md", &short)]);
-        let (t2, _) = bundle(&st2, &short, true, false, 10).unwrap();
+        let (t2, _) = bundle(&st2, &short, true, false, 10, &|_, _| {}).unwrap();
         assert!(t2.contains(&format!("```markdown\n{short}\n```\n")), "exactly 1000 characters is not truncated");
     }
 
@@ -153,7 +160,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("wiki")).unwrap();
         std::fs::write(dir.path().join("wiki/k.md"), "alpha beta").unwrap();
         let st = SearchState::new(Config::resolve_from(Some(dir.path().to_path_buf()), |_| None));
-        let (text, _) = bundle(&st, "alpha beta", false, false, 10).unwrap();
+        let (text, _) = bundle(&st, "alpha beta", false, false, 10, &|_, _| {}).unwrap();
         assert!(text.contains("### Source: wiki/k.md (Score: 2.00)"), "{text}");
     }
 
@@ -175,7 +182,7 @@ mod tests {
             &[("seed", "d", "links_to"), ("c", "seed", "cites"), ("seed", "k", "links_to"), ("seed", "s1", "links_to"),
               ("seed", "x", "links_to"), ("seed", "q", "links_to"), ("seed", "n", "links_to")],
         );
-        let (text, _) = bundle(&st, "the seed page", true, true, 10).unwrap();
+        let (text, _) = bundle(&st, "the seed page", true, true, 10, &|_, _| {}).unwrap();
         let graph = text.split("## Graph-Related Context\n").nth(1).expect("graph section");
         assert_eq!(
             graph,

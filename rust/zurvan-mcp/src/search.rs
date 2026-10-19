@@ -182,10 +182,21 @@ impl SearchState {
     }
 
     /// The query vector the INDEX calls for, or why there is none.
-    fn query_vector(&self, space: &Space, query: &str) -> Result<Vec<f32>, String> {
+    fn query_vector(&self, space: &Space, query: &str, on_progress: &dyn Fn(u64, u64)) -> Result<Vec<f32>, String> {
         match space {
             Space::Mock => Ok(mock(query)),
-            Space::Real => self.embedder()?.embed(query),
+            Space::Real => {
+                // A first query may wait for the model: say so (0/1 then 1/1).
+                let cold = self.embedder.get().is_none();
+                if cold {
+                    on_progress(0, 1);
+                }
+                let e = self.embedder()?;
+                if cold {
+                    on_progress(1, 1);
+                }
+                e.embed(query)
+            }
             Space::Unsupported(why) => Err(why.clone()),
         }
     }
@@ -210,7 +221,7 @@ impl SearchState {
         }
         let meta = self.meta.index(&self.cfg)?;
         let space = Space::for_index(meta.provider.as_deref(), meta.model.as_deref());
-        let qv = match self.query_vector(&space, query) {
+        let qv = match self.query_vector(&space, query, on_progress) {
             Ok(v) => v,
             Err(why) => return Ok(Err(why)),
         };

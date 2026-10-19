@@ -49,8 +49,14 @@ async fn main() -> anyhow::Result<()> {
             );
             Ok(())
         }
+        "doctor" | "self-test" => {
+            let (report, ok) =
+                if cmd == "doctor" { zurvan_mcp::doctor::run(&cfg) } else { zurvan_mcp::selftest::run(&cfg) };
+            println!("{report}");
+            std::process::exit(if ok { 0 } else { 1 });
+        }
         other => {
-            eprintln!("zurvan-mcp: unknown command {other:?} (expected: serve | build-cache)");
+            eprintln!("zurvan-mcp: unknown command {other:?} (expected: serve | build-cache | doctor | self-test)");
             std::process::exit(2);
         }
     }

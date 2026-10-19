@@ -7,14 +7,17 @@
 
 pub mod args;
 pub mod bridge;
+pub mod client;
 pub mod config;
 pub mod context;
 pub mod corpus;
+pub mod doctor;
 pub mod embed;
 pub mod graph;
 pub mod pages;
 pub mod search;
 pub mod security;
+pub mod selftest;
 pub mod server;
 pub mod status;
 pub mod store;
