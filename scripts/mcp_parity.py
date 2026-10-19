@@ -263,6 +263,17 @@ def search_cases(hybrid: bool) -> Callable[[Path], list[Case]]:
     return build
 
 
+def context_cases(root: Path) -> list[Case]:
+    topics = [(f"instrument#{i}", item["query"]) for i, item in enumerate(_instrument()[:5])]
+    topics += [(f"adhoc#{i}", q) for i, q in enumerate(_adhoc()[:5])]
+    cases = []
+    for label, topic in topics:
+        for graph in (True, False):
+            cases.append(tool(f"context:{label}:graph={graph}", "context", "zurvan_context",
+                              {"topic": topic, "hybrid": True, "graph": graph, "limit": 10}))
+    return cases
+
+
 _RESULT_HEAD = re.compile(r"^(\d+)\. (.+) \(score ([^)]*)\)$")
 
 
@@ -320,6 +331,7 @@ CASE_BUILDERS: dict[str, Callable[[Path], list[Case]]] = {
     "graph": graph_cases,
     "search_hybrid": search_cases(True),
     "search_keyword": search_cases(False),
+    "context": context_cases,
     "read_page": read_page_cases,
     "read_gate": read_gate_cases,
 }

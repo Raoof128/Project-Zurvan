@@ -4,6 +4,7 @@
 
 use crate::args::validate;
 use crate::config::Config;
+use crate::context;
 use crate::pages;
 use crate::graph;
 use crate::search::{self, SearchState};
@@ -133,6 +134,25 @@ impl ZurvanServer {
                 self.search.model_status(),
                 self.search.cache_status()
             )),
+            "zurvan_context" => {
+                let topic = s("topic");
+                let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
+                let graph = args.get("graph").and_then(Value::as_bool).unwrap_or(true);
+                let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
+                ToolOutput::Text(match context::bundle(&self.search, &topic, hybrid, graph, limit) {
+                    Err(e) => format!("Error building context for '{topic}': {e}"),
+                    Ok((text, notice)) => {
+                        let mut parts = Vec::new();
+                        let stamp = status::stamp(&self.cfg, &self.meta);
+                        if !stamp.is_empty() {
+                            parts.push(stamp);
+                        }
+                        parts.extend(notice);
+                        parts.push(crate::text::budget(&text, crate::text::RESULT_CHAR_BUDGET));
+                        parts.join("\n")
+                    }
+                })
+            }
             "zurvan_search" => {
                 let hybrid = args.get("hybrid").and_then(Value::as_bool).unwrap_or(true);
                 let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
