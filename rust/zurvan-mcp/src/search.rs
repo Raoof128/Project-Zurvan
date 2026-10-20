@@ -153,6 +153,8 @@ pub struct SearchState {
     pub cfg: Arc<Config>,
     pub meta: Arc<MetaCache>,
     pub loader: Loader,
+    /// Keyword mode's accelerator (IOU-13): same results, cached text.
+    pub keywords: crate::keyword::KeywordCache,
     embedder: Mutex<ModelSlot>,
     /// How long a failed model load is reported before it is tried again.
     model_retry: std::time::Duration,
@@ -176,9 +178,11 @@ impl SearchState {
     }
 
     pub fn with(cfg: Arc<Config>, meta: Arc<MetaCache>) -> Self {
+        let keyword_dirs = vec![cfg.cache_dir.clone(), crate::vectors::default_fallback_dir()];
         SearchState {
             cfg,
             meta,
+            keywords: crate::keyword::KeywordCache::new(keyword_dirs),
             loader: Loader::default(),
             embedder: Mutex::new(ModelSlot::Untried),
             model_retry: MODEL_RETRY,
@@ -350,12 +354,12 @@ impl SearchState {
     /// fallback notice when semantic search cannot run (design §7A).
     pub fn search(&self, query: &str, hybrid: bool, limit: usize, on_progress: &dyn Fn(u64, u64)) -> Result<(Vec<Hit>, Option<String>), String> {
         if !hybrid {
-            return Ok((keyword(&self.cfg.root, query, limit), None));
+            return Ok((self.keywords.search(&self.cfg.root, query, limit), None));
         }
         match self.hybrid_or_unavailable(query, limit, on_progress)? {
             Ok(hits) => Ok((hits, None)),
             Err(why) => Ok((
-                keyword(&self.cfg.root, query, limit),
+                self.keywords.search(&self.cfg.root, query, limit),
                 Some(format!("Semantic search unavailable: {why} — keyword results only.")),
             )),
         }

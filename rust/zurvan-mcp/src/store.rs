@@ -41,7 +41,7 @@ pub fn open_at(path: &Path, expected: Generation) -> Result<Connection, String> 
 }
 
 /// What an atomic promote changes: a new inode (and usually size/mtime).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Generation {
     pub dev: u64,
     pub ino: u64,
@@ -59,7 +59,7 @@ pub fn generation(path: &Path) -> std::io::Result<Generation> {
     })
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct IndexMeta {
     pub generation: Generation,
     pub chunks: i64,
@@ -157,11 +157,19 @@ impl MetaCache {
         self.computations.load(Ordering::SeqCst)
     }
 
+    /// The served index's metadata. It is persisted per generation next to
+    /// the vector cache (IOU-12): computing it is one full scan of `chunks`
+    /// (~6.5 s on the live store), which a fresh server paid on its first
+    /// `zurvan_status`.
     pub fn index(&self, cfg: &Config) -> Result<Arc<IndexMeta>, String> {
-        self.index_at(&cfg.search_db)
+        self.index_persisted(&cfg.search_db, Some(&cfg.cache_dir))
     }
 
     pub fn index_at(&self, path: &Path) -> Result<Arc<IndexMeta>, String> {
+        self.index_persisted(path, None)
+    }
+
+    fn index_persisted(&self, path: &Path, persist: Option<&Path>) -> Result<Arc<IndexMeta>, String> {
         let mut slot = self.index.lock().unwrap();
         let mut attempt = 0;
         loop {
@@ -169,9 +177,17 @@ impl MetaCache {
             if let Some(m) = slot.as_ref().filter(|m| m.generation == generation) {
                 return Ok(m.clone());
             }
+            if let Some(meta) = persist.and_then(|dir| read_persisted(dir, path, generation)) {
+                let meta = Arc::new(meta);
+                *slot = Some(meta.clone());
+                return Ok(meta);
+            }
             self.computations.fetch_add(1, Ordering::SeqCst);
             match compute_index(path, generation) {
                 Ok(meta) => {
+                    if let Some(dir) = persist {
+                        write_persisted(dir, path, &meta);
+                    }
                     let meta = Arc::new(meta);
                     *slot = Some(meta.clone());
                     return Ok(meta);
@@ -211,6 +227,58 @@ pub fn ledger(cfg: &Config) -> Option<(i64, String)> {
         Ok((r.get(0)?, r.get(1)?))
     })
     .ok()
+}
+
+/// `meta-<key>.json`: the key binds the index PATH and its generation, so a
+/// promoted index (new inode) can never be described by an older file.
+fn persisted_path(dir: &Path, index: &Path, g: Generation) -> std::path::PathBuf {
+    use sha2::{Digest, Sha256};
+    let key = format!("{}|{}|{}|{}|{}", index.display(), g.dev, g.ino, g.size, g.mtime_ns);
+    let hex: String = Sha256::digest(key.as_bytes()).iter().take(16).map(|b| format!("{b:02x}")).collect();
+    dir.join(format!("meta-{hex}.json"))
+}
+
+/// The persisted metadata, only if it parses AND names this exact generation.
+fn read_persisted(dir: &Path, index: &Path, g: Generation) -> Option<IndexMeta> {
+    let raw = std::fs::read(persisted_path(dir, index, g)).ok()?;
+    let meta: IndexMeta = serde_json::from_slice(&raw).ok()?;
+    (meta.generation == g).then_some(meta)
+}
+
+/// Best effort: 0600 in a 0700 dir, temp + rename; a store we cannot write
+/// simply recomputes next time. Keeps the newest four files.
+fn write_persisted(dir: &Path, index: &Path, meta: &IndexMeta) {
+    use std::io::Write;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    if std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).is_err() {
+        return;
+    }
+    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    let Ok(body) = serde_json::to_vec(meta) else { return };
+    let dest = persisted_path(dir, index, meta.generation);
+    let tmp = dest.with_extension(format!("json.tmp-{}", std::process::id()));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(&body).and_then(|_| f.sync_all()));
+    if written.is_err() || std::fs::rename(&tmp, &dest).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    let mut old: Vec<(std::time::SystemTime, std::path::PathBuf)> = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("meta-") && e.file_name().to_string_lossy().ends_with(".json"))
+                .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path()))
+                .collect()
+        })
+        .unwrap_or_default();
+    old.sort_by_key(|o| std::cmp::Reverse(o.0));
+    for (_, p) in old.into_iter().skip(4) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 #[cfg(test)]
@@ -290,5 +358,66 @@ mod tests {
         assert_eq!(ledger(&cfg), None);
         registry_db(&cfg.registry_db, 756, "CLEAN");
         assert_eq!(ledger(&cfg), Some((756, "CLEAN".to_string())));
+    }
+
+    fn meta_files(cfg: &Config) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(&cfg.cache_dir)
+            .map(|rd| rd.filter_map(Result::ok).map(|e| e.path())
+                .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("meta-")).collect())
+            .unwrap_or_default()
+    }
+
+    /// IOU-12: the first `zurvan_status` of a fresh server waited ~6.5 s for
+    /// one full scan of `chunks`. The per-generation metadata is now persisted
+    /// next to the vector cache, so a fresh process reads it instead.
+    #[test]
+    fn index_meta_is_persisted_per_generation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        search_db(&cfg.search_db, "mock", "deterministic_hash", &[chunk("a", "wiki/x.md"), chunk("b", "wiki/y.md")],
+                  &[("built_from_revision", "7")]);
+        let first = MetaCache::default();
+        let m1 = first.index(&cfg).unwrap();
+        assert_eq!(first.computations(), 1);
+        let files = meta_files(&cfg);
+        assert_eq!(files.len(), 1, "one metadata file per generation");
+        assert_eq!(std::fs::metadata(&files[0]).unwrap().permissions().mode() & 0o777, 0o600);
+
+        let fresh = MetaCache::default();
+        let m2 = fresh.index(&cfg).unwrap();
+        assert_eq!(fresh.computations(), 0, "a fresh process reads the persisted metadata");
+        assert_eq!(*m1, *m2);
+
+        let next = dir.path().join("next.sqlite");
+        search_db(&next, "mock", "deterministic_hash", &[chunk("z", "docs/z.md")], &[("built_from_revision", "8")]);
+        std::fs::rename(&next, &cfg.search_db).unwrap();
+        let after = MetaCache::default();
+        let m3 = after.index(&cfg).unwrap();
+        assert_eq!(after.computations(), 1, "a promoted index is never described by the old file");
+        assert_eq!((m3.chunks, m3.built_from_revision), (1, Some(8)));
+    }
+
+    #[test]
+    fn a_corrupt_persisted_meta_is_recomputed() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        search_db(&cfg.search_db, "mock", "deterministic_hash", &[chunk("a", "wiki/x.md")], &[]);
+        MetaCache::default().index(&cfg).unwrap();
+        let f = meta_files(&cfg).remove(0);
+        std::fs::write(&f, b"{ not json").unwrap();
+        let fresh = MetaCache::default();
+        assert_eq!(fresh.index(&cfg).unwrap().chunks, 1);
+        assert_eq!(fresh.computations(), 1, "unreadable metadata is recomputed, never trusted");
+    }
+
+    #[test]
+    fn index_at_another_path_is_never_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        let other = dir.path().join("elsewhere.sqlite");
+        search_db(&other, "mock", "deterministic_hash", &[chunk("a", "wiki/x.md")], &[]);
+        MetaCache::default().index_at(&other).unwrap();
+        assert!(meta_files(&cfg).is_empty(), "only the served index is persisted");
     }
 }

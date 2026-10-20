@@ -143,6 +143,14 @@ pub fn is_readable_path(root: &Path, target: &str, allow_raw: bool) -> bool {
     }
 }
 
+/// The allow-list for a path that is ALREADY canonical (stored names, no
+/// symlinks), under an already-canonical root: what `open_target` decides
+/// after its own resolution. Used by the keyword cache, whose walk resolves
+/// each directory once.
+pub fn allowed_canonical(root_canonical: &Path, canonical: &Path, allow_raw: bool) -> bool {
+    rel_of(root_canonical, canonical).is_some_and(|parts| allowed(&parts, allow_raw))
+}
+
 /// The allow-list over root-relative components. Allowed names compare
 /// exactly (a case variant fails closed); excluded names compare
 /// case-insensitively (a case variant is still excluded). The components are

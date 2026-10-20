@@ -75,7 +75,7 @@ pub fn default_fallback_dir() -> PathBuf {
 /// Make `dir` a private directory this account owns: created 0700, never a
 /// symlink, and chmod-able (only the owner can chmod), so a directory planted
 /// under a shared temp name by another account is refused, not used.
-fn private_dir(dir: &Path) -> Result<(), String> {
+pub(crate) fn private_dir(dir: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     match std::fs::DirBuilder::new().mode(0o700).create(dir) {
         Ok(()) => {}
@@ -622,9 +622,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let cfg = build_db(dir.path(), &vectors(12, 9), &ids(12), "7");
-        let meta = MetaCache::default().index(&cfg).unwrap();
+        // Locked BEFORE the metadata is read: persisting it would otherwise
+        // create data/cache/ first and the store would look writable.
         let data = cfg.cache_dir.parent().unwrap().to_path_buf();
         chmod(&data, 0o555);
+        let meta = MetaCache::default().index(&cfg).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let fallback = tmp.path().join("zurvan-mcp-vectors");
         let got = Loader::with_fallback(Some(fallback.clone())).get(&cfg, &meta, &|_, _| {});
@@ -641,9 +643,11 @@ mod tests {
     fn cache_failure_names_the_path_and_the_fix() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = build_db(dir.path(), &vectors(4, 3), &ids(4), "7");
-        let meta = MetaCache::default().index(&cfg).unwrap();
+        // Locked BEFORE the metadata is read: persisting it would otherwise
+        // create data/cache/ first and the store would look writable.
         let data = cfg.cache_dir.parent().unwrap().to_path_buf();
         chmod(&data, 0o555);
+        let meta = MetaCache::default().index(&cfg).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         chmod(tmp.path(), 0o555);
         let got = Loader::with_fallback(Some(tmp.path().join("zurvan-mcp-vectors"))).get(&cfg, &meta, &|_, _| {});
@@ -661,9 +665,11 @@ mod tests {
         // own is simulated by one that is not a directory at all.
         let dir = tempfile::tempdir().unwrap();
         let cfg = build_db(dir.path(), &vectors(4, 3), &ids(4), "7");
-        let meta = MetaCache::default().index(&cfg).unwrap();
+        // Locked BEFORE the metadata is read: persisting it would otherwise
+        // create data/cache/ first and the store would look writable.
         let data = cfg.cache_dir.parent().unwrap().to_path_buf();
         chmod(&data, 0o555);
+        let meta = MetaCache::default().index(&cfg).unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let planted = tmp.path().join("zurvan-mcp-vectors");
         std::os::unix::fs::symlink(tmp.path(), &planted).unwrap();

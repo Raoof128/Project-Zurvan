@@ -111,6 +111,16 @@ Paste the printed Python entry back and restart the client.
 
 ## Operations
 
+- **Keyword cache.** `data/cache/keyword-<key>.zkw` (0600) holds the
+  lowercased text of every readable file, memory-mapped and shared by all
+  servers; it is built at start-up and reused across restarts. Each query
+  re-walks `wiki/` and `docs/`, re-applies the read gate, and checks every
+  file's identity (device, inode, size, mtime), so an edit is seen at once (the
+  changed file is read fresh). After 256 changed files it is rebuilt. Results
+  are exactly those of the uncached scan.
+- **Index metadata.** `data/cache/meta-<key>.json` (0600) holds the counts
+  `zurvan_status` reports for one index build, so a fresh server answers its
+  first status in ~75 ms instead of rescanning `chunks` (~6.5 s).
 - **Vector cache.** The first hybrid search after an index rebuild (or the
   background warm-up at start) writes `data/cache/vectors-<key>.zvec`: the
   index's vectors as one memory-mapped matrix, about 490 MB, built in about 9 s.
@@ -140,14 +150,16 @@ Paste the printed Python entry back and restart the client.
 | | Python server | Rust server |
 |---|---|---|
 | hybrid search p50 / p95 | 11,844 / 27,983 ms (6.8 s warm on a quiet machine) | 129 / 194 ms |
-| keyword search p50 / p95 | several seconds | 618 / 1,224 ms |
+| keyword search p50 / p95 | several seconds | 80 / 110 ms (2026-10-20; was 618 / 1,224 ms) |
 | context p50 / p95 | 10,962 / 27,662 ms | 174 / 283 ms |
-| `zurvan_status` p50 / p95 | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 6.5 s on a fresh process's first call |
+| `zurvan_status` p50 / p95 | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 74 ms on a fresh process's first call (2026-10-20; was 6.5 s) |
 | physical footprint after 100 searches | — | 137 MB (+ the 465 MiB file-backed vector map, clean) |
 
 Parity on the same store, every group, on both MCP protocol versions: 312 cases,
 302 identical, 10 expected divergences (the read allow-list refusing what Python
 serves, and the eval tools' one-line prefix), 0 failures. The instrument scores
-the same on both servers. Targets **not** met: hybrid p95 under 150 ms, keyword
-under 400 ms, and the first `zurvan_status` of a fresh process, which waits for
+the same on both servers. Since 2026-10-20 keyword search and the first
+`zurvan_status` meet their targets (see Operations); hybrid p95 under 150 ms is
+still not met. At closure these targets were missed: hybrid p95 under 150 ms,
+keyword under 400 ms, and the first `zurvan_status` of a fresh process, which waits for
 the start-up metadata scan. Design §10.4 has the full table.

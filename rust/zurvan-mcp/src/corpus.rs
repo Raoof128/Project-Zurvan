@@ -11,6 +11,21 @@ use std::path::{Path, PathBuf};
 
 /// Paths (absolute, `base`-joined) of every `*.md` entry under `top`, in glob order.
 pub fn glob_md(top: &Path) -> Vec<PathBuf> {
+    glob_md_entries(top).into_iter().map(|e| e.path).collect()
+}
+
+/// One `*.md` entry of the walk: the path as walked, the canonical (stored)
+/// path of its directory, its stored leaf name, and whether the leaf itself
+/// is a symlink. The keyword cache gates from these without re-resolving.
+pub struct MdEntry {
+    pub path: PathBuf,
+    pub dir_canonical: PathBuf,
+    pub name: String,
+    pub is_symlink: bool,
+}
+
+/// `glob_md` with each entry's resolved directory, in the same order.
+pub fn glob_md_entries(top: &Path) -> Vec<MdEntry> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     if top.is_dir() {
@@ -22,25 +37,28 @@ pub fn glob_md(top: &Path) -> Vec<PathBuf> {
 /// Each REAL directory is walked once (by canonical path), so a symlink loop
 /// cannot repeat the corpus; the live store has no symlinks, so glob order is
 /// unaffected there.
-fn visit(dir: &Path, out: &mut Vec<PathBuf>, seen: &mut std::collections::HashSet<PathBuf>) {
+fn visit(dir: &Path, out: &mut Vec<MdEntry>, seen: &mut std::collections::HashSet<PathBuf>) {
     let Ok(canonical) = std::fs::canonicalize(dir) else { return };
-    if !seen.insert(canonical) {
+    if !seen.insert(canonical.clone()) {
         return;
     }
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let entries: Vec<(String, PathBuf)> = rd
+    let entries: Vec<(String, PathBuf, bool)> = rd
         .filter_map(Result::ok)
-        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
-        .filter(|(name, _)| !name.starts_with('.'))
+        .map(|e| {
+            let link = e.file_type().is_ok_and(|t| t.is_symlink());
+            (e.file_name().to_string_lossy().into_owned(), e.path(), link)
+        })
+        .filter(|(name, _, _)| !name.starts_with('.'))
         .collect();
     // glob's "*.md" matches any entry name (files and directories alike),
     // case-sensitively (posix normcase is the identity).
-    for (name, path) in &entries {
+    for (name, path, link) in &entries {
         if name.ends_with(".md") {
-            out.push(path.clone());
+            out.push(MdEntry { path: path.clone(), dir_canonical: canonical.clone(), name: name.clone(), is_symlink: *link });
         }
     }
-    for (_, path) in &entries {
+    for (_, path, _) in &entries {
         if path.is_dir() {
             visit(path, out, seen);
         }

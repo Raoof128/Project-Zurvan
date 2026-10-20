@@ -747,11 +747,23 @@ Named promises this document makes and does not pay:
   `zurvan_status` in a fresh Rust process waits for the one full scan of
   `chunks` (6.5 s cold) that the startup warm-up performs. Caching the
   per-generation metadata next to the vector cache would make the first call
-  as fast as the rest (8 ms).
+  as fast as the rest (8 ms). **PAID** 2026-10-20: `data/cache/meta-<key>.json`
+  (0600, keyed by the index path and generation) is read by a fresh process;
+  measured first `zurvan_status` 5.2 s (computing and persisting) then 74 ms
+  in the next fresh process. `store::tests::index_meta_is_persisted_per_generation`.
 - **IOU-13 `keyword-scan-speed`** — Rust keyword mode is 618 / 1,224 ms
   p50 / p95 against the 400 ms target: it reads all 235 MB of corpus files per
   query, now through the read gate. An FTS5 keyword mode (IOU-1) would make it
-  milliseconds but changes results.
+  milliseconds but changes results. **PAID** 2026-10-20 WITHOUT changing
+  results: profiling showed the matching itself was ~24 ms; the cost was the
+  per-file gate canonicalisation (~800 ms serial) and reading plus lowercasing
+  212 MB. `src/keyword.rs` gates from the walk's already-resolved directories
+  and keeps the lowercased text in a memory-mapped `data/cache/keyword-<key>.zkw`
+  (identity-checked per file, changed files read fresh, rebuilt after 256
+  misses, re-gated on every query). Measured warm p50 80 ms / p95 110 ms, first
+  query in a fresh process 221 ms; results identical to the uncached scan by
+  test and to Python by the parity gate. FTS5 keyword mode stays out (it would
+  change results and miss edits newer than the index).
 
 ## 10.4 Closure measurements (2026-10-19, live store, index rev 745)
 
@@ -772,10 +784,10 @@ sessions' idle servers); Python from the same-day A/B runs:
 | Tool | Python p50 / p95 | Rust p50 / p95 | §1 target |
 |---|---|---|---|
 | hybrid search | 11,844 / 27,983 ms (6.8 s quiet) | 129 / 194 ms | < 150 ms — p50 met, p95 not |
-| keyword search | ~5,000–15,000 ms | 618 / 1,224 ms | < 400 ms — **not met** (IOU-13) |
+| keyword search | ~5,000–15,000 ms | 618 / 1,224 ms; **80 / 110 ms** after IOU-13 (2026-10-20) | < 400 ms — not met at closure, **met** after IOU-13 |
 | context | 10,962 / 27,662 ms | 174 / 283 ms | < 400 ms — met |
 | orient | 18,149 / 22,447 ms | 138 / 208 ms | — |
-| status | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 6.5 s first call | < 100 ms — met warm, **not** first call (IOU-12) |
+| status | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 6.5 s first call; **74 ms** first call after IOU-12 (2026-10-20) | < 100 ms — met warm; first call met after IOU-12 |
 | graph neighbours / expand | 3.3 / 17 · 4.4 / 89 ms | 2.5 / 15 · 4.1 / 59 ms | < 20 ms p50 — met |
 | read_page | 0.9 / 1.1 ms | 0.2 / 0.3 ms | < 5 ms — met |
 

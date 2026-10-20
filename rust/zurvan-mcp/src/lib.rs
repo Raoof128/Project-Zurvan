@@ -14,6 +14,7 @@ pub mod corpus;
 pub mod doctor;
 pub mod embed;
 pub mod graph;
+pub mod keyword;
 pub mod pages;
 pub mod search;
 pub mod security;

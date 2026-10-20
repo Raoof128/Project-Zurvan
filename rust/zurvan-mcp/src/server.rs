@@ -100,6 +100,9 @@ impl ZurvanServer {
         let me = self.clone();
         std::thread::spawn(move || {
             let _ = me.meta.graph(&me.cfg);
+            // Builds (or opens) the keyword cache, so a first keyword query
+            // does not pay the full read of the corpus.
+            let _ = me.search.keywords.search(&me.cfg.root, "", 1);
             if let Ok(meta) = me.meta.index(&me.cfg) {
                 let _ = me.search.loader.get(&me.cfg, &meta, &|_, _| {});
                 if crate::embed::Space::for_index(meta.provider.as_deref(), meta.model.as_deref()) == crate::embed::Space::Real {
