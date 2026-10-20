@@ -23,6 +23,14 @@ from pathlib import Path
 
 import pytest
 
+# Hugging Face tokenizers prints "The current process just got forked, after
+# parallelism has already been used" to the CHILD's stderr whenever a process
+# that already used it forks. In one pytest session the embedding tests load
+# it, and the Z1b broker tests then fork and assert stderr is EMPTY, so they
+# failed in suite order only (merge of z1b-rev3, 2026-10-20). The library's own
+# documented switch is this variable; production brokers never load it.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
 LIVE_ROOT = Path(__file__).resolve().parents[1]
 
 # Files are counted; `wiki/log.md` is measured by LENGTH.
