@@ -1,5 +1,13 @@
 ## Change Log
 
+### 2026-10-20d (Australia/Sydney) — Rust MCP closeout: design status corrected, session logged
+**Raouf:**
+- **Scope:** documentation only. The design doc's status line still said the harness cut-over was not done; it now records the merge to `main`, the 2026-10-20 cut-over (both clients launch `~/.zurvan/bin/zurvan-mcp` built from `main`, main checkout as code root), the paid IOUs and every §1 latency target met.
+- **State of the Rust MCP server at closeout (all on `main`, pushed):** 15 tools / 7 resources / 4 prompts; live parity gate 314 cases per protocol, 312 PASS / 2 EXPECTED_DIVERGENCE (eval prefix) / 0 FAIL on both protocols; hybrid 70 / 92 ms, keyword 80 / 110 ms, first status 74 ms, footprint 164 MB; full suite 1547 passed / 0 failed in the main checkout.
+- **Files:** `docs/superpowers/specs/2026-10-19-rust-mcp-server-design.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/agents-history.md` (rotation).
+- **Verification:** `public_repo_guard.py` passed; `git diff --check` clean. No code changed, so no test run is owed by this entry.
+- **Follow-ups:** none open for the MCP server.
+
 ### 2026-10-20c (Australia/Sydney) — Rust MCP: hybrid p95 target met (175 to 92 ms) with a partitioned FTS5 pool; results identical
 **Raouf:**
 - **Scope:** the last closure target not met (hybrid p95 < 150 ms), on branch `mcp-hybrid`. No ranking change.

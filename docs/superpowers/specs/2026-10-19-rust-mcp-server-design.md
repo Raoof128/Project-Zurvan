@@ -6,8 +6,11 @@ approved … Answer open questions with your recommendations"). Gauntleted
 by builder check + simurgh-arise pass. Open questions answered in §12.
 Plan: `docs/superpowers/plans/2026-10-19-rust-mcp-server.md`.
 **Implemented** on branch `rust-mcp` (plan Tasks 0–14, 2026-10-19); live
-gate green on both protocols (§10.4). Cut-over of the harness configs is
-**not done**: it waits for the whole-branch review and the merge.
+gate green on both protocols (§10.4). **Merged to `main` and cut over
+2026-10-20:** Claude Code and Codex launch `~/.zurvan/bin/zurvan-mcp`, built
+from `main`, with the main checkout as code root. Whole-branch review fixed
+(fix passes 1 and 2), IOU-5/10/11/12/13 paid, and every §1 latency target met
+(hybrid 70 / 92 ms, keyword 80 / 110 ms, first status 74 ms; §10.2, §10.4).
 **Scope:** replace `scripts/mcp_server.py` (+ `mcp_tools.py`, `mcp_resources.py`,
 `mcp_prompts.py`, `mcp_security.py`) with a native binary that speaks the same
 MCP surface, is an order of magnitude faster on every call, and is smoother
