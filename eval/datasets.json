@@ -7,7 +7,24 @@
       "sha256": "34a533f2d74fc3994d4cf0a80e21a558986609bb5ce09d5224d2e781d5571018",
       "n_items": 50,
       "retired_on": "2026-09-29",
-      "reason": "public in the repository 2026-05-30..2026-09-16; kept as historical regression and diagnostics (spec §9.1), never a promotion gate"
+      "reason": "public in the repository 2026-05-30..2026-09-16; kept as historical regression and diagnostics (spec \u00a79.1), never a promotion gate"
+    },
+    "z1b_dev": {
+      "state": "DEV",
+      "sha256": "36c695434e7ef60e6bc12fa157d94112eca4141b8a8ba8504f9847fbe05347d9",
+      "n_items": 203
+    },
+    "z1b_holdout": {
+      "state": "HOLDOUT",
+      "sha256": "c446f1b2667ca8691a87e53f584e11fedcb711f65db819743ce5ebab9edfa8c9",
+      "n_items": 160,
+      "suite_id": "bedc01c1dce53b46"
+    },
+    "z1b_reserve": {
+      "state": "RESERVE",
+      "sha256": "711e10ac98d6ff50acef91864c99458ac3260267f9b04a647a56281a557f33fb",
+      "n_items": 80,
+      "suite_id": "bedc01c1dce53b46"
     }
   }
 }

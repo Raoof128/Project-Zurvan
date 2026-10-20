@@ -1,3 +1,4 @@
+import posixpath
 import subprocess
 import sys
 from pathlib import Path
@@ -104,6 +105,48 @@ _IDENTIFIER_PATTERNS = (
 )
 
 _EMAIL_PATTERN = _re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b')
+
+
+# Z1b sealed evaluation: the only files that may be tracked under eval/z1b/. Everything else there
+# (holdout.jsonl, sets/, dev.jsonl, ciphertext, bundles, keys) is sealed or per-item material and must
+# never reach a remote. Exact-case, exact-path matches only; the two prefixes hold committed
+# predeclarations and authoring prompts.
+EVAL_Z1B_ROOT = "eval/z1b"
+EVAL_Z1B_ALLOWED = frozenset({
+    "eval/z1b/spec.json",
+    "eval/z1b/manifest.json",
+    "eval/z1b/manifest.json.sig",
+    "eval/z1b/allowed_signers",
+    "eval/z1b/rubric.md",
+    "eval/z1b/promotions.jsonl",
+})
+EVAL_Z1B_ALLOWED_PREFIXES = ("eval/z1b/declarations/", "eval/z1b/prompts/")
+# ciphertext, bundles and stores are never publishable even inside an allowed prefix
+EVAL_Z1B_BLOCKED_SUFFIXES = (".age", ".bundle", ".sqlite", ".key", ".pem")
+
+
+def eval_z1b_offenders(tracked):
+    """Tracked paths under eval/z1b/ that are not on the allowlist.
+
+    Fails closed: the match on the directory is case-insensitive (the volume is, so `eval/Z1B/x` is the
+    same directory), and an allowed path must match exactly, with no `..`, `.`, empty or backslash
+    segment anywhere (a traversal under an allowed prefix is blocked, not normalised).
+    """
+    bad = []
+    for path in tracked:
+        lowered = path.lower()
+        normed = posixpath.normpath(path).lower()  # `docs/../eval/z1b/x` is in eval/z1b too
+        if not any(p == EVAL_Z1B_ROOT or p.startswith(EVAL_Z1B_ROOT + "/") for p in (lowered, normed)):
+            continue
+        parts = path.split("/")
+        clean = (all(p not in ("", ".", "..") for p in parts) and "\\" not in path
+                 and "\x00" not in path)
+        allowed = clean and (path in EVAL_Z1B_ALLOWED or (
+            path.startswith(EVAL_Z1B_ALLOWED_PREFIXES) and not path.endswith("/")
+            and not lowered.endswith(EVAL_Z1B_BLOCKED_SUFFIXES)))
+        if not allowed:
+            bad.append(path)
+    return bad
 
 
 def page_identifiers(text):
@@ -283,6 +326,8 @@ def main():
             else:
                 if path == pattern:
                     bad.append(path)
+
+    bad.extend(eval_z1b_offenders(tracked))
 
     if bad:
         print("Public repo guard failed. Remove these tracked private files:")

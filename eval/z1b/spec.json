@@ -1,0 +1,359 @@
+{
+  "schema": "zurvan.z1b.spec.v1",
+  "strata": [
+    {
+      "id": "exact_identifier",
+      "name": "Exact identifiers",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      }
+    },
+    {
+      "id": "path",
+      "name": "Filenames and paths",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      }
+    },
+    {
+      "id": "hash",
+      "name": "Hashes",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      }
+    },
+    {
+      "id": "error_string",
+      "name": "Error strings",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      }
+    },
+    {
+      "id": "semantic",
+      "name": "Semantic lookup",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    },
+    {
+      "id": "alias",
+      "name": "Aliases",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    },
+    {
+      "id": "decision_rationale",
+      "name": "Decision rationale",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    },
+    {
+      "id": "temporal",
+      "name": "Temporal reconstruction",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.4,
+        "hard": 0.4
+      }
+    },
+    {
+      "id": "contradiction",
+      "name": "Contradiction queries",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.1,
+        "medium": 0.4,
+        "hard": 0.5
+      }
+    },
+    {
+      "id": "provenance",
+      "name": "Provenance and source verification",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    },
+    {
+      "id": "code",
+      "name": "Code queries",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.3,
+        "medium": 0.5,
+        "hard": 0.2
+      }
+    },
+    {
+      "id": "multi_hop",
+      "name": "Multi-hop questions",
+      "grading": "set",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.1,
+        "medium": 0.4,
+        "hard": 0.5
+      }
+    },
+    {
+      "id": "synthesis",
+      "name": "Corpus-wide synthesis",
+      "grading": "set",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.1,
+        "medium": 0.4,
+        "hard": 0.5
+      }
+    },
+    {
+      "id": "cross_project",
+      "name": "Cross-project retrieval",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    },
+    {
+      "id": "hard_negative",
+      "name": "Hard negatives",
+      "grading": "rank",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.1,
+        "medium": 0.4,
+        "hard": 0.5
+      }
+    },
+    {
+      "id": "not_found",
+      "name": "Not found or insufficient evidence",
+      "grading": "abstain",
+      "min_holdout": 10,
+      "min_reserve": 5,
+      "difficulty_targets": {
+        "easy": 0.2,
+        "medium": 0.5,
+        "hard": 0.3
+      }
+    }
+  ],
+  "totals": {
+    "min_holdout": 150,
+    "min_reserve": 80
+  },
+  "abstain_threshold": 0.5,
+  "run_policy": {
+    "holdout_budget": 8,
+    "latency_resolution_ms": 10,
+    "metric_precision": 0.001,
+    "ci_precision": 0.01,
+    "query_timeout_s": 30,
+    "run_timeout_s": 3600,
+    "bootstrap_resamples": 2000,
+    "max_results": 10
+  },
+  "predeclaration_schema": {
+    "required": [
+      "role",
+      "suite_id",
+      "primary_metric",
+      "critical_strata",
+      "non_inferiority_margins",
+      "improvement_target",
+      "resource_budgets",
+      "resource_improvement"
+    ],
+    "properties": {
+      "role": {
+        "type": "string",
+        "enum": [
+          "baseline",
+          "candidate"
+        ]
+      },
+      "suite_id": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{16}$"
+      },
+      "primary_metric": {
+        "type": "string",
+        "enum": [
+          "recall_at_1",
+          "recall_at_3",
+          "recall_at_10",
+          "mrr"
+        ]
+      },
+      "critical_strata": {
+        "type": "array",
+        "element": {
+          "type": "string",
+          "enum": [
+            "exact_identifier",
+            "path",
+            "hash",
+            "error_string",
+            "semantic",
+            "alias",
+            "decision_rationale",
+            "temporal",
+            "contradiction",
+            "provenance",
+            "code",
+            "multi_hop",
+            "synthesis",
+            "cross_project",
+            "hard_negative",
+            "not_found"
+          ]
+        },
+        "min_length": 1
+      },
+      "non_inferiority_margins": {
+        "type": "object",
+        "required": [
+          "critical",
+          "overall"
+        ],
+        "properties": {
+          "critical": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "overall": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "improvement_target": {
+        "type": "object",
+        "required": [
+          "metric",
+          "min_delta"
+        ],
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "recall_at_1",
+              "recall_at_3",
+              "recall_at_10",
+              "mrr"
+            ]
+          },
+          "min_delta": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "resource_budgets": {
+        "type": "object",
+        "required": [
+          "latency_p95_ms",
+          "peak_rss_mb"
+        ],
+        "properties": {
+          "latency_p95_ms": {
+            "type": "integer",
+            "minimum": 10
+          },
+          "peak_rss_mb": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "resource_improvement": {
+        "type": [
+          "null",
+          "object"
+        ],
+        "description": "null disables the resource-only promotion route (#12); otherwise {metric, min_delta}",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "latency_p95_ms",
+              "peak_rss_mb"
+            ]
+          },
+          "min_delta": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "metric",
+          "min_delta"
+        ]
+      }
+    }
+  },
+  "locator_kinds": [
+    "page",
+    "section"
+  ]
+}

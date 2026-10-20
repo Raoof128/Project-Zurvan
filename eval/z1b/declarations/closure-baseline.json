@@ -1,0 +1,10 @@
+{
+  "role": "baseline",
+  "suite_id": "bedc01c1dce53b46",
+  "primary_metric": "recall_at_10",
+  "critical_strata": ["exact_identifier", "path", "hash", "error_string"],
+  "non_inferiority_margins": {"critical": 0.05, "overall": 0.02},
+  "improvement_target": {"metric": "mrr", "min_delta": 0.01},
+  "resource_budgets": {"latency_p95_ms": 30000, "peak_rss_mb": 4096},
+  "resource_improvement": null
+}

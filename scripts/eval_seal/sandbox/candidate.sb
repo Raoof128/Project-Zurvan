@@ -1,0 +1,15 @@
+;; Candidate sandbox (contract s3.8). Defence in depth only: the real boundary is the OS user.
+;; Parameters (-D): SCRATCH (the only writable tree), SEALED (sealed eval home), DEVHOME (developer home).
+;; SBPL subpaths are absolute real paths: callers pass os.path.realpath values.
+(version 1)
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write*
+    (subpath (param "SCRATCH"))
+    (literal "/dev/null")
+    (literal "/dev/dtracehelper"))
+(deny file-read*
+    (subpath "/Users/zurvaneval")
+    (subpath (param "SEALED"))
+    (subpath (param "DEVHOME")))

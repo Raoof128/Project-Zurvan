@@ -14,5 +14,29 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "Read(//Users/zurvaneval/**)",
+      "Edit(//Users/zurvaneval/**)",
+      "Write(//Users/zurvaneval/**)",
+      "Read(//Users/zurvaneval)",
+      "Bash(*/Users/zurvaneval*)",
+      "Read(//Library/ZurvanEval/corpus/**)",
+      "Edit(//Library/ZurvanEval/corpus/**)",
+      "Write(//Library/ZurvanEval/corpus/**)",
+      "Read(//Library/ZurvanEval/corpus)",
+      "Bash(*/Library/ZurvanEval/corpus*)",
+      "Read(//Library/ZurvanEval/stage/**)",
+      "Edit(//Library/ZurvanEval/stage/**)",
+      "Write(//Library/ZurvanEval/stage/**)",
+      "Read(//Library/ZurvanEval/stage)",
+      "Bash(*/Library/ZurvanEval/stage*)",
+      "Read(//Users/zurvancandidate/**)",
+      "Edit(//Users/zurvancandidate/**)",
+      "Write(//Users/zurvancandidate/**)",
+      "Read(//Users/zurvancandidate)",
+      "Bash(*/Users/zurvancandidate*)"
+    ]
   }
 }
