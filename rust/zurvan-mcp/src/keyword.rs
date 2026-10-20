@@ -68,7 +68,20 @@ struct Blob {
 
 impl Blob {
     fn open(path: &Path, root: &Path) -> Result<Blob, String> {
-        let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        // Trusted only as a regular file we own that nobody else can write,
+        // opened without following a symlink (commit security review
+        // 2026-10-20: a planted cache would inject text into results).
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| e.to_string())?;
+        let m = file.metadata().map_err(|e| e.to_string())?;
+        // SAFETY: getuid(2) has no preconditions.
+        let me = unsafe { libc::getuid() };
+        if !m.is_file() || m.uid() != me || m.mode() & 0o022 != 0 {
+            return Err("keyword cache file is not private".into());
+        }
         // SAFETY: the file is only ever replaced by rename, never written in
         // place, so the mapped inode cannot change under us.
         let map = unsafe { Mmap::map(&file) }.map_err(|e| e.to_string())?;
@@ -191,7 +204,13 @@ impl KeywordCache {
             return Some(b.clone());
         }
         let name = Self::file_name(root);
-        let b = self.dirs.iter().find_map(|d| Blob::open(&d.join(&name), root).ok()).map(Arc::new)?;
+        let b = self
+            .dirs
+            .iter()
+            .enumerate()
+            .filter(|(i, d)| *i == 0 || (d.is_dir() && crate::vectors::private_dir(d).is_ok()))
+            .find_map(|(_, d)| Blob::open(&d.join(&name), root).ok())
+            .map(Arc::new)?;
         *self.blob.write().unwrap() = Some(b.clone());
         Some(b)
     }
@@ -529,5 +548,62 @@ mod tests {
     fn without_a_writable_place_it_is_the_uncached_scan() {
         let (_d, _o, root) = store();
         assert_same(&KeywordCache::new(vec![]), &root);
+    }
+
+    /// Build a genuine cache for `root` in `dir`, then return its path.
+    fn built_cache(root: &Path, dir: &Path) -> PathBuf {
+        KeywordCache::new(vec![dir.to_path_buf()]).search(root, "alpha", 10);
+        fs::read_dir(dir).unwrap().filter_map(Result::ok)
+            .find(|e| e.file_name().to_string_lossy().ends_with(".zkw")).unwrap().path()
+    }
+
+    /// Commit security review 2026-10-20: the READ path opened a cache file
+    /// from the shared temp fallback without the private-dir check the write
+    /// path applies, so another account could plant one and inject text into
+    /// keyword results. A cache file is trusted only from a private dir, only
+    /// when it is a regular file (not a symlink), owned by us, and not group-
+    /// or world-writable.
+    #[test]
+    fn a_planted_cache_in_a_shared_fallback_dir_is_not_trusted() {
+        let (_d, _o, root) = store();
+        let shared = tempfile::tempdir().unwrap();
+        // Another account's planted directory is simulated by what
+        // `private_dir` refuses for anyone: a symlink in place of the dir.
+        let elsewhere = shared.path().join("theirs");
+        fs::create_dir(&elsewhere).unwrap();
+        let planted = built_cache(&root, &elsewhere);
+        let mut bytes = fs::read(&planted).unwrap();
+        let at = bytes.windows(5).position(|w| w == b"alpha").unwrap();
+        bytes[at..at + 5].copy_from_slice(b"omega");
+        fs::write(&planted, bytes).unwrap();
+        let fallback = shared.path().join("zurvan-mcp-vectors");
+        std::os::unix::fs::symlink(&elsewhere, &fallback).unwrap();
+        let unwritable_primary = shared.path().join("not-a-dir");
+        fs::write(&unwritable_primary, b"x").unwrap();
+        let cache = KeywordCache::new(vec![unwritable_primary.join("cache"), fallback.clone()]);
+        assert_eq!(cache.search(&root, "omega", 10), crate::search::keyword(&root, "omega", 10), "the planted text is not served");
+    }
+
+    #[test]
+    fn a_symlinked_or_shared_writable_cache_file_is_not_trusted() {
+        let (_d, _o, root) = store();
+        let dir = root.join("data/cache");
+        let real = built_cache(&root, &dir);
+        // Tamper: "alpha" -> "omega" in the cached text.
+        let mut bytes = fs::read(&real).unwrap();
+        let at = bytes.windows(5).position(|w| w == b"alpha").unwrap();
+        bytes[at..at + 5].copy_from_slice(b"omega");
+        let elsewhere = root.join("planted.zkw");
+        fs::write(&elsewhere, &bytes).unwrap();
+        fs::remove_file(&real).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &real).unwrap();
+        let cache = KeywordCache::new(vec![dir.clone()]);
+        assert_eq!(cache.search(&root, "omega", 10), crate::search::keyword(&root, "omega", 10), "a symlinked cache file is not served");
+
+        fs::remove_file(&real).unwrap();
+        fs::write(&real, &bytes).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o666)).unwrap();
+        let cache = KeywordCache::new(vec![dir]);
+        assert_eq!(cache.search(&root, "omega", 10), crate::search::keyword(&root, "omega", 10), "a group/world-writable cache file is not served");
     }
 }
