@@ -52,17 +52,25 @@ impl Hit {
 /// row (spike: 4.79 s cold vs 0.18 s, identical score set). Min-max is taken
 /// over EVERY matched row, as Python does.
 pub fn fts_scores(conn: &Connection, cache: &VectorCache, query: &str) -> rusqlite::Result<HashMap<u32, f64>> {
+    let Some(m) = fts_match(query) else { return Ok(HashMap::new()) };
+    let mut st = conn.prepare_cached("SELECT rowid, bm25(chunks_fts) FROM chunks_fts WHERE chunks_fts MATCH ?")?;
+    let rows: Vec<(i64, f64)> = st.query_map([m], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+    Ok(normalise_bm25(rows, cache))
+}
+
+/// `"t1" OR "t2" ...` from the query's word runs, or None when it has none.
+fn fts_match(query: &str) -> Option<String> {
     static TERMS: OnceLock<regex::Regex> = OnceLock::new();
     let re = TERMS.get_or_init(|| regex::Regex::new(r"\W+").unwrap());
     let terms: Vec<String> = re.split(query).filter(|t| !t.is_empty()).map(|t| format!("\"{t}\"")).collect();
+    (!terms.is_empty()).then(|| terms.join(" OR "))
+}
+
+/// Min-max over EVERY matched row (order-independent), keyed by cache row.
+fn normalise_bm25(rows: Vec<(i64, f64)>, cache: &VectorCache) -> HashMap<u32, f64> {
     let mut out = HashMap::new();
-    if terms.is_empty() {
-        return Ok(out);
-    }
-    let mut st = conn.prepare_cached("SELECT rowid, bm25(chunks_fts) FROM chunks_fts WHERE chunks_fts MATCH ?")?;
-    let rows: Vec<(i64, f64)> = st.query_map([terms.join(" OR ")], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
     if rows.is_empty() {
-        return Ok(out);
+        return out;
     }
     let (min, max) = rows.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, r| (a.0.min(r.1), a.1.max(r.1)));
     for (rowid, score) in rows {
@@ -71,7 +79,84 @@ pub fn fts_scores(conn: &Connection, cache: &VectorCache, query: &str) -> rusqli
             out.insert(row, norm);
         }
     }
-    Ok(out)
+    out
+}
+
+/// How many rowid ranges the hybrid FTS stage runs in parallel. Measured on
+/// the live store (70 queries, 10.6M scored rows, all bit-identical):
+/// 1 → 87/134 ms p50/p95, 2 → 49/75, 3 → 37/58, 4 → 30/46.
+pub const FTS_PARTS: usize = 4;
+/// SQLite memory-mapped I/O for the pool's read-only connections
+/// (sqlite.org/mmap.html). Safe here: a published index is never written in
+/// place (promotes are `os.replace`, the file is 0444), so the mapped inode
+/// cannot change; bundled SQLite clamps it to its compiled maximum.
+const FTS_MMAP: &str = "PRAGMA mmap_size=2147418112;";
+
+/// Persistent read-only connections to ONE index generation, each owning a
+/// rowid range, so the FTS5 query runs in parallel. Every row's bm25 is
+/// identical to the unpartitioned query: FTS5's bm25 takes IDF from
+/// `xQueryPhrase` and avgdl from `xRowCount`/`xColumnTotalSize`, all of which
+/// cover the whole table regardless of the outer query's rowid constraint
+/// (sqlite.org/fts5.html §custom auxiliary functions; ext/fts5/fts5_aux.c).
+pub struct FtsPool {
+    pub generation: crate::store::Generation,
+    parts: Vec<(Mutex<Connection>, i64, i64)>,
+}
+
+impl FtsPool {
+    pub fn open(path: &Path, generation: crate::store::Generation, parts: usize) -> Result<FtsPool, String> {
+        let parts = parts.max(1);
+        let first = open_at(path, generation)?;
+        first.execute_batch(FTS_MMAP).map_err(|e| e.to_string())?;
+        let (lo, hi): (Option<i64>, Option<i64>) = first
+            .query_row("SELECT min(rowid), max(rowid) FROM chunks", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| e.to_string())?;
+        // The outer bounds are open-ended, so every rowid lands in a range.
+        let bounds: Vec<(i64, i64)> = match (lo, hi) {
+            (Some(lo), Some(hi)) if parts > 1 && hi > lo => {
+                let span = (hi - lo + 1) as i128;
+                (0..parts as i128)
+                    .map(|i| {
+                        let a = if i == 0 { i64::MIN } else { lo + (span * i / parts as i128) as i64 };
+                        let b = if i == parts as i128 - 1 { i64::MAX } else { lo + (span * (i + 1) / parts as i128) as i64 - 1 };
+                        (a, b)
+                    })
+                    .collect()
+            }
+            _ => vec![(i64::MIN, i64::MAX)],
+        };
+        let mut conns = vec![first];
+        for _ in 1..bounds.len() {
+            let c = open_at(path, generation)?;
+            c.execute_batch(FTS_MMAP).map_err(|e| e.to_string())?;
+            conns.push(c);
+        }
+        Ok(FtsPool { generation, parts: conns.into_iter().zip(bounds).map(|(c, (a, b))| (Mutex::new(c), a, b)).collect() })
+    }
+
+    /// `fts_scores` for this generation, the ranges queried in parallel.
+    pub fn scores(&self, cache: &VectorCache, query: &str) -> Result<HashMap<u32, f64>, String> {
+        let Some(m) = fts_match(query) else { return Ok(HashMap::new()) };
+        let chunks: Vec<Vec<(i64, f64)>> = self
+            .parts
+            .par_iter()
+            .map(|(c, a, b)| -> rusqlite::Result<Vec<(i64, f64)>> {
+                let c = c.lock().unwrap();
+                let mut st = c.prepare_cached(
+                    "SELECT rowid, bm25(chunks_fts) FROM chunks_fts WHERE chunks_fts MATCH ?1 AND rowid BETWEEN ?2 AND ?3",
+                )?;
+                let rows = st.query_map(rusqlite::params![m, a, b], |r| Ok((r.get(0)?, r.get(1)?)))?.collect();
+                rows
+            })
+            .collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())?;
+        Ok(normalise_bm25(chunks.into_iter().flatten().collect(), cache))
+    }
+
+    /// The first connection, for hydrating the top hits (same generation).
+    pub fn with_conn<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
+        f(&self.parts[0].0.lock().unwrap())
+    }
 }
 
 /// `context_export._search_internal(hybrid=False)`: a live scan of wiki/ and
@@ -155,6 +240,8 @@ pub struct SearchState {
     pub loader: Loader,
     /// Keyword mode's accelerator (IOU-13): same results, cached text.
     pub keywords: crate::keyword::KeywordCache,
+    /// The FTS connections for the generation being served.
+    fts: Mutex<Option<Arc<FtsPool>>>,
     embedder: Mutex<ModelSlot>,
     /// How long a failed model load is reported before it is tried again.
     model_retry: std::time::Duration,
@@ -183,6 +270,7 @@ impl SearchState {
             cfg,
             meta,
             keywords: crate::keyword::KeywordCache::new(keyword_dirs),
+            fts: Mutex::new(None),
             loader: Loader::default(),
             embedder: Mutex::new(ModelSlot::Untried),
             model_retry: MODEL_RETRY,
@@ -201,6 +289,22 @@ impl SearchState {
         st.model_retry = retry;
         st.load_model = Arc::new(load);
         st
+    }
+
+    /// The pool for `meta`'s generation, reopened when the index is promoted.
+    fn fts_pool(&self, meta: &crate::store::IndexMeta) -> Result<Arc<FtsPool>, String> {
+        let mut slot = self.fts.lock().unwrap();
+        if let Some(p) = slot.as_ref().filter(|p| p.generation == meta.generation) {
+            return Ok(p.clone());
+        }
+        let p = Arc::new(FtsPool::open(&self.cfg.search_db, meta.generation, FTS_PARTS)?);
+        *slot = Some(p.clone());
+        Ok(p)
+    }
+
+    /// The generation the FTS pool currently serves (tests; doctor).
+    pub fn fts_generation(&self) -> Option<crate::store::Generation> {
+        self.fts.lock().unwrap().as_ref().map(|p| p.generation)
     }
 
     pub fn embedder(&self) -> Result<Arc<Embedder>, String> {
@@ -312,12 +416,21 @@ impl SearchState {
             Ok(c) => c,
             Err(why) => return Ok(Err(format!("vector cache: {why}"))),
         };
-        let conn = open_at(&self.cfg.search_db, meta.generation)?;
-        let kw = fts_scores(&conn, &cache, query).map_err(|e| e.to_string())?;
+        // Persistent, generation-pinned connections (opened with `open_at`):
+        // the FTS stage runs over FTS_PARTS rowid ranges in parallel.
+        let pool = self.fts_pool(&meta)?;
+        let kw = pool.scores(&cache, query)?;
         let top = cache.top_k(&qv, &kw, limit);
         if top.is_empty() {
             return Ok(Ok(Vec::new()));
         }
+        pool.with_conn(|conn| hydrate(conn, &cache, &top))
+    }
+}
+
+/// The top hits' rows from the same generation, fused scores, Python's floor.
+fn hydrate(conn: &Connection, cache: &VectorCache, top: &[crate::vectors::Ranked]) -> Result<Result<Vec<Hit>, String>, String> {
+    {
         let ids: Vec<&str> = top.iter().map(|r| cache.chunk_id(r.row)).collect();
         let placeholders = vec!["?"; ids.len()].join(",");
         let mut st = conn
@@ -349,7 +462,9 @@ impl SearchState {
             .collect();
         Ok(Ok(hits))
     }
+}
 
+impl SearchState {
     /// `_search_internal(query, hybrid, limit)`, with Rust's explicit
     /// fallback notice when semantic search cannot run (design §7A).
     pub fn search(&self, query: &str, hybrid: bool, limit: usize, on_progress: &dyn Fn(u64, u64)) -> Result<(Vec<Hit>, Option<String>), String> {
@@ -620,5 +735,57 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(250));
         assert!(st.embedder().is_err());
         assert_eq!(attempts.load(Ordering::SeqCst), 2, "retried after the window");
+    }
+
+    /// The closure's hybrid p95 target (150 ms) was missed because one FTS5
+    /// query scores ~170k rows. Partitioned by rowid over persistent mmap
+    /// connections it runs in parallel; bm25's IDF and avgdl are table-wide
+    /// (xRowCount, xColumnTotalSize, xQueryPhrase ignore the outer query's
+    /// rowid constraint), so every row's score is bit-identical.
+    #[test]
+    fn partitioned_fts_scores_equal_the_single_query_bit_for_bit() {
+        let (_d, cfg) = mock_store();
+        let cache = cache_for(&cfg);
+        let meta = MetaCache::default().index(&cfg).unwrap();
+        let conn = open_ro(&cfg.search_db).unwrap();
+        for parts in [1, 2, 3, 4, 7] {
+            let pool = FtsPool::open(&cfg.search_db, meta.generation, parts).unwrap();
+            for q in ["ledger revision boundary", "ledger ledger", "keyword weight in hybrid fusion", "sourdough", "!!! ???", "nothing matches zzzq"] {
+                let one = fts_scores(&conn, &cache, q).unwrap();
+                let split = pool.scores(&cache, q).unwrap();
+                assert_eq!(one.len(), split.len(), "parts={parts} q={q}");
+                for (row, s) in &one {
+                    assert_eq!(s.to_bits(), split[row].to_bits(), "parts={parts} q={q} row={row}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_fts_pool_is_never_opened_on_a_promoted_index() {
+        let (_d, cfg) = mock_store();
+        let old = MetaCache::default().index(&cfg).unwrap().generation;
+        let next = cfg.root.join("next.sqlite");
+        search_db(&next, "mock", "deterministic_hash",
+                  &[Chunk { chunk_id: "z", source_path: "wiki/z.md", heading: None, text: "zebra", indexed_at: "2026-10-18T00:00:00", vector: mock("zebra") }],
+                  &[("built_from_revision", "2")]);
+        fs::rename(&next, &cfg.search_db).unwrap();
+        assert_eq!(FtsPool::open(&cfg.search_db, old, 4).err().as_deref(), Some(GENERATION_CHANGED));
+    }
+
+    #[test]
+    fn the_fts_pool_follows_the_index_generation() {
+        let (_d, cfg) = mock_store();
+        let st = SearchState::new(cfg.clone());
+        st.hybrid("ledger revision", 3).unwrap();
+        let g1 = st.fts_generation().expect("pool built");
+        let next = cfg.root.join("next.sqlite");
+        search_db(&next, "mock", "deterministic_hash",
+                  &[Chunk { chunk_id: "z", source_path: "wiki/z.md", heading: None, text: "ledger zebra", indexed_at: "2026-10-18T00:00:00", vector: mock("ledger zebra") }],
+                  &[("built_from_revision", "2")]);
+        fs::rename(&next, &cfg.search_db).unwrap();
+        let hits = st.hybrid("ledger zebra", 3).unwrap();
+        assert_eq!(hits[0].chunk_id, "z");
+        assert_ne!(st.fts_generation(), Some(g1), "a new pool for the new index");
     }
 }

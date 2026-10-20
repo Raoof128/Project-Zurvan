@@ -111,6 +111,11 @@ Paste the printed Python entry back and restart the client.
 
 ## Operations
 
+- **FTS pool.** Hybrid search keeps four read-only connections per index
+  build, memory-mapped, and runs the full-text stage over four rowid ranges in
+  parallel. Each row's bm25 is the same as in one query (bm25's statistics are
+  table-wide), so results are identical; it is reopened when the index is
+  rebuilt.
 - **Keyword cache.** `data/cache/keyword-<key>.zkw` (0600) holds the
   lowercased text of every readable file, memory-mapped and shared by all
   servers; it is built at start-up and reused across restarts. Each query
@@ -149,7 +154,7 @@ Paste the printed Python entry back and restart the client.
 
 | | Python server | Rust server |
 |---|---|---|
-| hybrid search p50 / p95 | 11,844 / 27,983 ms (6.8 s warm on a quiet machine) | 129 / 194 ms |
+| hybrid search p50 / p95 | 11,844 / 27,983 ms (6.8 s warm on a quiet machine) | 70 / 92 ms (2026-10-20; was 129 / 194 ms) |
 | keyword search p50 / p95 | several seconds | 80 / 110 ms (2026-10-20; was 618 / 1,224 ms) |
 | context p50 / p95 | 10,962 / 27,662 ms | 174 / 283 ms |
 | `zurvan_status` p50 / p95 | 2,103 / 12,051 ms | 7.6 / 62 ms warm; 74 ms on a fresh process's first call (2026-10-20; was 6.5 s) |
@@ -159,7 +164,7 @@ Parity on the same store, every group, on both MCP protocol versions: 312 cases,
 302 identical, 10 expected divergences (the read allow-list refusing what Python
 serves, and the eval tools' one-line prefix), 0 failures. The instrument scores
 the same on both servers. Since 2026-10-20 keyword search and the first
-`zurvan_status` meet their targets (see Operations); hybrid p95 under 150 ms is
-still not met. At closure these targets were missed: hybrid p95 under 150 ms,
+`zurvan_status` meet their targets (see Operations), and so does hybrid p95
+under 150 ms (92 ms, after the FTS pool). At closure these targets were missed: hybrid p95 under 150 ms,
 keyword under 400 ms, and the first `zurvan_status` of a fresh process, which waits for
 the start-up metadata scan. Design §10.4 has the full table.

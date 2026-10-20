@@ -765,6 +765,27 @@ Named promises this document makes and does not pay:
   test and to Python by the parity gate. FTS5 keyword mode stays out (it would
   change results and miss edits newer than the index).
 
+- **Hybrid p95 (the last closure target), met 2026-10-20.** Profiled on the
+  live store: embedding 7 ms, vector scan 16 ms, but the FTS5 stage 111 / 142 ms
+  p50 / p95, because an OR of the query's words matches ~170k of 303k chunks
+  and min-max normalisation needs every match. From the SQLite docs
+  (sqlite.org/fts5.html, ext/fts5/fts5_aux.c): bm25's IDF comes from
+  `xQueryPhrase` and avgdl from `xRowCount` / `xColumnTotalSize`, all
+  whole-table, so a row's score cannot depend on a rowid constraint, and FTS5
+  serves `rowid BETWEEN` from its doclist index. `search::FtsPool` therefore
+  keeps four persistent, generation-pinned read-only connections with
+  memory-mapped I/O (sqlite.org/mmap.html; safe because a published index is
+  never written in place) and runs the query over four rowid ranges in
+  parallel. Probe on 70 queries: every one of 10.6 million row scores
+  bit-identical to the single query; FTS stage 87 / 134 ms → 30 / 46 ms.
+  Rejected on evidence: splitting by TERM (1–3 ulp differences, because clang
+  fuses bm25's multiply-add on arm64, and slower), bigger page cache or mmap
+  alone (~5%). Over stdio, same 70 queries x 3: hybrid 128 / 175 ms →
+  **70 / 92 ms** p50 / p95, result text identical; footprint 164 MB after 100
+  searches (was 137 MB; the extra mappings are clean and file-backed).
+  SQLite 3.54.1 (2026-10-16, "about 4% faster") is newer than the bundled
+  3.53.2; not taken, since the target is met and the dependency is pinned.
+
 ## 10.4 Closure measurements (2026-10-19, live store, index rev 745)
 
 Parity gate, `scripts/mcp_parity.py`, every group, on **both** protocols:
@@ -783,7 +804,7 @@ sessions' idle servers); Python from the same-day A/B runs:
 
 | Tool | Python p50 / p95 | Rust p50 / p95 | §1 target |
 |---|---|---|---|
-| hybrid search | 11,844 / 27,983 ms (6.8 s quiet) | 129 / 194 ms | < 150 ms — p50 met, p95 not |
+| hybrid search | 11,844 / 27,983 ms (6.8 s quiet) | 129 / 194 ms; **70 / 92 ms** after the FTS pool (2026-10-20) | < 150 ms — p95 not met at closure, **met** after the FTS pool |
 | keyword search | ~5,000–15,000 ms | 618 / 1,224 ms; **80 / 110 ms** after IOU-13 (2026-10-20) | < 400 ms — not met at closure, **met** after IOU-13 |
 | context | 10,962 / 27,662 ms | 174 / 283 ms | < 400 ms — met |
 | orient | 18,149 / 22,447 ms | 138 / 208 ms | — |
