@@ -33,8 +33,28 @@ def test_expand_graph_context(tmp_path):
     # Duplicate nodes should not be in the output
     # Depth limit respected
     
-def test_missing_db_handled(capsys):
-    items = expand_graph_context(['wiki/n1.md'], depth=1, db_path="non_existent_db.sqlite")
+def test_missing_db_handled(capsys, tmp_path):
+    # Audit 2026-10-22 §2: this reader used plain `sqlite3.connect`, which
+    # CREATES the file it cannot find. It must open read-only, never create,
+    # and say so on stderr (stdout is the MCP JSON-RPC channel).
+    db = tmp_path / "non_existent_db.sqlite"
+    items = expand_graph_context(['wiki/n1.md'], depth=1, db_path=str(db))
     assert items == []
+    assert not db.exists()
     captured = capsys.readouterr()
-    assert "Graph index missing" in captured.out
+    assert "Graph index missing" in captured.err
+    assert captured.out == ""
+
+
+def test_expand_graph_context_opens_read_only(tmp_path, monkeypatch):
+    import scripts.graph_context as gc
+    db = tmp_path / "graph.sqlite"
+    setup_graph_schema(str(db))
+    seen = []
+    real = sqlite3.connect
+    monkeypatch.setattr(gc.sqlite3, "connect",
+                        lambda target, *a, **k: seen.append((target, k)) or real(target, *a, **k))
+    gc.expand_graph_context(["nothing"], 1, db_path=str(db))
+    assert seen, "the reader opened nothing"
+    target, kwargs = seen[0]
+    assert target.startswith("file:") and "mode=ro" in target and kwargs.get("uri") is True

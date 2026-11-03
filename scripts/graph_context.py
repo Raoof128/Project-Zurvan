@@ -7,11 +7,15 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from scripts.graph_schema import DB_PATH
 
 def expand_graph_context(seeds: List[str], depth: int = 1, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    if not os.path.exists(db_path):
-        print(f"Graph index missing. Run: zurvan graph rebuild")
+    # Read-only, no CREATE: a plain `sqlite3.connect` creates the file it
+    # cannot find, and an existence check before it is not atomic against a
+    # concurrent removal (audit 2026-10-22 §2). The hint goes to stderr —
+    # stdout is the MCP JSON-RPC channel.
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:
+        print("Graph index missing. Run: zurvan graph rebuild", file=sys.stderr)
         return []
-        
-    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
