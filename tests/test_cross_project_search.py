@@ -33,6 +33,38 @@ def test_keyword_search_spans_knowledge_only_projects(mock_get_proj, tmp_path):
         assert r["snippet"]
 
 
+def _indexed_project(tmp_path, name, note_text, monkeypatch):
+    """A project with its OWN <root>/data/search.sqlite, built under the mock provider."""
+    from scripts.rebuild_search_index import rebuild_search_index
+    root = tmp_path / name
+    (root / "wiki").mkdir(parents=True)
+    (root / "wiki" / "note.md").write_text(f"# Note\n{note_text}\n")
+    monkeypatch.setenv("ZURVAN_EMBED_PROVIDER", "mock")
+    monkeypatch.setenv("ZURVAN_EMBED_MODEL", "mock_model")
+    rebuild_search_index(db_path=str(root / "data" / "search.sqlite"), root=root)
+    return {"name": name, "path": str(root), "has_search": True, "has_graph": False}
+
+
+@patch("scripts.cross_project_search.get_federated_projects")
+def test_hybrid_federation_searches_the_selected_project_index_only(mock_get_proj, tmp_path, monkeypatch):
+    # F3 reproduction (audit 2026-10-22): hybrid mode ignored the selected
+    # root, searched the HOME index and labelled its hits with the requested
+    # project. The home store here is a distinct tmp index named by the same
+    # ZURVAN_SEARCH_DB override production uses.
+    _indexed_project(tmp_path, "home", "SENTINEL_HOME alpha", monkeypatch)
+    other = _indexed_project(tmp_path, "other", "SENTINEL_OTHER alpha", monkeypatch)
+    monkeypatch.setenv("ZURVAN_SEARCH_DB", str(tmp_path / "home" / "data" / "search.sqlite"))
+    mock_get_proj.return_value = [other]
+
+    res = cross_project_search("alpha", hybrid=True, limit=10, projects=["other"])
+
+    assert res["results"], res["warnings"]
+    assert {r["project"] for r in res["results"]} == {"other"}
+    assert all("SENTINEL_HOME" not in r["snippet"] for r in res["results"])
+    assert all("SENTINEL_OTHER" in r["snippet"] for r in res["results"])
+    assert all(r["index_path"].endswith(os.path.join("other", "data", "search.sqlite")) for r in res["results"])
+
+
 @patch("scripts.cross_project_search.get_federated_projects")
 def test_hybrid_requires_search_index_and_warns(mock_get_proj, tmp_path):
     p1 = _knowledge_project(tmp_path, "p1", "anything")

@@ -28,6 +28,7 @@ def cross_project_search(query: str, hybrid: bool = False, limit: int = 10,
     # project to embed the entire Zurvan engine; knowledge-only projects
     # (wiki/ + docs/) are now first-class citizens.
     from scripts.context_export import _search_internal
+    from scripts.store_handle import resolve_store
 
     for p in federated:
         if hybrid and not p["has_search"]:
@@ -38,8 +39,12 @@ def cross_project_search(query: str, hybrid: bool = False, limit: int = 10,
                 print(msg)
             continue
 
+        # The store is named explicitly; the hit's own provenance labels it
+        # (not the loop variable), so a hit can never be attributed to a
+        # project whose index it did not come from.
+        store = resolve_store(p["path"], project=p["name"])
         try:
-            results = _search_internal(query, hybrid, limit, root=p["path"])
+            results = _search_internal(query, hybrid, limit, store=store)
         except Exception as e:
             warnings.append(f"Project {p['name']} search error: {e}")
             continue
@@ -52,7 +57,8 @@ def cross_project_search(query: str, hybrid: bool = False, limit: int = 10,
                 "keyword_score": r.get("keyword_score"),
                 "semantic_score": r.get("semantic_score"),
                 "hybrid_score": r.get("hybrid_score"),
-                "project": p["name"],
+                "project": r["project"],
+                "index_path": r.get("index_path"),
             })
 
     # Sort all results by hybrid_score if available, else keyword_score

@@ -18,16 +18,32 @@ from scripts.trace_writer import TraceStore
 
 def _search_internal(
     query: str, hybrid: bool = False, limit: int = 10, root: str | Path | None = None,
-    timings: Dict[str, float] | None = None,
+    timings: Dict[str, float] | None = None, store: "StoreHandle | None" = None,
 ) -> List[Dict[str, Any]]:
     """Search one project's knowledge base. `root` defaults to this repo;
-    federation passes another registered project's root, so knowledge-only
-    projects (wiki/ + docs/, no embedded Zurvan engine) are searchable too."""
-    base = Path(root) if root is not None else PROJECT_ROOT
+    federation passes another registered project's root (or a resolved
+    `store`), so knowledge-only projects (wiki/ + docs/, no embedded Zurvan
+    engine) are searchable too. Every result names the store it came from
+    (`project`, `index_path`): hybrid mode used to resolve the HOME index
+    whatever root was passed (audit 2026-10-22, F3)."""
+    from scripts.store_handle import StoreHandle, resolve_store
+    if store is None:
+        if root is None:
+            # Home store: the index follows ZURVAN_SEARCH_DB; the keyword scan
+            # root is THIS module's PROJECT_ROOT, which tests redirect to a
+            # tmp_path so no test ever scans the live wiki.
+            home = resolve_store()
+            store = StoreHandle(home.project, Path(PROJECT_ROOT), home.search_db, home.graph_db)
+        else:
+            store = resolve_store(root)
+    base = store.root
     if hybrid:
         from scripts.hybrid_search import search_hybrid
-        from scripts.config import get_search_db_path
-        return search_hybrid(query, limit, db_path=str(get_search_db_path()), timings=timings)
+        results = search_hybrid(query, limit, db_path=str(store.search_db), timings=timings)
+        for r in results:
+            r["project"] = store.project
+            r["index_path"] = str(store.search_db)
+        return results
 
     t0 = time.perf_counter_ns()
 
@@ -60,7 +76,9 @@ def _search_internal(
                 matches.append({
                     'source_path': rel,
                     'hybrid_score': score,
-                    'text': content
+                    'text': content,
+                    'project': store.project,
+                    'index_path': None,
                 })
         except Exception:
             continue
