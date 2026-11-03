@@ -65,6 +65,20 @@ The current passing gold set reflects the implemented Step 1A/Step 2B scope. It
 does not penalize missing future events such as `retrieval.fusion` or
 `graph.expand`.
 
+### `retrieval.fusion` weights: historical annotation (F5, 2026-11-04)
+
+Traces written before 2026-11-04 carry `"weights": {"fts": 0.6, "embedding":
+0.4}` in their `retrieval.fusion` payload while the scorer actually fused at
+keyword 0.2 / semantic 0.8 (`scripts/hybrid_search.py`, `KEYWORD_WEIGHT`). The
+scores in those traces are the scores that were served; only the declared
+weights are wrong, so a replay that recomputes `fused_score` from the recorded
+components and the recorded weights reconstructs the wrong number (1.0 / 0.5
+gives 0.8 from the trace, 0.6 in reality). Historical traces are **not**
+rewritten. Since 2026-11-04 the payload is produced by the single policy
+object the scorer applies (`scripts/fusion_policy.py`) and carries
+`"policy_id"`: a reader should key on `policy_id` when present and treat the
+`weights` field of a trace without one as unreliable.
+
 ## Commands
 
 ```bash

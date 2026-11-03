@@ -6,6 +6,7 @@ import math
 import time
 from typing import List, Dict
 from scripts.embed import get_embedding
+from scripts.fusion_policy import CURRENT as FUSION_POLICY
 
 #: Stages recorded by `search_hybrid(timings=...)` — observation only.
 STAGES = ("fts", "embed_query", "vector_scan", "hydrate", "fuse", "total")
@@ -35,6 +36,26 @@ def _index_embedding_config(cursor) -> tuple:
         return (row[0], row[1]) if row else (None, None)
     except sqlite3.Error:
         return (None, None)
+
+
+def _index_identity(cursor):
+    """The space the index holds, as an `EmbeddingIdentity`, or None for an
+    index with no embeddings. Prefers the `embedding_identity` stamp (full
+    identity, written since F4); older indexes yield provider/model/dimension
+    from the first embedding row."""
+    from scripts.embed import EmbeddingIdentity
+    try:
+        row = cursor.execute(
+            "SELECT value FROM index_meta WHERE key = 'embedding_identity'").fetchone()
+        if row:
+            return EmbeddingIdentity.from_json(row[0])
+    except sqlite3.Error:
+        pass
+    try:
+        row = cursor.execute("SELECT provider, model, dimension FROM embeddings LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return None
+    return EmbeddingIdentity(row[0], row[1], int(row[2])) if row else None
 
 
 def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
@@ -95,11 +116,21 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
     stage["fts"] = _ms(t)
 
     # Semantic search — embed the query with the SAME provider/model the
-    # index was built with (never the env), so scores stay meaningful.
+    # index was built with (never the env), and PROVE the vector that came
+    # back is in the index's space. A model that cannot load raises
+    # `EmbeddingUnavailable`; a vector from another space raises
+    # `EmbeddingSpaceMismatch`. Neither is answered with hashes (F4).
     index_provider, index_model = _index_embedding_config(cursor)
+    expected = _index_identity(cursor)
     t = time.perf_counter_ns()
-    query_emb = get_embedding(query, provider=index_provider, model=index_model)['vector']
-    stage["embed_query"] = _ms(t)
+    try:
+        result = get_embedding(query, provider=index_provider, model=index_model)
+        if expected is not None:
+            from scripts.embed import require_space
+            require_space(result, expected)
+    finally:
+        stage["embed_query"] = _ms(t)
+    query_emb = result['vector']
 
     t = time.perf_counter_ns()
     top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
@@ -195,7 +226,7 @@ def _score_semantic_top_k(cursor, query_emb, fts_scores, limit):
         # against a keyword score — see the fusion comment below.
         semantic_score = vec_storage.similarity_to_fusion_scale(similarity)
         keyword_score = fts_scores.get(chunk_id, 0.0)
-        hybrid = KEYWORD_WEIGHT * keyword_score + (1.0 - KEYWORD_WEIGHT) * semantic_score
+        hybrid = FUSION_POLICY.score(keyword_score, semantic_score)
         entry = _Ranked(hybrid, chunk_id, semantic_score, keyword_score)
         if len(heap) < limit:
             heapq.heappush(heap, entry)
@@ -242,22 +273,22 @@ def _hydrate(cursor, top):
 # value overfitted to 50 queries. Reciprocal rank fusion was also tried and lost
 # on every metric except top-3 (74% / MRR 0.652): it weights both retrievers
 # equally by construction, which over-promotes the weaker keyword ordering here.
-KEYWORD_WEIGHT = 0.2
+#
+# The value itself lives in scripts/fusion_policy.py, shared with the trace
+# writer (F5): these names are kept for callers and tests.
+KEYWORD_WEIGHT = FUSION_POLICY.keyword_weight
 
 # Floor for inclusion. Cosine mapped through (x+1)/2 puts an unrelated chunk at
 # ~0.5, so with the weight above every chunk starts near 0.4 — this threshold
 # only sheds the genuinely empty tail; `limit` does the real truncation.
-MIN_HYBRID_SCORE = 0.2
+MIN_HYBRID_SCORE = FUSION_POLICY.min_score
 
 
 def _fuse(scored: List[Dict]) -> List[Dict]:
     """Blend the keyword and semantic scores into one ranking."""
     results = []
     for chunk in scored:
-        hybrid_score = (
-            KEYWORD_WEIGHT * chunk["keyword_score"]
-            + (1.0 - KEYWORD_WEIGHT) * chunk["semantic_score"]
-        )
+        hybrid_score = FUSION_POLICY.score(chunk["keyword_score"], chunk["semantic_score"])
         if hybrid_score > MIN_HYBRID_SCORE:
             results.append({**chunk, "hybrid_score": hybrid_score})
     # `reverse=True` with `_Ranked.__lt__` ("ranks after") sorts best-first. A

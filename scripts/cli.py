@@ -22,6 +22,7 @@ except ImportError:
 from scripts.memory import add_decision, add_note, add_claim, add_question
 from scripts.context_export import search_memory, export_context
 from scripts.config import PROJECT_ROOT
+from scripts.embed import EmbeddingSpaceMismatch, EmbeddingUnavailable
 
 
 def _run_script(script_name: str, extra_args: list[str] | None = None,
@@ -1051,6 +1052,10 @@ def _main():
         except ValueError as exc:
             print(str(exc))
             sys.exit(1)
+        except (EmbeddingUnavailable, EmbeddingSpaceMismatch) as exc:
+            # stderr: `--json` consumers parse stdout (F4).
+            print(f"Error: semantic search unavailable: {exc}", file=sys.stderr)
+            sys.exit(1)
     elif args.command == "context":
         from scripts.context_export import export_context
         try:
@@ -1065,6 +1070,9 @@ def _main():
             )
         except ValueError as exc:
             print(str(exc))
+            sys.exit(1)
+        except (EmbeddingUnavailable, EmbeddingSpaceMismatch) as exc:
+            print(f"Error: semantic search unavailable: {exc}", file=sys.stderr)
             sys.exit(1)
         print(bundle)
     elif args.command == "audit":

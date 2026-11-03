@@ -162,15 +162,28 @@ def _format_search_results(results) -> str:
     return "\n".join(output)
 
 
+def _search_or_degrade(query: str, hybrid: bool, limit: int):
+    """`_search_internal`, with the Rust server's explicit fallback (design
+    2026-10-19 §7A): when semantic search cannot run, return keyword results
+    AND the notice saying so, never a silent substitute (F4)."""
+    from scripts.context_export import _search_internal
+    from scripts.embed import EmbeddingSpaceMismatch, EmbeddingUnavailable
+    if not hybrid:
+        return _search_internal(query, False, limit), None
+    try:
+        return _search_internal(query, True, limit), None
+    except (EmbeddingUnavailable, EmbeddingSpaceMismatch) as why:
+        return (_search_internal(query, False, limit),
+                f"Semantic search unavailable: {why} — keyword results only.")
+
+
 @_protocol_safe
 def tool_zurvan_search(query: str, hybrid: bool = True, limit: int = 10) -> str:
     """Searches Zurvan memory."""
     try:
-        from scripts.context_export import _search_internal
-        results = _search_internal(query, hybrid, limit)
-        if not results:
-            return "No matches found."
-        return _budget(_format_search_results(results))
+        results, notice = _search_or_degrade(query, hybrid, limit)
+        body = _format_search_results(results) if results else "No matches found."
+        return _budget(f"{notice}\n{body}" if notice else body)
     except Exception as e:
         return f"Error searching Zurvan for '{query}': {e}"
 
@@ -190,11 +203,12 @@ def tool_zurvan_orient(topic: str, limit: int = 10) -> str:
     """
     try:
         from scripts.agent_workflow import _index_staleness
-        from scripts.context_export import _search_internal
         from scripts.mcp_resources import read_file_slice
 
         parts = [f"Search index: {_index_staleness()}"]
-        results = _search_internal(topic, True, limit)
+        results, notice = _search_or_degrade(topic, True, limit)
+        if notice:
+            parts[0] += f"\n{notice}"
         parts.append(_format_search_results(results))
         paths = []
         for r in results:

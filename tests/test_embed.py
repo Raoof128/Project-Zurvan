@@ -15,10 +15,14 @@ def test_get_embedding_defaults_to_mock(monkeypatch):
     assert res['provider'] == "mock"
     assert len(res['vector']) == 384
     
-def test_get_embedding_handles_missing_sentence_transformers(monkeypatch):
-    # If sentence_transformers isn't installed (or we force ImportError), it should fallback to mock
+def test_get_embedding_missing_sentence_transformers_is_an_error_not_mock(monkeypatch):
+    # Audit 2026-10-22 F4: a requested real provider that cannot load used to
+    # come back as mock vectors labelled a success. It is a typed failure now.
+    import sys
+    import scripts.embed as embed
+    from scripts.embed import EmbeddingUnavailable
     monkeypatch.setenv("ZURVAN_EMBED_PROVIDER", "sentence_transformers")
-    # Even if installed, we are just testing the fallback mechanics or if it loads.
-    # Since we didn't add it to requirements, it will fallback gracefully.
-    res = get_embedding("test")
-    assert res['provider'] in ["mock", "sentence_transformers"]
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)
+    embed._MODEL_CACHE.clear()
+    with pytest.raises(EmbeddingUnavailable):
+        get_embedding("test")

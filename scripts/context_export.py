@@ -202,10 +202,6 @@ def _result_chunk_id(result: Dict[str, Any]) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
-# Observed fusion weights from scripts.hybrid_search.search_hybrid
-# (hybrid_score = 0.6 * keyword_score + 0.4 * semantic_score). Recorded, never applied.
-_FUSION_WEIGHTS = {"fts": 0.6, "embedding": 0.4}
-
 
 def _dedupe_sources(
     matches: List[Dict[str, Any]], max_per_source: int
@@ -262,12 +258,11 @@ def _fusion_payload(results: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "rank": rank,
             }
         )
-    return {
-        "mode": "hybrid",
-        "fusion": "weighted_sum",
-        "weights": dict(_FUSION_WEIGHTS),
-        "ranked": ranked,
-    }
+    # The weights are the scorer's own policy object (F5): traces written
+    # before 2026-11-04 declared 0.6/0.4 while the scorer used 0.2/0.8 — see
+    # docs/evaluation/provenance.md. `policy_id` is what a replay should key on.
+    from scripts.fusion_policy import CURRENT
+    return {**CURRENT.as_payload(), "mode": "hybrid", "ranked": ranked}
 
 
 def _assembled_context_payload(

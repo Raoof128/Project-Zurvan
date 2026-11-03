@@ -260,7 +260,11 @@ def rebuild_search_index(db_path: str | None = None, root=None, snapshot=None):
         # atomic: readers see the old index or the new one. Integrity was
         # checked by `check_index_health(deep=True)` above, and a full
         # `integrity_check` over 739 MB would double the cost of publishing.
-        _stamp_index(build_path, snapshot.stamp() if snapshot is not None else {})
+        # The full vector-space identity travels with the index (F4): the
+        # query path compares against it, not against a model name.
+        stamp = dict(snapshot.stamp()) if snapshot is not None else {}
+        stamp["embedding_identity"] = probe["identity"].to_json()
+        _stamp_index(build_path, stamp)
         _publication.publish(build_path, db_path, integrity=False)
     finally:
         reusable.close()
