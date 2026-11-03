@@ -267,9 +267,12 @@ def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List
 
     with open(source_read_path, 'r', encoding='utf-8') as f:
         source_text = f.read()
-        
-    if evidence not in source_text:
-        print("Error: Evidence quote not found verbatim in the source file.")
+
+    from scripts.evidence_admission import EvidenceRejected, admit_quote
+    try:
+        admit_quote(evidence, source_text)
+    except EvidenceRejected as e:
+        print(f"Error: {e}.")
         return False
         
     claim_id = str(uuid.uuid4())[:8]

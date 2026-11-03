@@ -419,7 +419,9 @@ def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str
     
     if add_claim(text, source, evidence, confidence, tags):
         return f"Claim added successfully: {text}"
-    return "Failed to add claim. Ensure evidence exists verbatim in the source file."
+    # "Error" prefix: the A5 error flag (and the Rust server's isError) keys on
+    # it, so a refused claim is reported as a refusal, not a success.
+    return "Error: failed to add claim. Ensure evidence is non-empty and exists verbatim in the source file."
 
 @_protocol_safe
 @enforce_read_only

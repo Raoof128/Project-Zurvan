@@ -74,7 +74,7 @@ def test_bridge_reports_the_revision_its_own_operation_minted(store):
     assert first["revision"] == 1
     failed = _reply(_bridge(store, "claim_add", {"text": "c", "source": "wiki/src.md", "evidence": "not in the file",
                                                  "confidence": "high", "tags": ["t"]}))
-    assert failed["text"].startswith("Failed to add claim")
+    assert failed["text"].startswith("Error: failed to add claim")
     assert failed["revision"] is None, "a write that minted nothing reports no revision"
     second = _reply(_bridge(store, "decision_add", {**DECISION, "title": "T2"}))
     assert second["revision"] == 2 == kr.current(store).revision

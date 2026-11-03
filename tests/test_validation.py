@@ -32,7 +32,7 @@ def test_validate_json_hallucinated_quote():
         "open_questions": [],
         "possible_contradictions": []
     }'''
-    with pytest.raises(ValueError, match="Quote not found in source text"):
+    with pytest.raises(ValueError, match="not found verbatim in source"):
         validate_extraction_json(valid_json, "source text says hello there")
 
 def test_validate_json_missing_evidence():

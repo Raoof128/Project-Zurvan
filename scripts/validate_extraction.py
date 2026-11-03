@@ -1,6 +1,8 @@
 import json
 import os
 
+from scripts.evidence_admission import EvidenceRejected, admit_quote
+
 def validate_extraction_json(json_str: str, source_text: str):
     """
     Validates the LLM JSON output.
@@ -28,13 +30,13 @@ def validate_extraction_json(json_str: str, source_text: str):
             raise ValueError(f"Claims have evidence failed: Claim '{cid}' has no evidence.")
             
         for evidence in evidence_list:
-            quote = evidence.get("quote", "")
-            if quote and quote not in source_text:
-                # Basic check, LLM might slightly alter quotes, but strict requirement for MVP:
-                # To prevent hallucinated citations, it must exist in the source text.
-                # If doing exact substring match is too brittle, one might use a fuzzy matcher.
-                # MVP enforces exact string inclusion.
-                raise ValueError(f"Evidence quote appears in source text failed: Quote not found in source text: '{quote}'")
+            # Exact, non-blank inclusion: a quote the source does not contain
+            # byte-for-byte is a hallucinated citation, and an empty quote is
+            # no citation at all (audit 2026-10-22, F2).
+            try:
+                admit_quote(evidence.get("quote"), source_text)
+            except EvidenceRejected as e:
+                raise ValueError(f"Evidence admission failed: Claim '{cid}': {e}")
                 
     return data
 
