@@ -32,9 +32,10 @@ def test_extract_writes_real_newlines_in_claim_tags(extraction_workspace):
 
     extract_source("source.md")
 
-    claim_file = extraction_workspace / "wiki" / "claims" / "claim-dummy-001.md"
-    assert claim_file.exists()
-    content = claim_file.read_text()
+    # Pages are content-identified since F1: <stem>-<hash12>--<claim_id>.md
+    claim_files = list((extraction_workspace / "wiki" / "claims").glob("source-*--claim-dummy-001.md"))
+    assert len(claim_files) == 1, claim_files
+    content = claim_files[0].read_text()
     assert "\\n" not in content
     assert "tags:\n  - ai\n  - retrieval" in content
 
@@ -46,7 +47,5 @@ def test_extract_creates_output_dirs_on_fresh_tree(extraction_workspace):
 
     extract_source("source.md")
 
-    assert (extraction_workspace / "data" / "extractions" / "source.json").exists()
-    assert (
-        extraction_workspace / "wiki" / "summaries" / "source_summary.md"
-    ).exists()
+    assert list((extraction_workspace / "data" / "extractions").glob("source-*.json"))
+    assert list((extraction_workspace / "wiki" / "summaries").glob("source-*_summary.md"))

@@ -2,6 +2,7 @@ import json
 import os
 
 from scripts.evidence_admission import EvidenceRejected, admit_quote
+from scripts.filename_utils import sanitize_filename
 
 def validate_extraction_json(json_str: str, source_text: str):
     """
@@ -21,9 +22,12 @@ def validate_extraction_json(json_str: str, source_text: str):
     claim_ids = set()
     for claim in data.get("claims", []):
         cid = claim.get("claim_id")
-        if cid in claim_ids:
+        # Uniqueness after filename sanitisation: `claim-1` and `claim 1`
+        # would otherwise land on one page (audit 2026-10-22, F1).
+        key = sanitize_filename(str(cid))
+        if key in claim_ids:
             raise ValueError(f"Claim IDs are unique failed: Duplicate claim_id '{cid}'")
-        claim_ids.add(cid)
+        claim_ids.add(key)
         
         evidence_list = claim.get("evidence", [])
         if not evidence_list:

@@ -1,11 +1,76 @@
 import os
 import argparse
+import hashlib
 import json
+import re
 from scripts.llm import run_llm
 from scripts.validate_extraction import validate_extraction_json, is_safe_filename
 from scripts.ingest import extract_text # reuse extraction logic
 
 from scripts.filename_utils import sanitize_filename
+
+
+class ExtractionConflict(RuntimeError):
+    """A claim page this extraction would write belongs to a different source."""
+
+
+def source_identity(filepath: str, source_text: str) -> tuple[str, str]:
+    """`(source_id, content_hash)`: the id names the content, not the path.
+
+    Audit 2026-10-22 F1: ids derived from the basename alone, so two
+    `source.md` files in different directories shared one extraction, one
+    summary and one claim namespace. The hash of the extracted text is what
+    makes two occurrences of the same bytes one identity and two different
+    files two."""
+    content_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    stem = sanitize_filename(os.path.splitext(os.path.basename(filepath))[0])
+    return f"{stem}-{content_hash[:12]}", content_hash
+
+
+def claim_page_name(source_id: str, claim_id: str) -> str:
+    return f"{source_id}--{sanitize_filename(claim_id)}.md"
+
+
+_SOURCE_HASH_LINE = re.compile(r"^source_hash:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir: str,
+                      source_file: str) -> list[tuple[str, str]]:
+    """Every claim page this extraction will write, as `(path, content)`, with
+    nothing written yet. Raises `ExtractionConflict` if any target page exists
+    and carries a different `source_hash` — the model may not pick a filename
+    that destroys another source's evidence. A page with the same hash is the
+    same bytes re-extracted and may be rewritten."""
+    plan = []
+    for claim in data.get("claims", []):
+        cid = sanitize_filename(claim["claim_id"])
+        name = claim_page_name(source_id, claim["claim_id"])
+        if not is_safe_filename(name):
+            continue
+        claim_file = os.path.join(claims_dir, name)
+        if os.path.exists(claim_file):
+            with open(claim_file, "r", encoding="utf-8") as f:
+                m = _SOURCE_HASH_LINE.search(f.read())
+            owner = m.group(1) if m else None
+            if owner != content_hash:
+                raise ExtractionConflict(
+                    f"claim page {os.path.basename(claim_file)} (claim '{claim['claim_id']}') "
+                    f"already exists for a different source (source_hash {owner!r}); "
+                    "nothing was written"
+                )
+        tags_yaml = "\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
+        body = (
+            f"---\ntype: claim\nclaim_id: {cid}\nsource_id: {source_id}\n"
+            f"source_file: {source_file}\nsource_hash: {content_hash}\n"
+            f"claim_type: {claim['claim_type']}\nconfidence: {claim['confidence']}\n"
+            f"tags:{tags_yaml}\n---\n\n# {cid}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n"
+        )
+        for ev in claim["evidence"]:
+            body += (f"> \"{ev['quote']}\"\n\nLocation: {ev.get('location', 'Unknown')}\n"
+                     f"Source: [[sources/{source_file}]]\n\n")
+        plan.append((claim_file, body))
+    return plan
+
 
 def extract_source(filepath):
     if not os.path.exists(filepath):
@@ -18,10 +83,10 @@ def extract_source(filepath):
         return
 
     basename = os.path.basename(filepath)
-    source_id = sanitize_filename(os.path.splitext(basename)[0])
-    
+
     # 1. Read the source Markdown/text
     source_text = extract_text(filepath)
+    source_id, content_hash = source_identity(filepath, source_text)
 
     # Best-effort embedded image detection — never breaks ingestion
     if filepath.lower().endswith(".pdf"):
@@ -77,6 +142,15 @@ def extract_source(filepath):
     # Override source_id from LLM with our deterministic one for safety
     data["source_id"] = source_id
 
+    # Plan every claim page BEFORE anything is written: a cross-owner
+    # collision aborts the whole extraction with nothing on disk.
+    claims_dir = os.path.join("wiki", "claims")
+    try:
+        claim_writes = plan_claim_writes(data, source_id, content_hash, claims_dir, basename)
+    except ExtractionConflict as e:
+        print(f"Extraction conflict: {e}")
+        return
+
     # 7. Save raw JSON
     os.makedirs(os.path.join("data", "extractions"), exist_ok=True)
     extraction_path = os.path.join("data", "extractions", f"{source_id}.json")
@@ -94,18 +168,11 @@ def extract_source(filepath):
             with open(summary_file, "w", encoding="utf-8") as f:
                 f.write(f"---\ntype: summary\nsource_id: {source_id}\n---\n# Summary: {source_id}\n\n## Short\n{data['summary']['short']}\n\n## Detailed\n{data['summary']['detailed']}\n")
     
-    # Claims
-    claims_dir = os.path.join("wiki", "claims")
+    # Claims (planned and conflict-checked above)
     os.makedirs(claims_dir, exist_ok=True)
-    for claim in data.get("claims", []):
-        cid = sanitize_filename(claim["claim_id"])
-        claim_file = os.path.join(claims_dir, f"{cid}.md")
-        if is_safe_filename(claim_file):
-            tags_yaml = "\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
-            with open(claim_file, "w", encoding="utf-8") as f:
-                f.write(f"---\ntype: claim\nclaim_id: {cid}\nsource_id: {source_id}\nclaim_type: {claim['claim_type']}\nconfidence: {claim['confidence']}\ntags:{tags_yaml}\n---\n\n# {cid}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n")
-                for ev in claim["evidence"]:
-                    f.write(f"> \"{ev['quote']}\"\n\nLocation: {ev.get('location', 'Unknown')}\nSource: [[sources/{basename}]]\n\n")
+    for claim_file, body in claim_writes:
+        with open(claim_file, "w", encoding="utf-8") as f:
+            f.write(body)
 
     # Concepts and Entities: canonical writer is wiki_merge (compounding wiki)
     from scripts.wiki_merge import merge_extraction
