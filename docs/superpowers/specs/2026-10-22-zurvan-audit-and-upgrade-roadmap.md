@@ -1,9 +1,9 @@
 # Zurvan: code audit, 2026 research and upgrade roadmap
 
-**Prepared for:** Raouf  
-**Date:** 22 October 2026, Australia/Sydney  
-**Repository:** `Raoof128/Project-Zurvan`  
-**Audited commit:** `e65d4bbf093c3a33ce920edd03bd79ad6c688f62`  
+**Prepared for:** Raouf\
+**Date:** 22 October 2026, Australia/Sydney\
+**Repository:** `Raoof128/Project-Zurvan`\
+**Audited commit:** `e65d4bbf093c3a33ce920edd03bd79ad6c688f62`\
 **Status:** Audit and recommendations. No production source, store, repository branch or remote was changed.
 
 ## 1. Decision
