@@ -29,23 +29,33 @@ def test_schema_allows_retrieval_fusion_event_type():
 
 
 def test_fusion_payload_records_observed_weights_and_ranks():
+    # Audit 2026-10-22 F5: this test used to assert {"fts": 0.6, "embedding":
+    # 0.4} — the WRONG weights the trace declared while the scorer fused at
+    # 0.2 / 0.8 — and its fixture scores were computed with them (0.74, 0.44).
+    # The recorded weights are now the scorer's own policy, and every recorded
+    # fused score must reconstruct from its components.
+    from scripts.fusion_policy import CURRENT
     results = [
-        {"chunk_id": "a", "keyword_score": 0.9, "semantic_score": 0.5, "hybrid_score": 0.74},
-        {"chunk_id": "b", "keyword_score": 0.2, "semantic_score": 0.8, "hybrid_score": 0.44},
+        {"chunk_id": "a", "keyword_score": 0.9, "semantic_score": 0.9, "hybrid_score": CURRENT.score(0.9, 0.9)},
+        {"chunk_id": "b", "keyword_score": 0.2, "semantic_score": 0.8, "hybrid_score": CURRENT.score(0.2, 0.8)},
     ]
     payload = context_export._fusion_payload(results)
 
     assert payload["mode"] == "hybrid"
     assert payload["fusion"] == "weighted_sum"
-    assert payload["weights"] == {"fts": 0.6, "embedding": 0.4}
+    assert payload["weights"] == {"fts": 0.2, "embedding": 0.8}
+    assert payload["policy_id"] == CURRENT.policy_id
     assert payload["ranked"][0] == {
         "chunk_id": "a",
         "fts_score": 0.9,
-        "embedding_score": 0.5,
-        "fused_score": 0.74,
+        "embedding_score": 0.9,
+        "fused_score": pytest.approx(0.9),
         "rank": 1,
     }
     assert payload["ranked"][1]["rank"] == 2
+    w = payload["weights"]
+    for r in payload["ranked"]:
+        assert w["fts"] * r["fts_score"] + w["embedding"] * r["embedding_score"] == pytest.approx(r["fused_score"])
 
 
 # --- C. context.assembled.dropped ----------------------------------------
@@ -90,7 +100,7 @@ def _hybrid_results():
             "text": "MCP provenance and retrieval tracing.",
             "keyword_score": 0.75,
             "semantic_score": 0.5,
-            "hybrid_score": 0.65,
+            "hybrid_score": 0.55,   # 0.2 * 0.75 + 0.8 * 0.5 (was 0.65, the F5 weights)
         }
     ]
 
@@ -119,7 +129,7 @@ def test_hybrid_context_trace_emits_retrieval_fusion(tmp_path, monkeypatch):
         "context.assembled",
     ]
     fusion = data["events"][2]["payload"]
-    assert fusion["weights"] == {"fts": 0.6, "embedding": 0.4}
+    assert fusion["weights"] == {"fts": 0.2, "embedding": 0.8}   # the scorer's weights (F5)
     assert fusion["ranked"][0]["chunk_id"] == "chunk-001"
 
 

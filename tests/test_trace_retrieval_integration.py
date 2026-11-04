@@ -17,7 +17,7 @@ def _sample_results():
             "text": "MCP provenance and retrieval tracing.",
             "keyword_score": 0.75,
             "semantic_score": 0.5,
-            "hybrid_score": 0.65,
+            "hybrid_score": 0.55,   # 0.2 * 0.75 + 0.8 * 0.5 (was 0.65, the F5 weights)
         }
     ]
 
@@ -65,8 +65,8 @@ def test_export_context_trace_writes_retrieval_and_graph_events(tmp_path, monkey
     ]
     assert data["events"][0]["payload"]["mode"] == "hybrid"
     assert data["events"][1]["payload"]["results"][0]["keyword_score"] == 0.75
-    assert data["events"][1]["payload"]["results"][0]["hybrid_score"] == 0.65
-    assert data["events"][2]["payload"]["weights"] == {"fts": 0.6, "embedding": 0.4}
+    assert data["events"][1]["payload"]["results"][0]["hybrid_score"] == 0.55
+    assert data["events"][2]["payload"]["weights"] == {"fts": 0.2, "embedding": 0.8}   # the scorer's weights (F5)
     assert data["events"][2]["payload"]["ranked"][0]["chunk_id"] == "chunk-001"
     assert data["events"][3]["payload"] == {
         "included_chunk_ids": ["chunk-001"],
