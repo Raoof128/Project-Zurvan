@@ -47,6 +47,32 @@ impl Hit {
     }
 }
 
+/// What a search answered from (audit 2026-10-22 F6). Hybrid hits are
+/// hydrated from ONE index generation and carry its metadata; keyword hits
+/// are read from the live files and carry no index generation at all.
+#[derive(Debug, Clone)]
+pub enum Served {
+    Index(Arc<crate::store::IndexMeta>),
+    LiveFiles,
+    /// No index at the path: nothing was served (Python prints to stderr
+    /// and returns []).
+    NoIndex,
+}
+
+/// `Ok(Ok((hits, meta)))`: hits and the generation they were hydrated from;
+/// `Ok(Err(why))`: semantic search unavailable; `Err(e)`: the call failed.
+pub type HybridOutcome = Result<Result<(Vec<Hit>, Arc<crate::store::IndexMeta>), String>, String>;
+
+/// A search response bound to what served it. The stamp is derived from
+/// `served`, never from a fresh read of the index path, so a promote landing
+/// after hydration cannot label this generation's text as the next one's.
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub hits: Vec<Hit>,
+    pub notice: Option<String>,
+    pub served: Served,
+}
+
 /// Keyword scores by matrix row. Selects `rowid`, never `chunk_id`: on the
 /// external-content table the latter costs one `chunks` lookup per matching
 /// row (spike: 4.79 s cold vs 0.18 s, identical score set). Min-max is taken
@@ -246,6 +272,10 @@ pub struct SearchState {
     /// How long a failed model load is reported before it is tried again.
     model_retry: std::time::Duration,
     load_model: Arc<dyn Fn() -> Result<Arc<Embedder>, String> + Send + Sync>,
+    /// Deterministic barrier for the F6 interleaving tests: runs once per
+    /// hybrid call, after hydration and before the result is returned.
+    #[cfg(test)]
+    pub(crate) after_hydrate: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 /// The query model: not tried yet, loaded, or failed at a time (and retried
@@ -275,6 +305,8 @@ impl SearchState {
             embedder: Mutex::new(ModelSlot::Untried),
             model_retry: MODEL_RETRY,
             load_model: Arc::new(|| locate_model().and_then(|d| Embedder::load(&d)).map(Arc::new)),
+            #[cfg(test)]
+            after_hydrate: Mutex::new(None),
         }
     }
 
@@ -368,22 +400,27 @@ impl SearchState {
     /// `search_hybrid(query, limit)`. `Ok(None)` = semantic search is not
     /// available (the caller falls back to keyword results and says so).
     pub fn hybrid(&self, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
+        if !self.cfg.search_db.exists() {
+            return Ok(Vec::new());
+        }
         match self.hybrid_or_unavailable(query, limit, &|_, _| {})? {
-            Ok(hits) => Ok(hits),
+            Ok((hits, _)) => Ok(hits),
             Err(why) => Err(format!("semantic search unavailable: {why}")),
         }
     }
 
+    /// `Ok(Ok((hits, meta)))`: the hits AND the generation they were
+    /// hydrated from. `Ok(Err(why))`: semantic search is unavailable.
     pub fn hybrid_or_unavailable(
         &self,
         query: &str,
         limit: usize,
         on_progress: &dyn Fn(u64, u64),
-    ) -> Result<Result<Vec<Hit>, String>, String> {
+    ) -> HybridOutcome {
         // The metadata, the vector cache and the connection that scores and
         // hydrates must be ONE generation. A promote landing between them is
         // detected (`open_at`) and the call starts again on the new one.
-        let changed = |r: &Result<Result<Vec<Hit>, String>, String>| match r {
+        let changed = |r: &HybridOutcome| match r {
             Err(e) | Ok(Err(e)) => e.contains(GENERATION_CHANGED),
             Ok(Ok(_)) => false,
         };
@@ -402,9 +439,9 @@ impl SearchState {
         query: &str,
         limit: usize,
         on_progress: &dyn Fn(u64, u64),
-    ) -> Result<Result<Vec<Hit>, String>, String> {
+    ) -> HybridOutcome {
         if !self.cfg.search_db.exists() {
-            return Ok(Ok(Vec::new())); // Python prints to stderr and returns []
+            return Err("unable to open database file".into());
         }
         let meta = self.meta.index(&self.cfg)?;
         let space = Space::for_index(meta.provider.as_deref(), meta.model.as_deref());
@@ -421,10 +458,14 @@ impl SearchState {
         let pool = self.fts_pool(&meta)?;
         let kw = pool.scores(&cache, query)?;
         let top = cache.top_k(&qv, &kw, limit);
-        if top.is_empty() {
-            return Ok(Ok(Vec::new()));
+        let hits = if top.is_empty() { Ok(Vec::new()) } else { pool.with_conn(|conn| hydrate(conn, &cache, &top))? };
+        #[cfg(test)]
+        if let Some(barrier) = self.after_hydrate.lock().unwrap().as_ref() {
+            barrier();
         }
-        pool.with_conn(|conn| hydrate(conn, &cache, &top))
+        // `meta` is the generation the pool and cache were pinned to: the
+        // hits were hydrated from it, by construction.
+        Ok(hits.map(|h| (h, meta)))
     }
 }
 
@@ -467,16 +508,20 @@ fn hydrate(conn: &Connection, cache: &VectorCache, top: &[crate::vectors::Ranked
 impl SearchState {
     /// `_search_internal(query, hybrid, limit)`, with Rust's explicit
     /// fallback notice when semantic search cannot run (design §7A).
-    pub fn search(&self, query: &str, hybrid: bool, limit: usize, on_progress: &dyn Fn(u64, u64)) -> Result<(Vec<Hit>, Option<String>), String> {
+    pub fn search(&self, query: &str, hybrid: bool, limit: usize, on_progress: &dyn Fn(u64, u64)) -> Result<SearchResult, String> {
         if !hybrid {
-            return Ok((self.keywords.search(&self.cfg.root, query, limit), None));
+            return Ok(SearchResult { hits: self.keywords.search(&self.cfg.root, query, limit), notice: None, served: Served::LiveFiles });
+        }
+        if !self.cfg.search_db.exists() {
+            return Ok(SearchResult { hits: Vec::new(), notice: None, served: Served::NoIndex });
         }
         match self.hybrid_or_unavailable(query, limit, on_progress)? {
-            Ok(hits) => Ok((hits, None)),
-            Err(why) => Ok((
-                self.keywords.search(&self.cfg.root, query, limit),
-                Some(format!("Semantic search unavailable: {why} — keyword results only.")),
-            )),
+            Ok((hits, meta)) => Ok(SearchResult { hits, notice: None, served: Served::Index(meta) }),
+            Err(why) => Ok(SearchResult {
+                hits: self.keywords.search(&self.cfg.root, query, limit),
+                notice: Some(format!("Semantic search unavailable: {why} — keyword results only.")),
+                served: Served::LiveFiles,
+            }),
         }
     }
 }
@@ -702,7 +747,7 @@ mod tests {
                 for word in ["alpha", "beta"] {
                     let q = format!("{word} entry {}", calls % N);
                     calls += 1;
-                    let Ok(Ok(hits)) = st.hybrid_or_unavailable(&q, 3, &|_, _| {}) else { continue };
+                    let Ok(Ok((hits, _))) = st.hybrid_or_unavailable(&q, 3, &|_, _| {}) else { continue };
                     if let Some(h) = hits.first() {
                         if h.semantic > 0.99 && !h.text.starts_with(word) {
                             mixed += 1;
@@ -714,6 +759,47 @@ mod tests {
         });
         assert!(calls > 50, "the storm ran ({calls} calls)");
         assert_eq!(mixed, 0, "{mixed} of {calls} calls mixed two generations");
+    }
+
+    /// Audit 2026-10-22 F6: the server obtained hits and THEN read current
+    /// index metadata for the stamp. A promote between the two stamped A's
+    /// text as B. The response now carries the generation it hydrated from.
+    #[test]
+    fn the_stamp_names_the_generation_that_was_hydrated_not_the_one_promoted_after() {
+        let (_d, cfg) = mock_store();
+        let st = SearchState::new(cfg.clone());
+        let promote_to = cfg.clone();
+        *st.after_hydrate.lock().unwrap() = Some(Box::new(move || {
+            // A new generation (built_from_revision 2) replaces the index
+            // between hydration and the stamp: new inode, same path.
+            let tmp = promote_to.search_db.with_extension("next");
+            let chunks: Vec<Chunk> = DOCS
+                .iter()
+                .map(|(id, p, t)| Chunk { chunk_id: id, source_path: p, heading: Some("H"), text: t, indexed_at: "2026-10-19T00:00:00", vector: mock(t) })
+                .collect();
+            search_db(&tmp, "mock", "deterministic_hash", &chunks, &[("built_from_revision", "2")]);
+            fs::rename(&tmp, &promote_to.search_db).unwrap();
+        }));
+        let r = st.search("ledger", true, 3, &|_, _| {}).unwrap();
+        assert!(!r.hits.is_empty());
+        let Served::Index(m) = &r.served else { panic!("hybrid serves an index") };
+        assert_eq!(m.built_from_revision, Some(1), "the generation hydrated from");
+        let s = crate::status::stamp_for(&cfg, &r.served, &st.meta, &[]);
+        assert!(s.starts_with("[index rev 1 "), "{s}");
+        assert!(!s.contains("index rev 2"), "{s}");
+        assert!(s.contains("superseded"), "a promote after hydration is reported: {s}");
+        // The generation now at the path IS 2: the old stamp would have said so.
+        assert_eq!(st.meta.index(&cfg).unwrap().built_from_revision, Some(2));
+    }
+
+    #[test]
+    fn keyword_mode_serves_live_files_and_says_so() {
+        let (_d, cfg) = mock_store();
+        let st = SearchState::new(cfg.clone());
+        let r = st.search("anything", false, 3, &|_, _| {}).unwrap();
+        assert!(matches!(r.served, Served::LiveFiles));
+        let s = crate::status::stamp_for(&cfg, &r.served, &st.meta, &[]);
+        assert!(s.starts_with("[live files · ledger rev "), "{s}");
     }
 
     /// Final review minor 6: a failed model load was cached for the life of

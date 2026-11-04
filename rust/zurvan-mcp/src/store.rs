@@ -220,6 +220,18 @@ pub fn open_graph(cfg: &Config) -> Result<Connection, String> {
     open_ro(&cfg.graph_db).map_err(|e| e.to_string())
 }
 
+/// `open_graph`, proving which generation was opened (mirror of `open_at`):
+/// stat, open, stat again; a promote between the two is `GENERATION_CHANGED`.
+/// The context tool binds its stamp to the returned generation (F6).
+pub fn open_graph_at(cfg: &Config) -> Result<(Connection, Generation), String> {
+    let before = generation(&cfg.graph_db).map_err(|_| graph_missing_message(&cfg.graph_db))?;
+    let conn = open_graph(cfg)?;
+    match generation(&cfg.graph_db) {
+        Ok(after) if after == before => Ok((conn, before)),
+        _ => Err(GENERATION_CHANGED.to_string()),
+    }
+}
+
 /// `knowledge_state` of the revision ledger: (current_revision, state).
 pub fn ledger(cfg: &Config) -> Option<(i64, String)> {
     let conn = open_ro(&cfg.registry_db).ok()?;

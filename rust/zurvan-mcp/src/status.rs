@@ -3,6 +3,7 @@
 
 use crate::config::{readonly, Config};
 use crate::corpus::scan_markdown_files;
+use crate::search::Served;
 use crate::store::{generation, ledger, MetaCache};
 use crate::text::thousands;
 use chrono::{DateTime, Local, NaiveDateTime, Utc};
@@ -149,26 +150,54 @@ pub fn status_text(cfg: &Config, cache: &MetaCache) -> String {
 /// The §7.8 stamp: which knowledge a result answered from. Empty when
 /// ZURVAN_MCP_STAMP=0. Says what the index was BUILT FROM, not that it is
 /// complete (only index_health can say that; IOU-6).
-pub fn stamp(cfg: &Config, cache: &MetaCache) -> String {
+///
+/// Derived from `served` — the generation the hits were hydrated from —
+/// never from a fresh read of the index path (audit 2026-10-22 F6: a promote
+/// between hydration and the stamp labelled generation A's text as B). When
+/// the path no longer holds the served generation, the stamp says so instead
+/// of describing the newer index's freshness. `extra` parts are appended
+/// (the context tool's graph revision, orient's live page reads).
+pub fn stamp_for(cfg: &Config, served: &Served, cache: &MetaCache, extra: &[String]) -> String {
     if std::env::var("ZURVAN_MCP_STAMP").as_deref() == Ok("0") {
         return String::new();
     }
     let ledger_rev = ledger(cfg).map(|(r, _)| r);
-    let Ok(m) = cache.index(cfg) else {
-        return format!("[index unavailable · ledger rev {}]", opt(ledger_rev));
+    let mut parts = match served {
+        Served::LiveFiles => vec!["live files".to_string(), format!("ledger rev {}", opt(ledger_rev))],
+        Served::NoIndex => vec!["index unavailable".to_string(), format!("ledger rev {}", opt(ledger_rev))],
+        Served::Index(m) => {
+            let mut parts = vec![
+                format!("index rev {} built {}", opt(m.built_from_revision), built_minute_utc(m.built_at.as_deref())),
+                format!("ledger rev {}", opt(ledger_rev)),
+            ];
+            if let (Some(n), Some(r)) = (ledger_rev, m.built_from_revision) {
+                parts.push(format!("{} writes since", n - r));
+            }
+            let still_current = cache.index(cfg).map(|c| c.generation == m.generation).unwrap_or(false);
+            parts.push(if still_current {
+                match freshness(cfg, cache) {
+                    Freshness::Newer(k) => format!("{k} files newer"),
+                    other => staleness_text(&other),
+                }
+            } else {
+                "superseded: a newer index was promoted during this call".to_string()
+            });
+            parts
+        }
     };
-    let mut parts = vec![
-        format!("index rev {} built {}", opt(m.built_from_revision), built_minute_utc(m.built_at.as_deref())),
-        format!("ledger rev {}", opt(ledger_rev)),
-    ];
-    if let (Some(n), Some(r)) = (ledger_rev, m.built_from_revision) {
-        parts.push(format!("{} writes since", n - r));
-    }
-    parts.push(match freshness(cfg, cache) {
-        Freshness::Newer(k) => format!("{k} files newer"),
-        other => staleness_text(&other),
-    });
+    parts.extend(extra.iter().cloned());
     format!("[{}]", parts.join(" · "))
+}
+
+/// The graph part of a context stamp: the revision of the graph generation
+/// that was actually opened, or "graph superseded" when the path has moved
+/// on since. `None` when the bundle opened no graph.
+pub fn graph_part(cfg: &Config, cache: &MetaCache, opened: Option<crate::store::Generation>) -> Option<String> {
+    let g = opened?;
+    Some(match cache.graph(cfg) {
+        Ok(m) if m.generation == g => format!("graph rev {}", opt(m.built_from_revision)),
+        _ => "graph superseded: a newer graph was promoted during this call".to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -277,13 +306,33 @@ mod tests {
                   &[chunk("a", "wiki/a.md", "2000-01-01T00:00:00")],
                   &[("built_from_revision", "745"), ("built_at", "2026-10-18T08:23:19.137571+00:00")]);
         registry_db(&cfg.registry_db, 751, "CLEAN");
+        let cache = MetaCache::default();
+        let served = Served::Index(cache.index(&cfg).unwrap());
         assert_eq!(
-            stamp(&cfg, &MetaCache::default()),
+            stamp_for(&cfg, &served, &cache, &[]),
             "[index rev 745 built 2026-10-18T08:23Z · ledger rev 751 · 6 writes since · 5 files newer]"
         );
+        assert_eq!(
+            stamp_for(&cfg, &served, &cache, &["graph rev 740".into()]),
+            "[index rev 745 built 2026-10-18T08:23Z · ledger rev 751 · 6 writes since · 5 files newer · graph rev 740]"
+        );
+        assert_eq!(stamp_for(&cfg, &Served::LiveFiles, &cache, &[]), "[live files · ledger rev 751]");
         let bare = tempfile::tempdir().unwrap();
         let cfg2 = Config::resolve_from(Some(bare.path().to_path_buf()), |_| None);
-        assert_eq!(stamp(&cfg2, &MetaCache::default()), "[index unavailable · ledger rev ?]");
+        assert_eq!(stamp_for(&cfg2, &Served::LiveFiles, &MetaCache::default(), &[]), "[live files · ledger rev ?]");
+        assert_eq!(stamp_for(&cfg2, &Served::NoIndex, &MetaCache::default(), &[]), "[index unavailable · ledger rev ?]");
+    }
+
+    #[test]
+    fn graph_part_names_the_opened_generation_or_says_superseded() {
+        let (_d, cfg) = root_with_files();
+        graph_db(&cfg.graph_db, &[], &[]);
+        let cache = MetaCache::default();
+        let g = crate::store::generation(&cfg.graph_db).unwrap();
+        assert_eq!(graph_part(&cfg, &cache, None), None);
+        assert_eq!(graph_part(&cfg, &cache, Some(g)).as_deref(), Some("graph rev ?"));
+        let stale = crate::store::Generation { ino: g.ino.wrapping_add(1), ..g };
+        assert!(graph_part(&cfg, &cache, Some(stale)).unwrap().starts_with("graph superseded"));
     }
 
     /// Final review minor 7: the 5 s freshness reuse was not keyed by index

@@ -118,9 +118,12 @@ impl ZurvanServer {
     fn orient_tool(&self, topic: &str, limit: usize, progress: &dyn Fn(u64, u64)) -> String {
         match self.search.search(topic, true, limit, progress) {
             Err(e) => format!("Error orienting on '{topic}': {e}"),
-            Ok((hits, notice)) => {
+            Ok(r) => {
+                let (hits, notice) = (r.hits, r.notice);
                 let mut head = format!("Search index: {}", status::staleness_text(&status::freshness(&self.cfg, &self.meta)));
-                let stamp = status::stamp(&self.cfg, &self.meta);
+                // The top pages below are read from the LIVE files, not the
+                // index generation the hits came from; the stamp says so.
+                let stamp = status::stamp_for(&self.cfg, &r.served, &self.meta, &["top pages read live".to_string()]);
                 if !stamp.is_empty() {
                     head.push('\n');
                     head.push_str(&stamp);
@@ -153,14 +156,14 @@ impl ZurvanServer {
     fn search_tool(&self, query: &str, hybrid: bool, limit: usize, progress: &dyn Fn(u64, u64)) -> String {
         match self.search.search(query, hybrid, limit, progress) {
             Err(e) => format!("Error searching Zurvan for '{query}': {e}"),
-            Ok((hits, notice)) => {
+            Ok(r) => {
                 let mut parts = Vec::new();
-                let stamp = status::stamp(&self.cfg, &self.meta);
+                let stamp = status::stamp_for(&self.cfg, &r.served, &self.meta, &[]);
                 if !stamp.is_empty() {
                     parts.push(stamp);
                 }
-                parts.extend(notice);
-                parts.push(search::format_results(&hits));
+                parts.extend(r.notice);
+                parts.push(search::format_results(&r.hits));
                 parts.join("\n")
             }
         }
@@ -199,14 +202,15 @@ impl ZurvanServer {
                 let limit = i("limit").unwrap_or(10).clamp(1, 50) as usize;
                 ToolOutput::Text(match context::bundle(&self.search, &topic, hybrid, graph, limit, progress) {
                     Err(e) => format!("Error building context for '{topic}': {e}"),
-                    Ok((text, notice)) => {
+                    Ok(b) => {
                         let mut parts = Vec::new();
-                        let stamp = status::stamp(&self.cfg, &self.meta);
+                        let extra: Vec<String> = status::graph_part(&self.cfg, &self.meta, b.graph).into_iter().collect();
+                        let stamp = status::stamp_for(&self.cfg, &b.served, &self.meta, &extra);
                         if !stamp.is_empty() {
                             parts.push(stamp);
                         }
-                        parts.extend(notice);
-                        parts.push(crate::text::budget(&text, crate::text::RESULT_CHAR_BUDGET));
+                        parts.extend(b.notice);
+                        parts.push(crate::text::budget(&b.text, crate::text::RESULT_CHAR_BUDGET));
                         parts.join("\n")
                     }
                 })

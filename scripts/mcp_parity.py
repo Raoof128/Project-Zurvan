@@ -43,7 +43,9 @@ GROUPS = ("listing", "status", "read_page", "read_gate", "graph", "search_hybrid
 
 # Lines a server adds that the other does not, stripped before comparison
 # (design §7.8 stamp, §7A status lines, §7.9 write revision).
-STRIP_PREFIXES = ("[index rev ", "Serving: ", "Model: ", "Vector cache: ", "Ledger: ", "Ledger revision: ")
+# "[live files " and "[index unavailable ": the F6 stamp names what a keyword
+# search or a missing-index call actually served instead of the index path.
+STRIP_PREFIXES = ("[index rev ", "[live files ", "[index unavailable ", "Serving: ", "Model: ", "Vector cache: ", "Ledger: ", "Ledger revision: ")
 _RELATION_SUFFIX = re.compile(r"( - (?:incoming|outgoing):\S+| \((?:incoming|outgoing):[^)]*\))$")
 
 

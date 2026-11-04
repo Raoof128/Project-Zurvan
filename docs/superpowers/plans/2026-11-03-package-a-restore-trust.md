@@ -570,7 +570,7 @@ Expected: all passed, clippy clean. The existing `hybrid_never_mixes_generations
 
 - [ ] **Step 5: Live parity check (read-only, no index rebuild)**
 
-Run (after `cargo build --release`): `PYTHONPATH=. python scripts/mcp_parity.py --only search,context,orient --protocol 2026-07-28` and again with `--protocol 2025-11-25`. Default A is the Python server, default B the freshly built `target/release/zurvan-mcp`.
+Run (after `cargo build --release`): `PYTHONPATH=. python scripts/mcp_parity.py --only search_hybrid,search_keyword,context,orient,status --protocol 2026-07-28` and again with `--protocol 2025-11-25` (the harness's group names; `search` alone is rejected). Default A is the Python server, default B the freshly built `target/release/zurvan-mcp`.
 Expected: 0 FAIL; the stamp line is stripped by `STRIP_PREFIXES` so only content parity is compared. Record the exact PASS/EXPECTED_DIVERGENCE counts for the change log.
 
 - [ ] **Step 6: Commit**
