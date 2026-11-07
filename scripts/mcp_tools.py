@@ -163,18 +163,9 @@ def _format_search_results(results) -> str:
 
 
 def _search_or_degrade(query: str, hybrid: bool, limit: int):
-    """`_search_internal`, with the Rust server's explicit fallback (design
-    2026-10-19 §7A): when semantic search cannot run, return keyword results
-    AND the notice saying so, never a silent substitute (F4)."""
-    from scripts.context_export import _search_internal
-    from scripts.embed import EmbeddingSpaceMismatch, EmbeddingUnavailable
-    if not hybrid:
-        return _search_internal(query, False, limit), None
-    try:
-        return _search_internal(query, True, limit), None
-    except (EmbeddingUnavailable, EmbeddingSpaceMismatch) as why:
-        return (_search_internal(query, False, limit),
-                f"Semantic search unavailable: {why} — keyword results only.")
+    """See `context_export.search_or_degrade` (shared with `zurvan_context`)."""
+    from scripts.context_export import search_or_degrade
+    return search_or_degrade(query, hybrid, limit)
 
 
 @_protocol_safe
@@ -227,7 +218,7 @@ def tool_zurvan_orient(topic: str, limit: int = 10) -> str:
 def tool_zurvan_context(topic: str, hybrid: bool = True, graph: bool = True, limit: int = 10) -> str:
     """Exports a Markdown context bundle."""
     try:
-        return _budget(export_context(topic, limit, hybrid, graph, 1))
+        return _budget(export_context(topic, limit, hybrid, graph, 1, degrade=True))
     except Exception as e:
         return f"Error building context for '{topic}': {e}"
 
