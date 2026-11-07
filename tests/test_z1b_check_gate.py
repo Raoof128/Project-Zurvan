@@ -1,8 +1,8 @@
-"""Z1b Task 17c: check.sh gate [24/24] Z1b seal.
+"""Z1b Task 17c: check.sh gate [24/25] Z1b seal.
 
 Same pattern as tests/test_z0_closure.py::test_check_sh_gates_the_inventory: the gate must be a live
-command under `set -e`, before the final banner. On top of that: every gate heading says /24, numbering
-is contiguous 0..24, and the gate prints `Z1b: NOT CONFIGURED` (never a pass) on a machine without the
+command under `set -e`, before the final banner. On top of that: every gate heading says /25, numbering
+is contiguous 0..25, and the gate prints `Z1b: NOT CONFIGURED` (never a pass) on a machine without the
 real identity. The configured/unconfigured branches are executed for real with PATH shims.
 """
 import os
@@ -36,17 +36,17 @@ def test_t17_check_sh_runs_seal_check_exactly_once_live_before_the_final_banner(
     assert live[0] < final and not any(i < live[0] for i in exits)
 
 
-def test_t17_every_gate_heading_says_24_and_numbering_is_contiguous_0_to_24():
+def test_t17_every_gate_heading_says_25_and_numbering_is_contiguous_0_to_25():
     heads = [(int(m.group(1)), int(m.group(2))) for m in map(_T17_HEADING.match, _t17_lines()) if m]
-    assert len(heads) == 25, heads
-    assert all(total == 24 for _n, total in heads), [h for h in heads if h[1] != 24]
-    assert [n for n, _t in heads] == list(range(25))  # contiguous and in file order
+    assert len(heads) == 26, heads
+    assert all(total == 25 for _n, total in heads), [h for h in heads if h[1] != 25]
+    assert [n for n, _t in heads] == list(range(26))  # contiguous and in file order
     assert "/23]" not in CHECK.read_text()
 
 
-def test_t17_the_gate_is_numbered_24_and_named_z1b_seal():
+def test_t17_the_gate_is_numbered_24_of_25_and_named_z1b_seal():
     lines = _t17_lines()
-    idx = [i for i, l in enumerate(lines) if '[24/24] Z1b seal' in l]
+    idx = [i for i, l in enumerate(lines) if '[24/25] Z1b seal' in l]
     assert len(idx) == 1
     cmd = [i for i, l in enumerate(lines) if l.strip() == GATE_CMD][0]
     assert idx[0] < cmd and cmd - idx[0] < 15  # the command belongs to this heading
@@ -54,7 +54,7 @@ def test_t17_the_gate_is_numbered_24_and_named_z1b_seal():
 
 def _t17_gate_block():
     lines = _t17_lines()
-    start = [i for i, l in enumerate(lines) if '[24/24] Z1b seal' in l][0]
+    start = [i for i, l in enumerate(lines) if '[24/25] Z1b seal' in l][0]
     end = next(i for i in range(start, len(lines)) if lines[i].strip() == "fi")
     return "\n".join(lines[start:end + 1])
 

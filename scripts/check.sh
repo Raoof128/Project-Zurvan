@@ -35,7 +35,7 @@ fi
 # progress, and deleting its input mid-run is the failure snapshots prevent.
 PYTHONPATH=. python scripts/measurement_snapshot.py --sweep || true
 
-echo "[0/24] Running Boundary egress gate..."
+echo "[0/25] Running Boundary egress gate..."
 # Opt-in: reports NOT CONFIGURED and exits 0 when no store exists, so the gate
 # never blocks a machine that has not set Boundary up. When a store IS present,
 # a store that cannot prove its own integrity fails the gate just as a detected
@@ -61,17 +61,17 @@ PYTHONPATH=. python -m pytest -q \
   tests/test_plan_integrity.py | tail -2
 echo ""
 
-echo "[1/24] Running Public Repo Guard..."
+echo "[1/25] Running Public Repo Guard..."
 PYTHONPATH=. python scripts/public_repo_guard.py
 echo "✅ Public repo guard passed."
 echo ""
 
-echo "[2/24] Running Unit Tests (pytest)..."
+echo "[2/25] Running Unit Tests (pytest)..."
 PYTHONPATH=. pytest tests/
 echo "✅ Unit tests passed."
 echo ""
 
-echo "[3/24] Running Reliability Gauntlet (Mock Provider)..."
+echo "[3/25] Running Reliability Gauntlet (Mock Provider)..."
 export ZURVAN_LLM_PROVIDER=mock
 PYTHONPATH=. python scripts/run_reliability_gauntlet.py \
   raw/notes/small_note.txt \
@@ -82,12 +82,12 @@ PYTHONPATH=. python scripts/run_reliability_gauntlet.py \
 echo "✅ Gauntlet completed."
 echo ""
 
-echo "[4/24] Auditing Wiki..."
+echo "[4/25] Auditing Wiki..."
 PYTHONPATH=. python scripts/audit_wiki.py
 echo "✅ Audit completed."
 echo ""
 
-echo "[5/24] Rebuilding Search Index..."
+echo "[5/25] Rebuilding Search Index..."
 # This gate rebuilds the PRODUCTION index, so the embedding space is pinned
 # here rather than inherited. Gate 3 above exports a mock LLM provider, and
 # check.sh is routinely run from a plain shell where ZURVAN_EMBED_PROVIDER is
@@ -111,7 +111,7 @@ fi
 echo "✅ Search index rebuilt and verified healthy."
 echo ""
 
-echo "[6/24] Evaluating Retrieval Harness..."
+echo "[6/25] Evaluating Retrieval Harness..."
 # Scored against a SNAPSHOT of the index, not the live one. Zurvan is shared
 # cross-project memory and the MCP server runs with ZURVAN_MCP_READONLY=0, so
 # another project's session can record a decision at any moment — twice
@@ -130,7 +130,7 @@ rm -rf "$SNAPSHOT_DIR"; trap - EXIT
 echo "✅ Retrieval Evaluation passed."
 echo ""
 
-echo "[7/24] Testing Knowledge Graph Lite & Context Expansion..."
+echo "[7/25] Testing Knowledge Graph Lite & Context Expansion..."
 PYTHONPATH=. python scripts/graph_build.py
 PYTHONPATH=. python scripts/cli.py graph stats
 PYTHONPATH=. python scripts/cli.py graph expand wiki/decisions/delay-vector-search.md --depth 1
@@ -138,12 +138,12 @@ PYTHONPATH=. python scripts/cli.py context --topic "vector" --hybrid --graph --l
 echo "✅ Graph tests passed."
 echo ""
 
-echo "[8/24] Running MCP Doctor..."
+echo "[8/25] Running MCP Doctor..."
 PYTHONPATH=. python scripts/doctor_mcp.py
 echo "✅ MCP Doctor passed."
 echo ""
 
-echo "[9/24] Testing MCP Server Integration..."
+echo "[9/25] Testing MCP Server Integration..."
 PYTHONPATH=. ZURVAN_MCP_READONLY=1 python -m pytest tests/test_mcp_security.py tests/test_mcp_tools.py tests/test_mcp_resources.py tests/test_mcp_server_smoke.py tests/test_doctor_mcp.py tests/test_install_mcp_config.py
 if [ $? -ne 0 ]; then
     echo "❌ MCP server tests failed."
@@ -152,7 +152,7 @@ fi
 echo "✅ MCP Server tests passed."
 echo ""
 
-echo "[10/24] Running MCP E2E smoke test..."
+echo "[10/25] Running MCP E2E smoke test..."
 PYTHONPATH=. \
 ZURVAN_MCP_TRANSPORT=stdio \
 ZURVAN_MCP_READONLY=1 \
@@ -162,7 +162,7 @@ ZURVAN_LLM_MODEL=mock \
 ZURVAN_EMBED_PROVIDER=mock \
 python scripts/e2e_mcp_smoke.py
 echo "✅ MCP E2E smoke test passed."
-echo "[11/24] Agent Workflow Smoke Test..."
+echo "[11/25] Agent Workflow Smoke Test..."
 # The WRITE half of this gate runs against a throwaway store. It used to write
 # `wiki/sessions/<date>-phase-7-smoke-test.md` plus log entries into the LIVE
 # wiki on every run — 6 such pages had accumulated by 2026-09-15, indexed and
@@ -194,12 +194,12 @@ rm -rf "$SMOKE_ROOT"; trap - EXIT
 echo "✅ Agent Workflow smoke test passed (writes isolated)."
 echo ""
 
-echo "[12/24] Running Version Check..."
+echo "[12/25] Running Version Check..."
 PYTHONPATH=. python scripts/cli.py version
 echo "✅ Version check passed."
 echo ""
 
-echo "[13/24] Running Doctor Check..."
+echo "[13/25] Running Doctor Check..."
 PYTHONPATH=. python scripts/cli.py doctor
 # Z0 gate item 3: the implicit-mutation inventory is a gated query, not an
 # assertion. A production write outside an operation reopens it and fails here.
@@ -207,20 +207,20 @@ PYTHONPATH=. python scripts/cli.py knowledge callers --strict
 echo "✅ Doctor check passed."
 echo ""
 
-echo "[14/24] Running Snapshot Smoke Test..."
+echo "[14/25] Running Snapshot Smoke Test..."
 export ZURVAN_SNAPSHOT_TEST="true"
 PYTHONPATH=. python scripts/cli.py snapshot create
 echo "✅ Snapshot smoke test passed."
 echo ""
 
-echo -e "\n[15/24] Testing Workspace Registry..."
+echo -e "\n[15/25] Testing Workspace Registry..."
 export ZURVAN_CONFIG_DIR="$(mktemp -d)"
 PYTHONPATH=. python scripts/cli.py project register --name testproj --path . > /dev/null
 PYTHONPATH=. python scripts/cli.py project list
 PYTHONPATH=. python scripts/cli.py project current
 echo "✅ Workspace registry test passed."
 
-echo -e "\n[16/24] Testing Federation..."
+echo -e "\n[16/25] Testing Federation..."
 # Register a second project for federation tests
 mkdir -p "$ZURVAN_CONFIG_DIR/testproj2"
 PYTHONPATH=. python scripts/cli.py project register --name testproj2 --path . > /dev/null
@@ -236,20 +236,20 @@ echo "Testing context-all..."
 PYTHONPATH=. python scripts/cli.py project context-all --topic "agent memory" --hybrid --graph --limit 10 > /dev/null
 echo "✅ context-all smoke test passed."
 
-echo -e "\n[17/24] Testing Decision Memory..."
+echo -e "\n[17/25] Testing Decision Memory..."
 python scripts/cli.py project decisions-all >/dev/null
 python scripts/cli.py project decisions-stale >/dev/null
 echo "✅ Decision memory smoke test passed."
 
 echo ""
-echo "[18/24] Testing Policy Radar..."
+echo "[18/25] Testing Policy Radar..."
 python scripts/cli.py project radar policies >/dev/null
 python scripts/cli.py project radar contradictions >/dev/null
 python scripts/cli.py project radar drift >/dev/null
 echo "✅ Policy radar smoke test passed."
 
 echo ""
-echo "[19/24] Testing Evidence Pack Builder..."
+echo "[19/25] Testing Evidence Pack Builder..."
 mkdir -p "$ZURVAN_CONFIG_DIR"
 python scripts/cli.py project register --name zurvan --path . >/dev/null
 python scripts/cli.py evidence build --topic "smoke test" --hybrid --graph --include-decisions --include-policy-radar >/dev/null
@@ -265,7 +265,7 @@ else
 fi
 
 echo ""
-echo "[20/24] Testing Report Composer..."
+echo "[20/25] Testing Report Composer..."
 python scripts/cli.py report compose --pack "$PACK_ID" --template evidence_digest >/dev/null
 REPORT_ID=$(python scripts/cli.py report list | head -n 1 | awk '{print $2}')
 if [ -n "$REPORT_ID" ]; then
@@ -279,7 +279,7 @@ else
 fi
 
 echo ""
-echo "[21/24] Testing Local Review Workbench..."
+echo "[21/25] Testing Local Review Workbench..."
 # Just start the server in background and kill it to ensure it creates correctly
 python scripts/cli.py review serve --host 127.0.0.1 --port 8769 &
 SERVER_PID=$!
@@ -288,20 +288,20 @@ kill $SERVER_PID || true
 echo "✅ Review workbench smoke test passed."
 
 echo ""
-echo "[22/24] Testing Review Audit & Index..."
+echo "[22/25] Testing Review Audit & Index..."
 python scripts/cli.py review audit > /dev/null
 python scripts/cli.py review index rebuild > /dev/null
 echo "✅ Review Audit and Index passed."
 
 echo ""
-echo "[23/24] Testing Publication Export..."
+echo "[23/25] Testing Publication Export..."
 # Just validate a smoke test for publication (we need a report first, but the pytest unit tests will handle that)
 # We can just check that the CLI runs validation.
 # We skip running export if there's no report guaranteed, so we rely on tests/test_publication_*.py which was run in pytest.
 echo "✅ Publication Export CLI structure is present."
 
 echo ""
-echo "[24/24] Z1b seal..."
+echo "[24/25] Z1b seal..."
 # Z1b closes on the REAL zurvaneval identity (spec 9, Z1b gates 1-9). On a machine without that
 # identity or the installed broker there is nothing to check, and this gate says so: it prints
 # NOT CONFIGURED and never "passed". When configured, seal-check must exit 0 (set -e makes a
@@ -312,6 +312,13 @@ if id zurvaneval >/dev/null 2>&1 && [ -x /Library/ZurvanEval/broker/bin/zurvan-b
 else
     echo "Z1b: NOT CONFIGURED (no zurvaneval identity or broker; the Z1b seal gates are UNVERIFIED on this machine)"
 fi
+
+echo ""
+echo "[25/25] Status index..."
+# docs/status/index.md is generated from docs/status/receipts.json (audit 2026-10-22 §2). --check is read-only
+# and exits 1 when the page has drifted from its receipts or a receipt names a missing evidence path.
+PYTHONPATH=. python scripts/status_index.py --check
+echo "✅ Status index is current."
 
 echo ""
 echo "========================================="

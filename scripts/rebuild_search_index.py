@@ -24,10 +24,11 @@ confident noise.
 import json
 import os
 import sqlite3
+import sys
 
 from scripts.chunk import iter_all_markdown_chunks
 from scripts.config import PROJECT_ROOT
-from scripts.embed import get_embedding
+from scripts.embed import EmbeddingIdentity, EmbeddingIdentityCorrupt, get_embedding, read_index_identity
 from scripts.index_health import (
     CANONICAL_DIMENSION,
     CANONICAL_MODEL,
@@ -67,6 +68,7 @@ class _PriorIndex:
 
     def __init__(self, db_path: str):
         self._conn = None
+        self.identity_problem = None
         if not os.path.exists(db_path):
             return
         try:
@@ -77,6 +79,22 @@ class _PriorIndex:
         except (sqlite3.Error, OSError):
             return
         self._conn = conn
+
+    def reusable_for(self, identity: EmbeddingIdentity) -> bool:
+        """Whether this index's vectors may be carried into a build in `identity`'s
+        space. The index-level identity (the F4 stamp, or provider/model/dimension
+        from its first row when it predates the stamp) must be the same space under
+        the rule `require_space` applies to a query vector. A stamp that cannot be
+        read means the prior space is unknown, so nothing is reusable; the reason
+        is kept in `identity_problem` for the caller to report."""
+        if self._conn is None:
+            return False
+        try:
+            prior = read_index_identity(self._conn)
+        except EmbeddingIdentityCorrupt as exc:
+            self.identity_problem = str(exc)
+            return False
+        return prior is not None and prior.same_space_as(identity)
 
     def get(self, chunk_id):
         if self._conn is None:
@@ -178,8 +196,11 @@ def read_index_meta(db_path) -> dict:
 
 
 def _stamp_index(build_path, fields: dict) -> None:
-    """Write the source stamps into the BUILD file, before publication. The
-    retriever never reads this table (proved in Task 6)."""
+    """Write `fields` (the source stamps, plus `embedding_identity`) and
+    `built_at` into `index_meta` in the BUILD file, before publication. The
+    retriever never reads the source stamps (proved in Task 6); the query path
+    reads `embedding_identity` (F4) and rebuild reuse reads it to decide whether
+    a prior vector is in the same space."""
     from datetime import datetime, timezone
     conn = sqlite3.connect(build_path)
     try:
@@ -221,7 +242,6 @@ def rebuild_search_index(db_path: str | None = None, root=None, snapshot=None):
     # file is touched.
     probe = get_embedding("zurvan embedding provider probe")
     _assert_embedding_space_is_safe(db_path, probe)
-    current_provider_model = (probe["provider"], probe["model"])
 
     live_builders = _sweep_abandoned_builds(db_path)
     if live_builders:
@@ -241,7 +261,7 @@ def rebuild_search_index(db_path: str | None = None, root=None, snapshot=None):
 
     reusable = _PriorIndex(db_path)
     try:
-        indexed, reused, computed = _build(build_path, root, reusable, current_provider_model)
+        indexed, reused, computed = _build(build_path, root, reusable, probe["identity"])
 
         report = check_index_health(
             build_path,
@@ -284,8 +304,18 @@ def rebuild_search_index(db_path: str | None = None, root=None, snapshot=None):
     return {"chunks": indexed, "reused": reused, "computed": computed}
 
 
-def _build(build_path: str, root, reusable: _PriorIndex, current_provider_model):
-    """Write a complete index to `build_path`. Never touches the live index."""
+def _build(build_path: str, root, reusable: _PriorIndex, current_identity: EmbeddingIdentity):
+    """Write a complete index to `build_path`. Never touches the live index.
+
+    `current_identity` is the full identity the build is stamped with. A stored
+    vector is reused only when its index holds that same space (`reusable_for`)
+    and the row itself says provider, model and dimension of that space too.
+    """
+    prior_is_reusable = reusable.reusable_for(current_identity)
+    if reusable.identity_problem:
+        print(f"  prior index not reused, every chunk will be re-embedded: {reusable.identity_problem}",
+              file=sys.stderr, flush=True)
+    current_row_space = (current_identity.provider, current_identity.model, current_identity.dimension)
     conn = sqlite3.connect(build_path)
     # sqlite-vec provides vec_distance_cosine() at query time; loading it here
     # keeps the write and read paths on one extension contract.
@@ -344,8 +374,8 @@ def _build(build_path: str, root, reusable: _PriorIndex, current_provider_model)
 
             # Reuse the stored vector for unchanged chunks — embedding is the
             # expensive step with real providers.
-            prior = reusable.get(c['chunk_id'])
-            if prior is not None and (prior[0], prior[1]) == current_provider_model:
+            prior = reusable.get(c['chunk_id']) if prior_is_reusable else None
+            if prior is not None and tuple(prior[:3]) == current_row_space:
                 provider, model, dimension, vector_blob = prior
                 reused += 1
             else:

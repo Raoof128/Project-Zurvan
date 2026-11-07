@@ -118,3 +118,115 @@ def test_rebuild_stamps_embedding_identity(tmp_path, monkeypatch):
     rebuild_search_index(db_path=db, root=corpus)
     ident = EmbeddingIdentity.from_json(read_index_meta(db)["embedding_identity"])
     assert (ident.provider, ident.model, ident.dimension) == ("mock", "deterministic_hash", 384)
+
+
+# --- review follow-up (a): vector reuse must require the FULL identity -------------------------------------------
+# The index stamps the probe's full EmbeddingIdentity (F4), but rebuild reuse compared only provider+model, so a
+# prior index whose pooling / normalisation / sequence length / dimension differed had its vectors carried into a
+# new index stamped as the new space. Reuse is now gated on the same comparison `require_space` applies.
+
+_POOLED = {"max_seq_length": 256, "pooling": "mean", "normalize": True}
+
+
+def _two_page_corpus(tmp_path):
+    corpus = tmp_path / "corpus"
+    (corpus / "wiki").mkdir(parents=True)
+    (corpus / "wiki" / "a.md").write_text("# A\n\nalpha beta\n")
+    (corpus / "wiki" / "b.md").write_text("# B\n\ngamma delta\n")
+    return corpus
+
+
+def _prior_mock_index(tmp_path, monkeypatch, *, stamp=None, corrupt_stamp=None, row_dimension=None):
+    """A throwaway mock index (never a live store), optionally relabelled afterwards."""
+    import os
+
+    from scripts.rebuild_search_index import rebuild_search_index
+    corpus = _two_page_corpus(tmp_path)
+    monkeypatch.setenv("ZURVAN_EMBED_PROVIDER", "mock")
+    monkeypatch.setenv("ZURVAN_EMBED_MODEL", "mock_model")
+    db = str(tmp_path / "search.sqlite")
+    rebuild_search_index(db_path=db, root=corpus)
+    os.chmod(db, 0o644)   # publication leaves it 0444; this is a throwaway fixture
+    conn = sqlite3.connect(db)
+    if stamp is not None:
+        conn.execute("UPDATE index_meta SET value=? WHERE key='embedding_identity'", (stamp.to_json(),))
+    if corrupt_stamp is not None:
+        conn.execute("UPDATE index_meta SET value=? WHERE key='embedding_identity'", (corrupt_stamp,))
+    if row_dimension is not None:
+        conn.execute("UPDATE embeddings SET dimension=?", (row_dimension,))
+    conn.commit()
+    conn.close()
+    return db, corpus
+
+
+def _probe_reports(monkeypatch, identity):
+    """Make the rebuild's embedder report `identity` (the vectors stay mock)."""
+    import scripts.rebuild_search_index as rsi
+    real = embed.get_embedding
+
+    def fake(text, provider=None, model=None):
+        return dict(real(text, provider=provider, model=model), identity=identity)
+
+    monkeypatch.setattr(rsi, "get_embedding", fake)
+
+
+def test_rebuild_reuses_every_vector_when_the_full_identity_matches(tmp_path, monkeypatch):
+    # Positive control: without it the next tests could pass because reuse is simply broken.
+    from scripts.rebuild_search_index import rebuild_search_index
+    db, corpus = _prior_mock_index(tmp_path, monkeypatch)
+    out = rebuild_search_index(db_path=db, root=corpus)
+    assert out["reused"] == out["chunks"] > 0 and out["computed"] == 0
+
+
+def test_rebuild_re_embeds_when_a_pinned_identity_field_differs(tmp_path, monkeypatch):
+    from scripts.rebuild_search_index import rebuild_search_index
+    prior = EmbeddingIdentity("mock", "deterministic_hash", 384, 256, "cls", True)
+    db, corpus = _prior_mock_index(tmp_path, monkeypatch, stamp=prior)
+    _probe_reports(monkeypatch, EmbeddingIdentity("mock", "deterministic_hash", 384, 256, "mean", True))
+    out = rebuild_search_index(db_path=db, root=corpus)
+    assert out["reused"] == 0 and out["computed"] == out["chunks"] > 0, out
+
+
+def test_rebuild_reuses_when_only_one_side_pins_an_optional_field(tmp_path, monkeypatch):
+    # The same rule require_space applies: an optional field is compared only when BOTH sides have it, so an index
+    # stamped before the field was recorded keeps its vectors.
+    from scripts.rebuild_search_index import rebuild_search_index
+    db, corpus = _prior_mock_index(tmp_path, monkeypatch)       # stamp has no pooling etc.
+    _probe_reports(monkeypatch, EmbeddingIdentity("mock", "deterministic_hash", 384, **_POOLED))
+    out = rebuild_search_index(db_path=db, root=corpus)
+    assert out["reused"] == out["chunks"] > 0
+
+
+def test_rebuild_re_embeds_rows_whose_stored_dimension_differs(tmp_path, monkeypatch):
+    # Reuse compared provider+model only; a row labelled with another dimension was carried over and then tripped
+    # the width guard (ValueError) mid-build instead of being recomputed.
+    from scripts.rebuild_search_index import rebuild_search_index
+    db, corpus = _prior_mock_index(tmp_path, monkeypatch, row_dimension=768)
+    out = rebuild_search_index(db_path=db, root=corpus)
+    assert out["reused"] == 0 and out["computed"] == out["chunks"] > 0, out
+
+
+def test_rebuild_with_a_corrupt_prior_identity_stamp_re_embeds_and_says_why(tmp_path, monkeypatch, capsys):
+    from scripts.rebuild_search_index import read_index_meta, rebuild_search_index
+    db, corpus = _prior_mock_index(tmp_path, monkeypatch, corrupt_stamp="{not json")
+    out = rebuild_search_index(db_path=db, root=corpus)
+    assert out["reused"] == 0 and out["computed"] == out["chunks"] > 0, out
+    assert "embedding_identity" in capsys.readouterr().err
+    # ...and the replacement carries a good stamp again.
+    assert EmbeddingIdentity.from_json(read_index_meta(db)["embedding_identity"]).dimension == 384
+
+
+@pytest.mark.parametrize("bad", ["{not json", "[]", "null", '{"provider": "mock"}', '{"nope": 1}', ""])
+def test_corrupt_identity_json_is_a_typed_error(bad):
+    from scripts.embed import EmbeddingIdentityCorrupt
+    with pytest.raises(EmbeddingIdentityCorrupt, match="embedding_identity"):
+        EmbeddingIdentity.from_json(bad)
+    assert issubclass(EmbeddingIdentityCorrupt, EmbeddingSpaceMismatch)   # the CLI and MCP already handle that
+
+
+def test_hybrid_query_on_a_corrupt_identity_stamp_raises_the_typed_error_not_json_decode(tmp_path, monkeypatch):
+    from scripts.embed import EmbeddingIdentityCorrupt
+    from scripts.hybrid_search import search_hybrid
+    db, _ = _prior_mock_index(tmp_path, monkeypatch, corrupt_stamp="{not json")
+    with pytest.raises(EmbeddingIdentityCorrupt):
+        search_hybrid("alpha", limit=3, db_path=db)

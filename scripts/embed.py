@@ -23,6 +23,16 @@ class EmbeddingSpaceMismatch(RuntimeError):
     """The vector returned is not in the space the caller required."""
 
 
+class EmbeddingIdentityCorrupt(EmbeddingSpaceMismatch):
+    """An index's stored `embedding_identity` stamp cannot be read.
+
+    A subclass of `EmbeddingSpaceMismatch` on purpose: the space the index holds
+    cannot be established, so the CLI and the MCP tools already answer it the way
+    they answer any other space they cannot vouch for. A rebuild treats it as
+    "nothing in the prior index is reusable" instead.
+    """
+
+
 @dataclass(frozen=True)
 class EmbeddingIdentity:
     """What a vector space IS. A model name alone is not an identity: the
@@ -41,7 +51,29 @@ class EmbeddingIdentity:
 
     @classmethod
     def from_json(cls, s: str) -> "EmbeddingIdentity":
-        return cls(**json.loads(s))
+        try:
+            ident = cls(**json.loads(s))
+            if not (isinstance(ident.provider, str) and isinstance(ident.model, str)
+                    and isinstance(ident.dimension, int) and not isinstance(ident.dimension, bool)):
+                raise TypeError("provider/model must be strings and dimension an integer")
+        except (ValueError, TypeError) as exc:
+            raise EmbeddingIdentityCorrupt(
+                f"the index's embedding_identity stamp is unreadable "
+                f"({type(exc).__name__}: {exc})"
+            ) from exc
+        return ident
+
+    def same_space_as(self, other: "EmbeddingIdentity") -> bool:
+        """Whether vectors of the two identities are comparable: provider, model
+        and dimension always; the optional fields only where BOTH sides record
+        them (the contract `require_space` applies to a query vector). Vector
+        reuse during a rebuild asks the same question of a stored vector."""
+        if (self.provider, self.model, self.dimension) != (other.provider, other.model, other.dimension):
+            return False
+        return all(
+            getattr(self, f) is None or getattr(other, f) is None or getattr(self, f) == getattr(other, f)
+            for f in ("max_seq_length", "pooling", "normalize")
+        )
 
 
 MOCK_IDENTITY = EmbeddingIdentity("mock", "deterministic_hash", 384)
@@ -96,16 +128,6 @@ def _st_identity(st_model, model: str, dimension: int) -> EmbeddingIdentity:
     max_seq = getattr(st_model, "max_seq_length", None)
     return EmbeddingIdentity("sentence_transformers", model, dimension,
                              int(max_seq) if max_seq is not None else None, pooling, normalize)
-
-
-def identity_for(provider: str, model: str) -> EmbeddingIdentity:
-    if provider == "sentence_transformers":
-        if model in ("mock_model", "deterministic_hash"):
-            model = "all-MiniLM-L6-v2"
-        st_model = _load_sentence_transformer(model)
-        dim = st_model.get_sentence_embedding_dimension()
-        return _st_identity(st_model, model, int(dim))
-    return MOCK_IDENTITY
 
 
 def get_embedding(text: str, provider: str | None = None, model: str | None = None) -> dict:
@@ -172,3 +194,25 @@ def require_space(result: dict, expected: EmbeddingIdentity) -> None:
             raise EmbeddingSpaceMismatch(
                 f"query embedding {field}={g!r} differs from the index's {field}={e!r}"
             )
+
+
+def read_index_identity(cursor) -> "EmbeddingIdentity | None":
+    """The space an index holds, as an `EmbeddingIdentity`, or None for an index
+    with no embeddings. Prefers the `embedding_identity` stamp in `index_meta`
+    (the full identity, written since F4); an older index yields
+    provider/model/dimension from its first embedding row. A stamp that is
+    present but unreadable raises `EmbeddingIdentityCorrupt`: falling back to
+    the row would silently drop the pinned fields the stamp exists to carry."""
+    import sqlite3
+    try:
+        row = cursor.execute(
+            "SELECT value FROM index_meta WHERE key = 'embedding_identity'").fetchone()
+    except sqlite3.Error:
+        row = None
+    if row:
+        return EmbeddingIdentity.from_json(row[0])
+    try:
+        row = cursor.execute("SELECT provider, model, dimension FROM embeddings LIMIT 1").fetchone()
+    except sqlite3.Error:
+        return None
+    return EmbeddingIdentity(row[0], row[1], int(row[2])) if row else None

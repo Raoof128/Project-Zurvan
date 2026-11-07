@@ -12,7 +12,7 @@ by default. A fresh clone has code and an empty knowledge base, by design.
 
 ```bash
 PYTHONPATH=. python -m pytest -q          # full test suite (must be 0 failed)
-bash scripts/check.sh                     # full quality gate, 24 gates (gate 0 = Boundary)
+bash scripts/check.sh                     # full quality gate, 25 gates (gate 0 = Boundary)
 PYTHONPATH=. python scripts/public_repo_guard.py  # must pass before any commit
 PYTHONPATH=. python scripts/cli.py <cmd>  # the `zurvan` CLI (search, context, graph, trace, eval, boundary, ...)
 scripts/zurvan <cmd>                      # same CLI; picks a python that HAS the deps (bare python3 may not)

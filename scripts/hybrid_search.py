@@ -40,22 +40,10 @@ def _index_embedding_config(cursor) -> tuple:
 
 def _index_identity(cursor):
     """The space the index holds, as an `EmbeddingIdentity`, or None for an
-    index with no embeddings. Prefers the `embedding_identity` stamp (full
-    identity, written since F4); older indexes yield provider/model/dimension
-    from the first embedding row."""
-    from scripts.embed import EmbeddingIdentity
-    try:
-        row = cursor.execute(
-            "SELECT value FROM index_meta WHERE key = 'embedding_identity'").fetchone()
-        if row:
-            return EmbeddingIdentity.from_json(row[0])
-    except sqlite3.Error:
-        pass
-    try:
-        row = cursor.execute("SELECT provider, model, dimension FROM embeddings LIMIT 1").fetchone()
-    except sqlite3.Error:
-        return None
-    return EmbeddingIdentity(row[0], row[1], int(row[2])) if row else None
+    index with no embeddings (see `embed.read_index_identity`). A corrupt
+    `embedding_identity` stamp raises `EmbeddingIdentityCorrupt`."""
+    from scripts.embed import read_index_identity
+    return read_index_identity(cursor)
 
 
 def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
