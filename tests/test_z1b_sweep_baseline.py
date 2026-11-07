@@ -155,6 +155,74 @@ def test_sb_a_missing_folders_base_snapshots_empty(tmp_path):
     assert sweep.snapshot_darwin(os.getuid(), str(tmp_path / "missing")) == {}
 
 
+# ================================================================ unlistable directories are opaque, not blind
+
+_sb_needs_nonroot = pytest.mark.skipif(os.geteuid() == 0, reason="chmod-based denial does not bind root")
+
+
+@pytest.fixture
+def _sb_opaque(tmp_path):
+    """A candidate-owned darwin tree with a mode-000 directory (as production's eval identity sees the
+    candidate's 0700 C/ and T/). Yields (base, opaque_dir, lock, unlock); perms are always restored."""
+    base, root = _sb_folders(tmp_path)
+    d = root / "T"
+    (d / "kept").write_text("x")
+
+    def lock():
+        os.chmod(str(d), 0o000)
+
+    def unlock():
+        os.chmod(str(d), 0o700)
+
+    lock()
+    try:
+        yield base, d, lock, unlock
+    finally:
+        unlock()
+
+
+@_sb_needs_nonroot
+def test_sb_an_unchanged_unlistable_directory_is_not_reported(_sb_opaque):
+    base, d, _lock, _unlock = _sb_opaque
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    assert str(d) in snap                                   # the directory itself is recorded
+    assert not any(k.startswith(str(d) + os.sep) for k in snap)   # its children cannot be seen
+    assert sweep.darwin_changes(uid, snap, str(base)) == []
+
+
+@_sb_needs_nonroot
+def test_sb_a_file_created_inside_an_unlistable_directory_is_reported_as_the_directory_changing(_sb_opaque):
+    base, d, lock, unlock = _sb_opaque
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    before = os.lstat(str(d)).st_mtime_ns
+    unlock()
+    (d / "dropped-by-escaped-process").write_text("x")
+    os.utime(str(d), ns=(before, before + 10 ** 9))          # make the mtime advance whatever the FS granularity
+    lock()
+    assert sweep.darwin_changes(uid, snap, str(base)) == [str(d)]
+
+
+@_sb_needs_nonroot
+def test_sb_an_opaque_signature_cannot_collide_with_a_listable_directorys(_sb_opaque):
+    base, d, _lock, unlock = _sb_opaque
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    unlock()                                                # same dir, now listable: a different signature
+    assert sweep.darwin_changes(uid, snap, str(base)) == sorted([str(d), str(d / "kept")])
+
+
+@_sb_needs_nonroot
+def test_sb_a_listable_directorys_mtime_still_does_not_count(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    st = os.lstat(str(root / "C"))
+    os.utime(str(root / "C"), ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+    assert sweep.darwin_changes(uid, snap, str(base)) == []
+
+
 # ================================================================ strict roots stay strict
 
 def test_sb_sweep_roots_are_the_strict_roots_and_exclude_the_darwin_trees(tmp_path):

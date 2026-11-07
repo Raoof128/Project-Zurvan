@@ -85,12 +85,15 @@ def sweep_roots(paths: SealPaths, candidate_uid: int) -> tuple:
     return tuple(DEFAULT_ROOTS) + (str(paths.candidate_home),)
 
 
-def _sweep_signature(st) -> tuple:
-    # A directory's own mtime/size move when a child is deleted or added, and a created child is reported as
-    # its own new path, so a directory is identified by inode and mode only.
-    if stat.S_ISDIR(st.st_mode):
-        return (st.st_ino, 0, 0, st.st_mode)
-    return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode)
+def _sweep_signature(st, opaque: bool = False) -> tuple:
+    # A LISTABLE directory's own mtime/size move when a child is deleted, and a created child is reported as
+    # its own new path, so it is identified by inode and mode only. An OPAQUE directory (its contents cannot
+    # be listed, e.g. the candidate's 0700 C/ and T/ seen from the eval identity) hides its children, so its
+    # own mtime is the only evidence of a created or removed child: it keeps its full signature, flagged so it
+    # can never equal a listable directory's.
+    if stat.S_ISDIR(st.st_mode) and not opaque:
+        return (st.st_ino, 0, 0, st.st_mode, False)
+    return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode, opaque)
 
 
 def snapshot_darwin(candidate_uid: int, base=None) -> dict:
@@ -99,6 +102,13 @@ def snapshot_darwin(candidate_uid: int, base=None) -> dict:
     vanishes mid-walk is skipped. Any other failure propagates: the caller treats it as a violation."""
     uid = _sweep_check_uid(candidate_uid)
     snap = {}
+    opaque = set()
+
+    def unlistable(err):
+        # os.walk reports a directory it cannot list; one that merely vanished is skipped as before
+        if getattr(err, "filename", None) and not isinstance(err, FileNotFoundError):
+            opaque.add(err.filename)
+
     for root in sweep_darwin_roots(uid, FOLDERS_BASE if base is None else base):
         try:
             st = os.lstat(root)
@@ -106,7 +116,7 @@ def snapshot_darwin(candidate_uid: int, base=None) -> dict:
             continue
         if st.st_uid == uid:
             snap[root] = _sweep_signature(st)
-        for top, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        for top, dirnames, filenames in os.walk(root, topdown=True, onerror=unlistable, followlinks=False):
             for name in list(dirnames) + list(filenames):
                 full = os.path.join(top, name)
                 try:
@@ -115,6 +125,15 @@ def snapshot_darwin(candidate_uid: int, base=None) -> dict:
                     continue
                 if st.st_uid == uid:
                     snap[full] = _sweep_signature(st)
+    for path in opaque:
+        # each directory os.walk could not list is re-signed in full (lstat only; vanished -> skipped)
+        try:
+            st = os.lstat(path)
+        except OSError:
+            snap.pop(path, None)
+            continue
+        if st.st_uid == uid and stat.S_ISDIR(st.st_mode):
+            snap[path] = _sweep_signature(st, opaque=True)
     return snap
 
 
