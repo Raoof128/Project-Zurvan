@@ -76,69 +76,71 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
     t_total = time.perf_counter_ns()
     # read-only: the query path must never create or modify the index
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    from scripts import vec_storage
-    vec_storage.load_extension(conn)
-    cursor = conn.cursor()
-    
-    # Keyword search using FTS5 (BM25 rank)
-    t = time.perf_counter_ns()
-    import re
-    terms = [t for t in re.split(r'\W+', query) if t]
-    if terms:
-        # Each term is quoted as an FTS5 string: identical matching for plain
-        # tokens, but bareword keywords (AND/OR/NOT/NEAR) no longer raise
-        # "fts5: syntax error".
-        fts_query = " OR ".join(f'"{t}"' for t in terms)
-        cursor.execute("""
-            SELECT chunk_id, bm25(chunks_fts) as bm25_score
-            FROM chunks_fts
-            WHERE chunks_fts MATCH ?
-        """, (fts_query,))
-        fts_results = cursor.fetchall()
-    else:
-        fts_results = []
-    
-    # Normalize BM25 scores (lower bm25 value is better in SQLite FTS5)
-    # Actually SQLite bm25 returns negative values. Let's invert and normalize.
-    fts_scores = {}
-    if fts_results:
-        min_score = min(row[1] for row in fts_results)
-        max_score = max(row[1] for row in fts_results)
-        for chunk_id, score in fts_results:
-            # Normalize between 0 and 1
-            if max_score == min_score:
-                fts_scores[chunk_id] = 1.0
-            else:
-                # since scores are typically negative, smaller is better.
-                # mapping max_score (worst) -> 0, min_score (best) -> 1
-                norm_score = (max_score - score) / (max_score - min_score)
-                fts_scores[chunk_id] = norm_score
-    stage["fts"] = _ms(t)
-
-    # Semantic search — embed the query with the SAME provider/model the
-    # index was built with (never the env), and PROVE the vector that came
-    # back is in the index's space. A model that cannot load raises
-    # `EmbeddingUnavailable`; a vector from another space raises
-    # `EmbeddingSpaceMismatch`. Neither is answered with hashes (F4).
-    index_provider, index_model = _index_embedding_config(cursor)
-    expected = _index_identity(cursor)
-    t = time.perf_counter_ns()
     try:
-        result = get_embedding(query, provider=index_provider, model=index_model)
-        if expected is not None:
-            from scripts.embed import require_space
-            require_space(result, expected)
-    finally:
-        stage["embed_query"] = _ms(t)
-    query_emb = result['vector']
+        from scripts import vec_storage
+        vec_storage.load_extension(conn)
+        cursor = conn.cursor()
+    
+        # Keyword search using FTS5 (BM25 rank)
+        t = time.perf_counter_ns()
+        import re
+        terms = [t for t in re.split(r'\W+', query) if t]
+        if terms:
+            # Each term is quoted as an FTS5 string: identical matching for plain
+            # tokens, but bareword keywords (AND/OR/NOT/NEAR) no longer raise
+            # "fts5: syntax error".
+            fts_query = " OR ".join(f'"{t}"' for t in terms)
+            cursor.execute("""
+                SELECT chunk_id, bm25(chunks_fts) as bm25_score
+                FROM chunks_fts
+                WHERE chunks_fts MATCH ?
+            """, (fts_query,))
+            fts_results = cursor.fetchall()
+        else:
+            fts_results = []
+    
+        # Normalize BM25 scores (lower bm25 value is better in SQLite FTS5)
+        # Actually SQLite bm25 returns negative values. Let's invert and normalize.
+        fts_scores = {}
+        if fts_results:
+            min_score = min(row[1] for row in fts_results)
+            max_score = max(row[1] for row in fts_results)
+            for chunk_id, score in fts_results:
+                # Normalize between 0 and 1
+                if max_score == min_score:
+                    fts_scores[chunk_id] = 1.0
+                else:
+                    # since scores are typically negative, smaller is better.
+                    # mapping max_score (worst) -> 0, min_score (best) -> 1
+                    norm_score = (max_score - score) / (max_score - min_score)
+                    fts_scores[chunk_id] = norm_score
+        stage["fts"] = _ms(t)
 
-    t = time.perf_counter_ns()
-    top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
-    stage["vector_scan"] = _ms(t)
-    t = time.perf_counter_ns()
-    scored = _hydrate(cursor, top)
-    stage["hydrate"] = _ms(t)
-    conn.close()
+        # Semantic search — embed the query with the SAME provider/model the
+        # index was built with (never the env), and PROVE the vector that came
+        # back is in the index's space. A model that cannot load raises
+        # `EmbeddingUnavailable`; a vector from another space raises
+        # `EmbeddingSpaceMismatch`. Neither is answered with hashes (F4).
+        index_provider, index_model = _index_embedding_config(cursor)
+        expected = _index_identity(cursor)
+        t = time.perf_counter_ns()
+        try:
+            result = get_embedding(query, provider=index_provider, model=index_model)
+            if expected is not None:
+                from scripts.embed import require_space
+                require_space(result, expected)
+        finally:
+            stage["embed_query"] = _ms(t)
+        query_emb = result['vector']
+
+        t = time.perf_counter_ns()
+        top = _score_semantic_top_k(cursor, query_emb, fts_scores, limit)
+        stage["vector_scan"] = _ms(t)
+        t = time.perf_counter_ns()
+        scored = _hydrate(cursor, top)
+        stage["hydrate"] = _ms(t)
+    finally:
+        conn.close()
 
     t = time.perf_counter_ns()
     fused = _fuse(scored)[:limit]

@@ -89,6 +89,21 @@ def _search_internal(
         timings.update({"keyword_scan": elapsed, "total": elapsed})
     return matches[:limit]
 
+def search_or_degrade(query: str, hybrid: bool, limit: int):
+    """`_search_internal`, with the Rust server's explicit fallback (design
+    2026-10-19 §7A): when semantic search cannot run, return keyword results
+    AND the notice saying so, never a silent substitute (F4). Returns
+    `(results, notice_or_None)`."""
+    from scripts.embed import EmbeddingSpaceMismatch, EmbeddingUnavailable
+    if not hybrid:
+        return _search_internal(query, False, limit), None
+    try:
+        return _search_internal(query, True, limit), None
+    except (EmbeddingUnavailable, EmbeddingSpaceMismatch) as why:
+        return (_search_internal(query, False, limit),
+                f"Semantic search unavailable: {why} — keyword results only.")
+
+
 def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> None:
     """Write a canonical Markdown synthesis page to wiki/syntheses/. Always saves markdown."""
     from scripts.wiki_merge import append_log_save
@@ -440,13 +455,26 @@ def export_context(
     trace_id: str | None = None,
     max_per_source: int = 2,
     trace_mode: str = "summary",
+    degrade: bool = False,
 ) -> str:
-    """Exports a Markdown context bundle based on search results."""
+    """Exports a Markdown context bundle based on search results.
+
+    `degrade=False` (the CLI) lets `EmbeddingUnavailable` / `EmbeddingSpaceMismatch`
+    propagate. `degrade=True` (MCP `zurvan_context`, `agent preflight`) answers
+    with keyword results and puts the `Semantic search unavailable: ...` notice
+    on the first line of the bundle (a `notice` key for JSON), never silently.
+    """
 
     # Fetch a wider candidate pool, cap chunks per source (R4b), then budget
     # down to `limit`. Both drop classes are observable in the trace with
     # their own reasons (source_dedupe / budget).
-    candidates = _search_internal(topic, hybrid, limit * 3)
+    notice = None
+    if degrade:
+        candidates, notice = search_or_degrade(topic, hybrid, limit * 3)
+        if notice:
+            hybrid = False   # what actually ran: the trace and its mode must say so
+    else:
+        candidates = _search_internal(topic, hybrid, limit * 3)
     deduped, dedupe_dropped = _dedupe_sources(candidates, max_per_source)
     results, budget_dropped = _apply_budget(deduped, limit)
     dropped = dedupe_dropped + budget_dropped
@@ -504,7 +532,7 @@ def export_context(
                     output.append(f"- **{node['title']}** (`{node['path']}`) [Depth: {node['depth']}] ({node['relation']})")
                 output.append("")
 
-    base_output = "\n".join(output)
+    base_output = ("\n".join([notice] + output)) if notice else "\n".join(output)
 
     if save:
         _save_synthesis(topic, base_output, seed_paths)
@@ -534,13 +562,16 @@ def export_context(
             "graph": [_graph_trace_payload(n) for n in graph_nodes],
             "dropped_count": len(dropped),
         }
+        if notice:
+            payload["notice"] = notice
         if trace_path:
             payload["trace_path"] = trace_path
         return json.dumps(payload, indent=2)
     if fmt == "table":
-        return _format_table(results) + trace_line
+        return (f"{notice}\n" if notice else "") + _format_table(results) + trace_line
     elif fmt == "marp":
-        return _format_marp(topic, results) + trace_line
+        # front matter must stay first, so the notice rides in an HTML comment
+        return (f"<!-- {notice} -->\n" if notice else "") + _format_marp(topic, results) + trace_line
     return base_output + trace_line
 
 if __name__ == "__main__":

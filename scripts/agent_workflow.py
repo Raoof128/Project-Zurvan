@@ -45,7 +45,7 @@ def get_open_questions() -> str:
 
 def agent_preflight(topic: str, hybrid: bool = True, graph: bool = True, limit: int = 10) -> str:
     from scripts.context_export import export_context
-    context_bundle = export_context(topic=topic, limit=limit, hybrid=hybrid, graph=graph)
+    context_bundle = export_context(topic=topic, limit=limit, hybrid=hybrid, graph=graph, degrade=True)
     
     template_path = CODE_ROOT / "scripts" / "templates" / "preflight.md"
     with open(template_path, "r", encoding="utf-8") as f:
