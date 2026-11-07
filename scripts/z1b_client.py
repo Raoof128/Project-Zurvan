@@ -44,7 +44,7 @@ _MAX_STDOUT = 1024 * 1024
 _BROKER_TIMEOUT_S = 3900  # the broker's own run timeout is 3600 s
 _GIT_TIMEOUT_S = 600
 _SUITES = ("holdout", "reserve")
-_DENY_TOOLS = ("Read", "Edit", "Write")
+_DENY_TOOLS = ("Read", "Edit")  # no Write: Claude Code checks writes against Edit rules only
 _RULE_RE = re.compile(r"(Read|Edit|Write)\((.*)\)")
 
 
@@ -308,8 +308,9 @@ def _client_sealed_paths(paths: SealPaths) -> list:
 def client_deny_rules(paths: SealPaths) -> list:
     """The permissions.deny rules .claude/settings.json must carry (Claude Code rule syntax).
 
-    `//<abs>` is Claude Code's absolute-path form for Read/Edit/Write rules; Edit rules govern
-    every file-editing tool. Bash rules are a best effort only (a script can assemble a path at
+    `//<abs>` is Claude Code's absolute-path form for Read/Edit rules; Edit rules govern
+    every file-editing tool, Write included. A Write(...) rule is never consulted (the harness
+    warns "never matches", 2026-11-04), so none is emitted. Bash rules are a best effort only (a script can assemble a path at
     run time): the OS permission, not these rules, is the wall.
     """
     roots = [paths.eval_home, paths.corpus_dir, paths.stage_dir, paths.candidate_home]

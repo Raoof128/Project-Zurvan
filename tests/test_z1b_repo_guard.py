@@ -142,16 +142,22 @@ def test_t17_settings_deny_rules_cover_every_sealed_path_for_read_and_edit():
     sealed = zc._client_sealed_paths(SealPaths.real())
     assert len(sealed) >= 10
     for path in sealed:
-        for tool in ("Read", "Edit", "Write"):
+        for tool in ("Read", "Edit"):
             assert any(_t17_covers(r, tool, str(path)) for r in deny), (tool, str(path))
 
 
 @pytest.mark.parametrize("root", _T17_ROOTS)
-def test_t17_each_sealed_root_has_the_literal_read_edit_write_and_bash_rules(root):
+def test_t17_each_sealed_root_has_the_literal_read_edit_and_bash_rules(root):
     deny = _t17_deny()
-    for tool in ("Read", "Edit", "Write"):
+    for tool in ("Read", "Edit"):
         assert "%s(/%s/**)" % (tool, root) in deny
     assert "Bash(*%s*)" % root in deny
+
+
+def test_t17_settings_carry_no_write_rule_because_claude_code_never_matches_one():
+    # Claude Code checks every file write against Edit(...) rules; a Write(...) deny rule is
+    # never consulted and the harness warns "Deny rule Write(...) never matches" (2026-11-04).
+    assert not [r for r in _t17_deny() if r.startswith("Write(")]
 
 
 def test_t17_settings_rules_equal_what_the_client_expects_so_seal_check_and_the_file_cannot_drift():

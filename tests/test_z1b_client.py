@@ -696,9 +696,10 @@ def test_t13_real_layout_deny_rules_are_the_four_sealed_roots():
     rules = zc.client_deny_rules(SealPaths.real())
     for root in ("/Users/zurvaneval", "/Library/ZurvanEval/corpus", "/Library/ZurvanEval/stage",
                  "/Users/zurvancandidate"):
-        for tool in ("Read", "Edit", "Write"):
+        for tool in ("Read", "Edit"):
             assert "%s(/%s/**)" % (tool, root) in rules
         assert "Bash(*%s*)" % root in rules
+    assert not [r for r in rules if r.startswith("Write(")]  # Edit rules govern Write; Write rules never match
 
 
 # ------------------------------------------------------------------ dev (DEV set, local)
