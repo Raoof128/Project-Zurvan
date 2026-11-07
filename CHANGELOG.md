@@ -1,5 +1,16 @@
 ## Change Log
 
+### 2026-11-07b (Australia/Sydney) — Package A merged to `main`; `zurvan-mcp` rebuilt with F6 and installed
+**Raouf:**
+- **Scope:** Raouf chose "Merge, then rebuild MCP": fast-forward `main` to `package-a`, release-build `rust/zurvan-mcp`, run its parity gate, install to `~/.zurvan/bin`. No code, ranking, indexing, embedding or frozen-artifact change in this entry; nothing pushed.
+- **Merge:** `main` fast-forwarded to `fc2dcd5` (local only; the `pre-push` hook and the no-push rule stand).
+- **Build:** `cargo build --release` (10,443,200 bytes); `cargo test --release` 124 passed (109 + 10 + 5), 0 failed, 1 ignored.
+- **Parity gate** (`scripts/mcp_parity.py`, A = Python `scripts/mcp_server.py`, B = the new release binary): 302 cases per protocol, the same case count as the 2026-11-04 runs. Protocol `2025-11-25` and `2026-07-28` each: 299 PASS, 1 NEAR_TIE, 2 EXPECTED_DIVERGENCE, **0 FAIL**, exit 0. The 2 EXPECTED_DIVERGENCE are `eval:eval_search@2` and `eval:validate_gold`, whose predicate is exact (`b == EVAL_PREFIX + a`), as in the 2026-10-20 baseline. The NEAR_TIE is instrument item #14 under `search_hybrid`: same result set, order differs only between results with equal displayed score. Instrument metrics identical A vs B (hybrid top-1 0.72, top-3 0.74, MRR 0.7372). Reports: `~/.zurvan/parity/20261107T151717.json`, `20261107T155504.json`.
+- **Install:** old binary kept as `~/.zurvan/bin/zurvan-mcp.2026-10-20.bak` (sha256 `ddcd4d04…`, hard link to the old inode); new binary copied beside it and `mv`'d over `zurvan-mcp` (sha256 `a1933bac…`), so the four `zurvan-mcp serve` processes already running keep their old inode. `codesign -v` ok; a direct `initialize` answers (`serverInfo.version` 3.0.0). Rollback: `mv ~/.zurvan/bin/zurvan-mcp.2026-10-20.bak ~/.zurvan/bin/zurvan-mcp`.
+- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). Outside the repo: `~/.zurvan/bin/zurvan-mcp`, `~/.zurvan/bin/zurvan-mcp.2026-10-20.bak`.
+- **Verification:** the code verification is the 2026-11-07 entry's (full suite 3382 passed / 1 failed / 8 skipped; the 1 failure is the pre-existing `sudo -n` live-seal test and stays reported as failed). This entry adds the cargo tests and the parity gate above; `public_repo_guard.py` and `git diff --check` before commit.
+- **Follow-ups:** Claude Code and Codex sessions serve F6 only after restart (running servers hold the old binary). The 2026-11-07 review follow-ups (a)–(f) remain open. The search index is STALE (11 files newer than the index); rebuild before the next measurement.
+
 ### 2026-11-07 (Australia/Sydney) — Package A whole-branch review: claim/summary → source graph edge restored; order-dependent snapshot test isolated
 **Raouf:**
 - **Scope:** the whole-branch review of `package-a` (`main...package-a`) that Package A's follow-ups name, plus that entry's "fix the pre-existing `eval/datasets.json` fixture failure". No ranking, indexing, embedding or frozen-artifact change; nothing merged, nothing pushed.
