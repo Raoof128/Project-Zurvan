@@ -156,7 +156,7 @@ pub fn status_text(cfg: &Config, cache: &MetaCache) -> String {
 /// between hydration and the stamp labelled generation A's text as B). When
 /// the path no longer holds the served generation, the stamp says so instead
 /// of describing the newer index's freshness. `extra` parts are appended
-/// (the context tool's graph revision, orient's live page reads).
+/// (the context tool's graph revision).
 pub fn stamp_for(cfg: &Config, served: &Served, cache: &MetaCache, extra: &[String]) -> String {
     if std::env::var("ZURVAN_MCP_STAMP").as_deref() == Ok("0") {
         return String::new();
@@ -187,6 +187,14 @@ pub fn stamp_for(cfg: &Config, served: &Served, cache: &MetaCache, extra: &[Stri
     };
     parts.extend(extra.iter().cloned());
     format!("[{}]", parts.join(" · "))
+}
+
+/// Orient's `## Top pages` header (F6, plan Task 7): those pages are read from
+/// the live files, not the index generation the hits came from, so the header
+/// labels them with their own version, the ledger revision at the read.
+/// `scripts/mcp_tools.py` emits the identical text.
+pub fn top_pages_header(cfg: &Config) -> String {
+    format!("## Top pages (live files, ledger rev {})", opt(ledger(cfg).map(|(r, _)| r)))
 }
 
 /// The graph part of a context stamp: the revision of the graph generation

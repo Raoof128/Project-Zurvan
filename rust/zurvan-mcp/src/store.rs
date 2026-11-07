@@ -21,6 +21,9 @@ pub fn open_ro(path: &Path) -> rusqlite::Result<Connection> {
 }
 
 pub const GENERATION_CHANGED: &str = "the search index was replaced during this call; call again";
+/// The graph store's own wording: the failure is in `graph.sqlite`, and
+/// saying "the search index" there sends the reader to the wrong store.
+pub const GRAPH_GENERATION_CHANGED: &str = "the graph store was replaced during this call; call again";
 /// Fresh attempts after a promote lands mid-call, before reporting it.
 pub const GENERATION_RETRIES: usize = 2;
 
@@ -121,7 +124,9 @@ fn compute_index(path: &Path, generation: Generation) -> Result<IndexMeta, Strin
 }
 
 fn compute_graph(path: &Path, generation: Generation) -> Result<GraphMeta, String> {
-    let conn = open_ro(path).map_err(|e| e.to_string())?;
+    // Pinned like `compute_index`: the counts below describe `generation`,
+    // not whatever a promote put at the path since it was read.
+    let conn = open_graph_pinned(path, generation)?;
     let nodes: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).map_err(|e| e.to_string())?;
     let edges: i64 = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).map_err(|e| e.to_string())?;
     Ok(GraphMeta {
@@ -200,15 +205,25 @@ impl MetaCache {
     }
 
     pub fn graph(&self, cfg: &Config) -> Result<Arc<GraphMeta>, String> {
-        let generation = generation(&cfg.graph_db).map_err(|_| graph_missing_message(&cfg.graph_db))?;
         let mut slot = self.graph.lock().unwrap();
-        if let Some(m) = slot.as_ref().filter(|m| m.generation == generation) {
-            return Ok(m.clone());
+        let mut attempt = 0;
+        loop {
+            let generation = generation(&cfg.graph_db).map_err(|_| graph_missing_message(&cfg.graph_db))?;
+            if let Some(m) = slot.as_ref().filter(|m| m.generation == generation) {
+                return Ok(m.clone());
+            }
+            self.computations.fetch_add(1, Ordering::SeqCst);
+            match compute_graph(&cfg.graph_db, generation) {
+                Ok(meta) => {
+                    let meta = Arc::new(meta);
+                    *slot = Some(meta.clone());
+                    return Ok(meta);
+                }
+                // Promoted between the stat and the open: describe the new one.
+                Err(e) if e == GRAPH_GENERATION_CHANGED && attempt < GENERATION_RETRIES => attempt += 1,
+                Err(e) => return Err(e),
+            }
         }
-        self.computations.fetch_add(1, Ordering::SeqCst);
-        let meta = Arc::new(compute_graph(&cfg.graph_db, generation)?);
-        *slot = Some(meta.clone());
-        Ok(meta)
     }
 }
 
@@ -220,16 +235,31 @@ pub fn open_graph(cfg: &Config) -> Result<Connection, String> {
     open_ro(&cfg.graph_db).map_err(|e| e.to_string())
 }
 
-/// `open_graph`, proving which generation was opened (mirror of `open_at`):
-/// stat, open, stat again; a promote between the two is `GENERATION_CHANGED`.
-/// The context tool binds its stamp to the returned generation (F6).
+/// Open the graph store read-only and prove the file opened is generation
+/// `expected` (the graph's mirror of `open_at`, same argument: a promote
+/// replaces the path with a new inode, so if the path still names `expected`
+/// after the open, the descriptor is `expected` too). A promote in between is
+/// `GRAPH_GENERATION_CHANGED`. Every graph read that must be bound to a
+/// generation goes through here: the context stamp's connection AND the
+/// metadata cache, so neither can read a different generation than it names.
+fn open_graph_pinned(path: &Path, expected: Generation) -> Result<Connection, String> {
+    if !path.exists() {
+        return Err(graph_missing_message(path));
+    }
+    let conn = open_ro(path).map_err(|e| e.to_string())?;
+    match generation(path) {
+        Ok(g) if g == expected => Ok(conn),
+        _ => Err(GRAPH_GENERATION_CHANGED.to_string()),
+    }
+}
+
+/// `open_graph`, proving which generation was opened: stat, then a pinned
+/// open of that generation. The context tool binds its stamp to the returned
+/// generation (F6).
 pub fn open_graph_at(cfg: &Config) -> Result<(Connection, Generation), String> {
     let before = generation(&cfg.graph_db).map_err(|_| graph_missing_message(&cfg.graph_db))?;
-    let conn = open_graph(cfg)?;
-    match generation(&cfg.graph_db) {
-        Ok(after) if after == before => Ok((conn, before)),
-        _ => Err(GENERATION_CHANGED.to_string()),
-    }
+    let conn = open_graph_pinned(&cfg.graph_db, before)?;
+    Ok((conn, before))
 }
 
 /// `knowledge_state` of the revision ledger: (current_revision, state).
@@ -321,6 +351,62 @@ mod tests {
         search_db(&next, "mock", "deterministic_hash", &[chunk("b", "wiki/y.md")], &[]);
         std::fs::rename(&next, &cfg.search_db).unwrap();
         assert_eq!(open_at(&cfg.search_db, g1).err().as_deref(), Some(GENERATION_CHANGED));
+    }
+
+    /// Review follow-up (d1): `compute_graph` opened the graph by path after
+    /// the generation was read, so a promote between the two described one
+    /// graph with another's counts. It must open through the same pin as the
+    /// search path and refuse a generation that is no longer at the path.
+    #[test]
+    fn compute_graph_refuses_a_generation_promoted_before_it_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        graph_db(&cfg.graph_db, &[("n1", "decision", Some("A"), Some("wiki/a.md"))], &[]);
+        let g1 = generation(&cfg.graph_db).unwrap();
+        assert_eq!(compute_graph(&cfg.graph_db, g1).unwrap().nodes, 1);
+        let next = dir.path().join("graph-next.sqlite");
+        graph_db(&next, &[("n1", "decision", Some("A"), Some("wiki/a.md")), ("n2", "claim", Some("B"), Some("wiki/b.md"))], &[]);
+        std::fs::rename(&next, &cfg.graph_db).unwrap();
+        // The path now holds a newer graph; metadata for g1 must not be built from it.
+        let err = compute_graph(&cfg.graph_db, g1).expect_err("a promoted graph is refused, not described");
+        assert!(err.contains("replaced during this call"), "{err}");
+    }
+
+    /// Review follow-up (d2): the failure is in the graph store, so the text
+    /// names the graph store, never "the search index".
+    #[test]
+    fn a_graph_generation_change_names_the_graph_not_the_search_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        graph_db(&cfg.graph_db, &[("n1", "decision", Some("A"), Some("wiki/a.md"))], &[]);
+        let g1 = generation(&cfg.graph_db).unwrap();
+        let next = dir.path().join("graph-next.sqlite");
+        graph_db(&next, &[("n9", "claim", Some("Z"), Some("wiki/z.md"))], &[]);
+        std::fs::rename(&next, &cfg.graph_db).unwrap();
+        for err in [
+            open_graph_pinned(&cfg.graph_db, g1).expect_err("pinned open refuses"),
+            compute_graph(&cfg.graph_db, g1).expect_err("compute refuses"),
+        ] {
+            assert_eq!(err, GRAPH_GENERATION_CHANGED);
+            assert!(err.contains("graph store") && !err.contains("search index"), "{err}");
+        }
+        assert!(GENERATION_CHANGED.contains("search index"), "the index wording stays for the index path");
+    }
+
+    /// `graph()` describes the generation it actually opened after a promote.
+    #[test]
+    fn graph_meta_describes_the_generation_it_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_for(dir.path());
+        graph_db(&cfg.graph_db, &[("n1", "decision", Some("A"), Some("wiki/a.md"))], &[]);
+        let cache = MetaCache::default();
+        let m1 = cache.graph(&cfg).unwrap();
+        let next = dir.path().join("graph-next.sqlite");
+        graph_db(&next, &[("n1", "decision", Some("A"), Some("wiki/a.md")), ("n2", "claim", Some("B"), Some("wiki/b.md"))], &[]);
+        std::fs::rename(&next, &cfg.graph_db).unwrap();
+        let m2 = cache.graph(&cfg).unwrap();
+        assert_eq!((m1.nodes, m2.nodes), (1, 2));
+        assert_eq!(m2.generation, generation(&cfg.graph_db).unwrap());
     }
 
     #[test]
