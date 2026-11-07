@@ -6,6 +6,7 @@ candidate escaped its sandbox or left a process alive, so queries may have leake
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 
 from .codes import SealRefusal
@@ -75,13 +76,55 @@ def sweep_darwin_roots(candidate_uid: int, base: str = FOLDERS_BASE) -> list:
     return found
 
 
-def sweep_roots(paths: SealPaths, candidate_uid: int, folders_base: str = FOLDERS_BASE) -> tuple:
-    """Ruling R13: the contract roots, plus the candidate's home (find_candidate_leftovers prunes
-    scratch), plus the candidate's DARWIN temp/cache trees."""
+def sweep_roots(paths: SealPaths, candidate_uid: int) -> tuple:
+    """Ruling R13: the STRICT roots (any candidate-owned entry is a leftover): the contract roots plus the
+    candidate's home (find_candidate_leftovers prunes scratch). The candidate's DARWIN temp/cache trees are
+    deliberately NOT here: macOS creates and keeps entries there for any process that ever ran as the user,
+    so they are baseline-diffed instead (snapshot_darwin / darwin_changes)."""
+    _sweep_check_uid(candidate_uid)
+    return tuple(DEFAULT_ROOTS) + (str(paths.candidate_home),)
+
+
+def _sweep_signature(st) -> tuple:
+    # A directory's own mtime/size move when a child is deleted or added, and a created child is reported as
+    # its own new path, so a directory is identified by inode and mode only.
+    if stat.S_ISDIR(st.st_mode):
+        return (st.st_ino, 0, 0, st.st_mode)
+    return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode)
+
+
+def snapshot_darwin(candidate_uid: int, base=None) -> dict:
+    """path -> (st_ino, st_mtime_ns, st_size, st_mode) for every candidate-owned entry under the candidate's
+    darwin per-user roots (the roots themselves included). lstat only, never follows symlinks; an entry that
+    vanishes mid-walk is skipped. Any other failure propagates: the caller treats it as a violation."""
     uid = _sweep_check_uid(candidate_uid)
-    roots = list(DEFAULT_ROOTS) + [str(paths.candidate_home)]
-    roots.extend(sweep_darwin_roots(uid, folders_base))
-    return tuple(roots)
+    snap = {}
+    for root in sweep_darwin_roots(uid, FOLDERS_BASE if base is None else base):
+        try:
+            st = os.lstat(root)
+        except OSError:
+            continue
+        if st.st_uid == uid:
+            snap[root] = _sweep_signature(st)
+        for top, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            for name in list(dirnames) + list(filenames):
+                full = os.path.join(top, name)
+                try:
+                    st = os.lstat(full)
+                except OSError:
+                    continue
+                if st.st_uid == uid:
+                    snap[full] = _sweep_signature(st)
+    return snap
+
+
+def darwin_changes(candidate_uid: int, baseline: dict, base=None) -> list:
+    """Paths under the darwin roots that are new, or whose signature differs from `baseline`. A path that has
+    disappeared is not reported. A root that did not exist at baseline contributes all its entries."""
+    if type(baseline) is not dict:
+        raise SealRefusal("BAD_ARGS")
+    now = snapshot_darwin(candidate_uid, base)
+    return sorted(path for path, sig in now.items() if baseline.get(path) != sig)
 
 
 def _sweep_default_runner(cmd):

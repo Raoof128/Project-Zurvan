@@ -144,7 +144,9 @@ class BrokerContext:
     tmutil_isexcluded: object  # (Path) -> bool
     now: object                # () -> datetime
     sudo_uid: object           # () -> int
-    sweep_leftovers: object    # () -> list
+    sweep_leftovers: object    # () -> list   STRICT: any candidate-owned entry in the strict roots (+ VM leftovers)
+    sweep_baseline: object     # () -> opaque snapshot of the darwin per-user roots, taken before launch
+    sweep_darwin_changes: object  # (snapshot) -> list   darwin paths new or changed since the snapshot
     sweep_processes: object    # () -> int
     runtime_sha256: object     # () -> 64-hex
     rss_mb: object             # () -> int
@@ -444,6 +446,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
         sudo_uid=sysenv.sudo_uid,
         sweep_leftovers=lambda: (sweep.find_candidate_leftovers(
             paths, cand_uid, roots=sweep.sweep_roots(paths, cand_uid)) + broker_vm_leftovers(paths)),
+        sweep_baseline=lambda: sweep.snapshot_darwin(cand_uid),
+        sweep_darwin_changes=lambda baseline: sweep.darwin_changes(cand_uid, baseline),
         sweep_processes=lambda: sweep.candidate_processes(cand_uid),
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,
@@ -834,15 +838,31 @@ def broker_kill(proc) -> None:
             pass
 
 
-def broker_post_run_violation(ctx, run_id: str) -> bool:
-    """Wipe the candidate's scratch, then sweep. Any leftover, any live process, or ANY failure to find out
-    is a violation (assume the worst)."""
+_BASELINE_FAILED = object()
+
+
+def broker_sweep_baseline(ctx):
+    """The pre-launch snapshot of the darwin roots, or _BASELINE_FAILED (which makes the post-run check a
+    violation: fail closed, as for every other sweep failure)."""
+    try:
+        return ctx.sweep_baseline()
+    except Exception:  # noqa: BLE001
+        return _BASELINE_FAILED
+
+
+def broker_post_run_violation(ctx, run_id: str, baseline) -> bool:
+    """Wipe the candidate's scratch, then sweep. Any strict-root leftover, any darwin path new or changed since
+    `baseline`, any live process, or ANY failure to find out (including a failed baseline) is a violation
+    (assume the worst)."""
     try:
         ctx.wipe(run_id)
     except Exception:  # noqa: BLE001
         pass
     try:
-        return bool(ctx.sweep_leftovers()) or int(ctx.sweep_processes()) > 0
+        if baseline is _BASELINE_FAILED:
+            return True
+        return (bool(ctx.sweep_leftovers()) or bool(ctx.sweep_darwin_changes(baseline))
+                or int(ctx.sweep_processes()) > 0)
     except Exception:  # noqa: BLE001
         return True
 
@@ -1124,6 +1144,7 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
     declared = decl is not None
     try:
         sent, proc, failure, results, latencies = [], None, None, None, None
+        sweep_base = broker_sweep_baseline(ctx)   # strictly before the candidate exists
         try:
             proc = ctx.launch_candidate(run_id, corpus_sha, args["commit"])
             results, latencies = broker_drive(proc, items, spec, sent)
@@ -1131,7 +1152,7 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
             failure = "CANDIDATE_FAILED"
         finally:
             broker_kill(proc)
-        if broker_post_run_violation(ctx, run_id):
+        if broker_post_run_violation(ctx, run_id, sweep_base):
             led.burn_items(list(sent), "sandbox_violation", broker_today(ctx))
             broker_record_incident(paths, led, "sandbox_violation", list(sent), ctx.now())
             try:

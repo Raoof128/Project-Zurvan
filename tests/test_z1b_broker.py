@@ -247,7 +247,8 @@ def _t10_ctx(E, **over):
         probe=lambda: {k: "EACCES" for k in ("eval_home", "keys_dir", "sets_dir", "runs_dir",
                                              "incidents_dir", "manifest_file")},
         tmutil_isexcluded=lambda p: True, now=lambda: _T10_NOW, sudo_uid=lambda: os.getuid(),
-        sweep_leftovers=lambda: [], sweep_processes=lambda: 0, runtime_sha256=lambda: "ab" * 32,
+        sweep_leftovers=lambda: [], sweep_baseline=lambda: {}, sweep_darwin_changes=lambda baseline: [],
+        sweep_processes=lambda: 0, runtime_sha256=lambda: "ab" * 32,
         rss_mb=lambda: 12, scan=lambda paths, ctx, led: {"hits": [], "canary_hits": 0, "unreadable": 0},
         reseal=lambda paths, ctx, led: {"resealed": False}, is_tty=lambda: True,
         scan_agent_present=lambda: True, git_env=_t10_genv(), root_uid=os.getuid(), eval_uid=os.getuid(),
@@ -1402,7 +1403,7 @@ def test_t10_new_seal_path_properties_have_the_installer_locations(tmp_path):
         getattr(fake, name).relative_to(tmp_path)
 
 
-def test_t10_sweep_roots_add_the_candidate_home_and_darwin_trees(tmp_path):
+def test_t10_sweep_roots_add_the_candidate_home_but_not_the_darwin_trees(tmp_path):
     paths = SealPaths.for_root(tmp_path / "root")
     base = tmp_path / "folders"
     mine = base / "zz" / "hash0123"
@@ -1412,10 +1413,11 @@ def test_t10_sweep_roots_add_the_candidate_home_and_darwin_trees(tmp_path):
     assert sweep.sweep_darwin_roots(uid, str(base)) == [str(mine)]
     assert sweep.sweep_darwin_roots(uid + 1, str(base)) == []
     assert sweep.sweep_darwin_roots(uid, str(tmp_path / "missing")) == []
-    roots = sweep.sweep_roots(paths, uid, str(base))
-    assert roots[:4] == sweep.DEFAULT_ROOTS and str(paths.candidate_home) in roots and str(mine) in roots
+    roots = sweep.sweep_roots(paths, uid)
+    # the darwin trees are baseline-diffed (test_z1b_sweep_baseline.py), never strict roots
+    assert roots[:4] == sweep.DEFAULT_ROOTS and str(paths.candidate_home) in roots and str(mine) not in roots
     with pytest.raises(SealRefusal) as ei:
-        sweep.sweep_roots(paths, 0, str(base))
+        sweep.sweep_roots(paths, 0)
     assert ei.value.code == "BAD_ARGS"
 
 
