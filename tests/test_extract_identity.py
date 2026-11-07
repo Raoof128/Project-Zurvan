@@ -79,16 +79,21 @@ def test_cross_owner_collision_is_an_explicit_conflict_and_writes_nothing(worksp
     assert page.read_text().endswith("old\n")
 
 
-def test_same_owner_may_rewrite_its_own_page(workspace):
+def test_same_owner_page_with_identical_body_is_a_no_op(workspace):
+    """Superseded the earlier "same owner may rewrite its own page": the roadmap
+    F1 gate allows a retry only if it preserves evidence (see
+    test_extract_reextraction.py for the differing-body conflict)."""
     from scripts.extract import plan_claim_writes
     claims_dir = workspace / "wiki" / "claims"
     claims_dir.mkdir(parents=True)
-    (claims_dir / "src-aaaaaaaaaaaa--claim-1.md").write_text("---\ntype: claim\nsource_hash: cccccccc\n---\nold\n")
     data = {"claims": [{"claim_id": "claim-1", "claim_type": "fact", "confidence": "high",
                         "text": "new", "evidence": [{"quote": "q"}], "tags": []}]}
-    plan = plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md")
-    assert [p for p, _ in plan] == [str(claims_dir / "src-aaaaaaaaaaaa--claim-1.md")]
-    assert "source_hash: cccccccc" in plan[0][1]
+    [(path, body)] = plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md")
+    assert path == str(claims_dir / "src-aaaaaaaaaaaa--claim-1.md")
+    assert "source_hash: cccccccc" in body
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
+    assert plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md") == []
 
 
 def test_sanitisation_collisions_are_rejected_by_the_validator():
