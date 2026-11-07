@@ -289,11 +289,18 @@ def test_hybrid_search_can_be_pointed_at_a_snapshot(store):
     assert any("provenance-extra" in r["source_path"] for r in live)
 
 
-def test_eval_search_scores_against_the_index_it_is_given(store, tmp_path, capsys):
+def test_eval_search_scores_against_the_index_it_is_given(store, tmp_path, capsys, monkeypatch):
     """`eval_search --index` is what lets a gate hand a snapshot to the scorer."""
     import json
 
-    from scripts import eval_search
+    from scripts import eval_datasets, eval_search
+
+    # `eval_datasets.REGISTRY` is bound at import from PROJECT_ROOT. Imported for the
+    # first time under this fixture's patched root, it pointed at <tmp>/eval/datasets.json
+    # and the test failed alone; imported earlier in a full run, it pointed at the repo's.
+    # Pin it to the tracked registry so the result no longer depends on test order.
+    monkeypatch.setattr(eval_datasets, "REGISTRY",
+                        Path(__file__).resolve().parents[1] / "eval" / "datasets.json")
 
     gold = tmp_path / "gold.jsonl"
     gold.write_text(json.dumps({

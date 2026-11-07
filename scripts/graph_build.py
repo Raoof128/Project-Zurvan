@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Tuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from scripts.filename_utils import sanitize_filename
 from scripts.graph_schema import setup_graph_schema, DB_PATH
 from scripts.config import PROJECT_ROOT
 
@@ -119,7 +120,18 @@ def extract_edges(path: str, content: str, nodes_dict: Dict[str, Dict]) -> List[
     # 3. YAML fields
     if 'source' in fm: add_edge(f"wiki/sources/{fm['source']}", 'derived_from', 'YAML source')
     if 'source_path' in fm: add_edge(fm['source_path'], 'derived_from', 'YAML source_path')
-    if 'source_id' in fm: add_edge(f"wiki/sources/{fm['source_id']}.md", 'derived_from', 'YAML source_id')
+    # Extraction pages (claims, summaries) name their source by `source_file`, the ingested
+    # file's basename; ingest names the source page by that basename's sanitised stem.
+    # `source_id` is content-identified since audit F1 (`<stem>-<hash12>`), so it only
+    # resolves for pages written before F1. Link through whichever resolves, once.
+    source_targets = []
+    if 'source_file' in fm:
+        stem = sanitize_filename(os.path.splitext(os.path.basename(fm['source_file']))[0])
+        source_targets.append(f"wiki/sources/{stem}.md")
+    if 'source_id' in fm:
+        source_targets.append(f"wiki/sources/{fm['source_id']}.md")
+    for target in dict.fromkeys(source_targets):
+        add_edge(target, 'derived_from', 'YAML source_file/source_id')
     
     # Extracted lines (simple parsing)
     for line in body.splitlines():

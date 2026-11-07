@@ -72,6 +72,14 @@ def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir:
     return plan
 
 
+def summary_page(source_id: str, source_file: str, summary: dict) -> str:
+    """The summary page. `source_file` is what links it to the ingested source page:
+    `source_id` is content-identified (F1) and no longer equals that page's stem."""
+    return (f"---\ntype: summary\nsource_id: {source_id}\nsource_file: {source_file}\n---\n"
+            f"# Summary: {source_id}\n\n## Short\n{summary['short']}\n\n"
+            f"## Detailed\n{summary['detailed']}\n")
+
+
 def extract_source(filepath):
     if not os.path.exists(filepath):
         print(f"File not found: {filepath}")
@@ -166,7 +174,7 @@ def extract_source(filepath):
         summary_file = os.path.join("wiki", "summaries", f"{source_id}_summary.md")
         if is_safe_filename(summary_file):
             with open(summary_file, "w", encoding="utf-8") as f:
-                f.write(f"---\ntype: summary\nsource_id: {source_id}\n---\n# Summary: {source_id}\n\n## Short\n{data['summary']['short']}\n\n## Detailed\n{data['summary']['detailed']}\n")
+                f.write(summary_page(source_id, basename, data["summary"]))
     
     # Claims (planned and conflict-checked above)
     os.makedirs(claims_dir, exist_ok=True)

@@ -80,3 +80,55 @@ def test_build_graph_excludes_wiki_traces(tmp_path, monkeypatch):
     conn.close()
     assert any(p.endswith("real.md") for p in paths)
     assert not any("traces" in p.split(os.sep) for p in paths)
+
+
+# ── claims and summaries link to their source page (review of package-a, 2026-11-07) ──
+#
+# Audit F1 made `source_id` content-identified (`<stem>-<hash12>`), but ingest still names
+# the source page `wiki/sources/<stem>.md`. The graph linked claims through
+# `wiki/sources/{source_id}.md`, so every newly extracted claim and summary silently lost
+# its `derived_from` edge. These tests build pages with the real writers.
+
+def _source_node(filepath):
+    from scripts.graph_build import generate_node_id
+    from scripts.ingest import source_page_stem
+    stem = source_page_stem(filepath)
+    path = f"wiki/sources/{stem}.md"
+    nid = generate_node_id(path)
+    return nid, {nid: {"node_id": nid, "slug": stem, "title": stem, "path": path}}
+
+
+def test_an_extracted_claim_derives_from_its_ingested_source_page(tmp_path):
+    from scripts.extract import plan_claim_writes, source_identity
+    filepath = "raw/papers/My Paper.pdf"
+    source_id, content_hash = source_identity(filepath, "the extracted text")
+    data = {"claims": [{"claim_id": "claim-1", "claim_type": "fact", "confidence": "high",
+                        "text": "t", "evidence": [{"quote": "the extracted text"}]}]}
+    [(_, body)] = plan_claim_writes(data, source_id, content_hash, str(tmp_path), "My Paper.pdf")
+    node_id, nodes = _source_node(filepath)
+
+    edges = extract_edges(f"wiki/claims/{source_id}--claim-1.md", body, nodes)
+
+    assert [e["edge_type"] for e in edges if e["to_node_id"] == node_id] == ["derived_from"]
+
+
+def test_an_extraction_summary_derives_from_its_ingested_source_page():
+    from scripts.extract import source_identity, summary_page
+    filepath = "raw/papers/My Paper.pdf"
+    source_id, _ = source_identity(filepath, "the extracted text")
+    body = summary_page(source_id, "My Paper.pdf", {"short": "s", "detailed": "d"})
+    node_id, nodes = _source_node(filepath)
+
+    edges = extract_edges(f"wiki/summaries/{source_id}_summary.md", body, nodes)
+
+    assert [e["edge_type"] for e in edges if e["to_node_id"] == node_id] == ["derived_from"]
+
+
+def test_a_legacy_claim_whose_source_id_is_the_stem_still_links_once():
+    # Claims written before F1 carry `source_id: <stem>` and no `source_file`.
+    node_id, nodes = _source_node("raw/papers/My Paper.pdf")
+    body = f"---\ntype: claim\nclaim_id: c\nsource_id: {nodes[node_id]['slug']}\n---\n# c\n"
+
+    edges = extract_edges("wiki/claims/c.md", body, nodes)
+
+    assert [e["edge_type"] for e in edges if e["to_node_id"] == node_id] == ["derived_from"]
