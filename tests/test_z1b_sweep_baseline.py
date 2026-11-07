@@ -86,6 +86,19 @@ def test_sb_a_same_size_rewrite_is_caught_by_mtime_and_a_chmod_by_mode(tmp_path)
     assert sweep.darwin_changes(uid, snap, str(base)) == sorted([str(a), str(b)])
 
 
+def test_sb_a_same_size_rewrite_with_the_mtime_restored_is_still_caught_by_ctime(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    target = root / "C" / "entry"
+    target.write_text("aaaa")
+    snap = sweep.snapshot_darwin(uid, str(base))
+    st = os.lstat(str(target))
+    target.write_text("bbbb")                                          # same size
+    os.utime(str(target), ns=(st.st_atime_ns, st.st_mtime_ns))         # mtime put back by the candidate
+    assert os.lstat(str(target)).st_mtime_ns == st.st_mtime_ns and os.lstat(str(target)).st_size == st.st_size
+    assert sweep.darwin_changes(uid, snap, str(base)) == [str(target)]
+
+
 def test_sb_a_path_that_disappeared_is_not_a_violation(tmp_path):
     base, root = _sb_folders(tmp_path)
     uid = os.getuid()
@@ -223,6 +236,20 @@ def test_sb_a_listable_directorys_mtime_still_does_not_count(tmp_path):
     assert sweep.darwin_changes(uid, snap, str(base)) == []
 
 
+@_sb_needs_nonroot
+def test_sb_an_unlistable_directorys_ctime_counts_but_a_listable_directorys_does_not(_sb_opaque):
+    base, d, lock, unlock = _sb_opaque
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    st = os.lstat(str(d))
+    unlock()
+    (d / "dropped").write_text("x")
+    (d / "dropped").unlink()                                           # contents identical again
+    os.utime(str(d), ns=(st.st_atime_ns, st.st_mtime_ns))              # mtime restored: only ctime moved
+    lock()
+    assert sweep.darwin_changes(uid, snap, str(base)) == [str(d)]
+
+
 # ================================================================ strict roots stay strict
 
 def test_sb_sweep_roots_are_the_strict_roots_and_exclude_the_darwin_trees(tmp_path):
@@ -342,6 +369,44 @@ def test_sb_broker_post_run_violation_passes_the_baseline_to_the_diff(tmp_path):
     assert B.broker_post_run_violation(ctx, "r" * 16, {"k": 1}) is False
     assert seen == [{"k": 1}]
     ctx.sweep_darwin_changes = lambda b: ["/x"]
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}) is True
+
+
+def _sb_proc_ctx(procs, calls, leftovers=(), changes=()):
+    seq = list(procs)
+    return types.SimpleNamespace(
+        wipe=lambda r: calls.append("wipe"),
+        sweep_processes=lambda: calls.append("procs") or seq.pop(0),
+        sweep_leftovers=lambda: calls.append("leftovers") or list(leftovers),
+        sweep_darwin_changes=lambda b: calls.append("darwin") or list(changes))
+
+
+def test_sb_a_live_process_before_the_filesystem_sweep_is_a_violation_without_touching_the_fs_seams(tmp_path):
+    calls = []
+    ctx = types.SimpleNamespace(wipe=lambda r: calls.append("wipe"),
+                                sweep_processes=lambda: calls.append("procs") or [1, 0].pop(0))   # always 1
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}) is True      # no fs seams exist on this ctx at all
+    assert calls == ["wipe", "procs"]
+
+
+def test_sb_the_sweep_order_is_processes_then_strict_then_darwin_then_processes_again(tmp_path):
+    calls = []
+    ctx = _sb_proc_ctx([0, 0], calls)
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}) is False
+    assert calls == ["wipe", "procs", "leftovers", "darwin", "procs"]
+
+
+def test_sb_a_process_that_appears_during_the_filesystem_sweep_is_caught_by_the_second_check(tmp_path):
+    calls = []
+    assert B.broker_post_run_violation(_sb_proc_ctx([0, 2], calls), "r" * 16, {}) is True
+    assert calls == ["wipe", "procs", "leftovers", "darwin", "procs"]
+
+
+def test_sb_the_first_process_check_failing_is_a_violation(tmp_path):
+    def boom():
+        raise OSError("ps vanished")
+
+    ctx = types.SimpleNamespace(wipe=lambda r: None, sweep_processes=boom)
     assert B.broker_post_run_violation(ctx, "r" * 16, {}) is True
 
 

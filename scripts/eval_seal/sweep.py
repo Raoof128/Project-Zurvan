@@ -86,18 +86,20 @@ def sweep_roots(paths: SealPaths, candidate_uid: int) -> tuple:
 
 
 def _sweep_signature(st, opaque: bool = False) -> tuple:
-    # A LISTABLE directory's own mtime/size move when a child is deleted, and a created child is reported as
-    # its own new path, so it is identified by inode and mode only. An OPAQUE directory (its contents cannot
-    # be listed, e.g. the candidate's 0700 C/ and T/ seen from the eval identity) hides its children, so its
-    # own mtime is the only evidence of a created or removed child: it keeps its full signature, flagged so it
-    # can never equal a listable directory's.
+    # (ino, mtime_ns, size, mode, ctime_ns, opaque). A LISTABLE directory's own times/size move when a child is
+    # deleted, and a created child is reported as its own new path, so it is identified by inode and mode only.
+    # An OPAQUE directory (its contents cannot be listed, e.g. the candidate's 0700 C/ and T/ seen from the eval
+    # identity) hides its children, so its own times are the only evidence of a created or removed child: it
+    # keeps everything, flagged so it never equals a listable directory's. Everything that is not a listable
+    # directory also carries ctime: a user cannot set it, and it moves on content, xattr, chmod and rename, so a
+    # same-size rewrite with mtime restored through utime is still seen.
     if stat.S_ISDIR(st.st_mode) and not opaque:
-        return (st.st_ino, 0, 0, st.st_mode, False)
-    return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode, opaque)
+        return (st.st_ino, 0, 0, st.st_mode, 0, False)
+    return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode, st.st_ctime_ns, opaque)
 
 
 def snapshot_darwin(candidate_uid: int, base=None) -> dict:
-    """path -> (st_ino, st_mtime_ns, st_size, st_mode) for every candidate-owned entry under the candidate's
+    """path -> signature (see _sweep_signature) for every candidate-owned entry under the candidate's
     darwin per-user roots (the roots themselves included). lstat only, never follows symlinks; an entry that
     vanishes mid-walk is skipped. Any other failure propagates: the caller treats it as a violation."""
     uid = _sweep_check_uid(candidate_uid)

@@ -861,6 +861,10 @@ def broker_post_run_violation(ctx, run_id: str, baseline) -> bool:
     try:
         if baseline is _BASELINE_FAILED:
             return True
+        # Candidate-uid processes can only descend from existing ones, so zero of them BEFORE the filesystem
+        # sweep means nothing can write after it; the second check closes the window the sweep itself leaves.
+        if int(ctx.sweep_processes()) > 0:
+            return True
         return (bool(ctx.sweep_leftovers()) or bool(ctx.sweep_darwin_changes(baseline))
                 or int(ctx.sweep_processes()) > 0)
     except Exception:  # noqa: BLE001
