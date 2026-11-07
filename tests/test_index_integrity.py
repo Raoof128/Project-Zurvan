@@ -311,6 +311,11 @@ def test_a_rebuild_killed_after_a_committed_batch_promotes_nothing(
 
 class _NoReuse:
     """A _PriorIndex that never offers a stored vector."""
+    identity_problem = None
+
+    def reusable_for(self, _identity):
+        return False
+
     def get(self, _chunk_id):
         return None
 
