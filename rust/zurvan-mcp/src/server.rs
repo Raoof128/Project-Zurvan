@@ -122,8 +122,8 @@ impl ZurvanServer {
                 let (hits, notice) = (r.hits, r.notice);
                 let mut head = format!("Search index: {}", status::staleness_text(&status::freshness(&self.cfg, &self.meta)));
                 // The top pages below are read from the LIVE files, not the
-                // index generation the hits came from; the stamp says so.
-                let stamp = status::stamp_for(&self.cfg, &r.served, &self.meta, &["top pages read live".to_string()]);
+                // index generation the hits came from; their header says so.
+                let stamp = status::stamp_for(&self.cfg, &r.served, &self.meta, &[]);
                 if !stamp.is_empty() {
                     head.push('\n');
                     head.push_str(&stamp);
@@ -143,7 +143,7 @@ impl ZurvanServer {
                     }
                 }
                 if !paths.is_empty() {
-                    parts.push("## Top pages".into());
+                    parts.push(status::top_pages_header(&self.cfg));
                     parts.extend(paths.iter().map(|p| pages::read_file_slice(&self.cfg, p, 0, 2000)));
                 }
                 crate::text::budget(&parts.join("\n\n"), crate::text::RESULT_CHAR_BUDGET)
@@ -408,5 +408,47 @@ impl ServerHandler for ZurvanServer {
         }))
         .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
         Ok(result.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::embed::mock;
+    use crate::testutil::{registry_db, search_db, Chunk};
+
+    /// A throwaway store whose hybrid search finds `wiki/a.md`, with the page
+    /// on disk; the ledger is at `ledger` when given.
+    fn orient_store(ledger: Option<i64>) -> (tempfile::TempDir, ZurvanServer) {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("wiki")).unwrap();
+        std::fs::write(dir.path().join("wiki/a.md"), "the seed page body").unwrap();
+        let cfg = Config::resolve_from(Some(dir.path().to_path_buf()), |_| None);
+        let t = "the seed page";
+        let cs = [Chunk { chunk_id: "s", source_path: "wiki/a.md", heading: None, text: t, indexed_at: "2026-10-18T00:00:00", vector: mock(t) }];
+        search_db(&cfg.search_db, "mock", "deterministic_hash", &cs, &[("built_from_revision", "1")]);
+        if let Some(rev) = ledger {
+            registry_db(&cfg.registry_db, rev, "CLEAN");
+        }
+        (dir, ZurvanServer::new(cfg))
+    }
+
+    /// F6 (plan Task 7): the pages orient appends are read from the LIVE files,
+    /// not from the index generation the hits came from, and the header says
+    /// so with the ledger revision they were read at. The Python server emits
+    /// the identical header (`tests/test_mcp_tools.py`).
+    #[test]
+    fn orient_labels_its_top_pages_as_live_files_at_the_ledger_revision() {
+        let (_d, s) = orient_store(Some(42));
+        let out = s.orient_tool("the seed page", 10, &|_, _| {});
+        assert!(out.contains("\n\n## Top pages (live files, ledger rev 42)\n\n[wiki/a.md"), "{out}");
+        assert!(!out.contains("\n## Top pages\n"), "the bare header is gone: {out}");
+    }
+
+    #[test]
+    fn orient_header_says_unknown_when_there_is_no_ledger() {
+        let (_d, s) = orient_store(None);
+        let out = s.orient_tool("the seed page", 10, &|_, _| {});
+        assert!(out.contains("\n\n## Top pages (live files, ledger rev ?)\n\n"), "{out}");
     }
 }

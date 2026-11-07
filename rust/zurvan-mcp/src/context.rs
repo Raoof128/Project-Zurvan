@@ -3,7 +3,7 @@
 
 use crate::graph::{expand, Expanded};
 use crate::search::{Hit, Score, SearchState, Served};
-use crate::store::{open_graph_at, Generation, GENERATION_CHANGED, GENERATION_RETRIES};
+use crate::store::{open_graph_at, Generation, GENERATION_RETRIES, GRAPH_GENERATION_CHANGED};
 use crate::text::{py_str, take_chars};
 use std::collections::HashMap;
 
@@ -83,7 +83,7 @@ pub fn bundle(
         let mut opened = open_graph_at(&st.cfg);
         for _ in 0..GENERATION_RETRIES {
             match &opened {
-                Err(e) if e == GENERATION_CHANGED => opened = open_graph_at(&st.cfg),
+                Err(e) if e == GRAPH_GENERATION_CHANGED => opened = open_graph_at(&st.cfg),
                 _ => break,
             }
         }
@@ -92,7 +92,7 @@ pub fn bundle(
                 graph_generation = Some(g);
                 expand(&conn, &seeds, 1).map_err(|e| e.to_string())?
             }
-            Err(e) if e == GENERATION_CHANGED => return Err(e),
+            Err(e) if e == GRAPH_GENERATION_CHANGED => return Err(e),
             Err(_) => Vec::new(),
         };
         if !nodes.is_empty() {

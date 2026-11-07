@@ -264,19 +264,43 @@ def _orient_store(monkeypatch, tmp_path):
     monkeypatch.setattr(context_export, "_search_internal", lambda q, hybrid, limit: hits[:limit])
 
 
+def _pin_ledger(monkeypatch, revision):
+    """The header names the ledger revision the live pages were read at; a
+    test must not read the production ledger for it. `None` = no ledger."""
+    from scripts import knowledge_revision as kr
+    if revision is None:
+        def current(root=None):
+            raise kr.LedgerError("no ledger")
+    else:
+        def current(root=None):
+            return kr.Revision(revision=revision, state="CLEAN", atomicity="MANAGED", manifest_digest="d")
+    monkeypatch.setattr(kr, "current", current)
+
+
 def test_orient_combines_status_search_and_top_pages(monkeypatch, tmp_path):
     from scripts.mcp_tools import tool_zurvan_orient
     _orient_store(monkeypatch, tmp_path)
+    _pin_ledger(monkeypatch, 42)
     out = tool_zurvan_orient("anything", 10)
     parts = out.split("\n\n")
     assert parts[0] == "Search index: fresh"
     assert parts[1].startswith("1. wiki/a.md (score 0.90)\n   heading: H\n   alpha\n2. wiki/a.md (score 0.80)")
-    assert parts[2] == "## Top pages"
+    # F6 (plan Task 7): the pages are read from LIVE files, labelled with the
+    # ledger revision. rust/zurvan-mcp emits the identical header.
+    assert parts[2] == "## Top pages (live files, ledger rev 42)"
     # The three DISTINCT paths in rank order, 2,000 characters each at most.
     assert parts[3] == "[wiki/a.md — characters 0-2000] More: call again with offset=2000.\n" + "A" * 2000
     assert parts[4] == "[wiki/b.md — characters 0-8]\nbee page"
     assert parts[5] == "[docs/c.md — characters 0-3]\nsee"
     assert len(parts) == 6, "docs/d.md is the fourth distinct path and is not read"
+
+
+def test_orient_header_says_unknown_when_there_is_no_ledger(monkeypatch, tmp_path):
+    from scripts.mcp_tools import tool_zurvan_orient
+    _orient_store(monkeypatch, tmp_path)
+    _pin_ledger(monkeypatch, None)
+    out = tool_zurvan_orient("anything", 10)
+    assert "\n\n## Top pages (live files, ledger rev ?)\n\n" in out
 
 
 def test_orient_without_results_has_no_pages_section(monkeypatch, tmp_path):

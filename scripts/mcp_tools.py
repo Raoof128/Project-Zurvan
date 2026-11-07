@@ -183,6 +183,22 @@ ORIENT_PAGES = 3
 ORIENT_PAGE_CHARS = 2000
 
 
+def _top_pages_header() -> str:
+    """Orient's `## Top pages` header (audit 2026-10-22 F6, plan Task 7).
+
+    Those pages are read from the LIVE files, not from the index generation the
+    hits came from, so the header labels them with their own version: the
+    ledger revision at the read, `?` when there is no ledger. The Rust server
+    (`status::top_pages_header`) emits the identical text.
+    """
+    try:
+        from scripts import knowledge_revision as kr
+        rev = str(kr.current().revision)
+    except Exception:
+        rev = "?"
+    return f"## Top pages (live files, ledger rev {rev})"
+
+
 @_protocol_safe
 def tool_zurvan_orient(topic: str, limit: int = 10) -> str:
     """Status line + hybrid results + the opening of the top pages, in one call.
@@ -208,7 +224,7 @@ def tool_zurvan_orient(topic: str, limit: int = 10) -> str:
             if len(paths) == ORIENT_PAGES:
                 break
         if paths:
-            parts.append("## Top pages")
+            parts.append(_top_pages_header())
             parts += [read_file_slice(p, 0, ORIENT_PAGE_CHARS) for p in paths]
         return _budget("\n\n".join(parts))
     except Exception as e:

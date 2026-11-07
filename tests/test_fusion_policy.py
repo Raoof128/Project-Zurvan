@@ -38,3 +38,61 @@ def test_policy_values_are_the_measured_ones():
     # this pins them so a policy edit cannot slip in without an eval re-run.
     from scripts.fusion_policy import CURRENT
     assert (CURRENT.keyword_weight, CURRENT.min_score) == (0.2, 0.2)
+
+
+# --- Rust parity (review follow-up 2026-11-07 (e)) ---------------------------
+# The Rust server re-implements the fusion as three source-level facts: two
+# constants, one formula (used at two sites) and one strict comparison. Nothing
+# compared them with this module, so a ranking edit on one side would have
+# shipped silently (only the live parity harness would notice, and only on a
+# query whose rank happened to move). This reads the Rust SOURCE, so it runs in
+# the ordinary suite with no cargo build, and it fails loudly when a constant
+# is renamed instead of passing on a missing match.
+
+import re
+from pathlib import Path
+
+RUST_SRC = Path(__file__).resolve().parents[1] / "rust" / "zurvan-mcp" / "src"
+
+
+def _rust(name: str) -> str:
+    return (RUST_SRC / name).read_text(encoding="utf-8")
+
+
+def _rust_const(source: str, name: str) -> float:
+    m = re.search(rf"\bconst\s+{name}\s*:\s*f64\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*;", source)
+    assert m, f"rust const {name} not found as `const {name}: f64 = <literal>;` - update this test with the rename"
+    return float(m.group(1))
+
+
+def test_rust_keyword_weight_is_the_policys():
+    from scripts.fusion_policy import CURRENT
+    assert _rust_const(_rust("vectors.rs"), "KEYWORD_WEIGHT") == CURRENT.keyword_weight
+
+
+def test_rust_min_hybrid_score_is_the_policys():
+    from scripts.fusion_policy import CURRENT
+    assert _rust_const(_rust("search.rs"), "MIN_HYBRID_SCORE") == CURRENT.min_score
+
+
+def test_rust_scores_with_the_policys_formula_at_each_site():
+    # score = kw*keyword + (1-kw)*semantic, spelled the same way at both sites
+    # (the vector scan in vectors.rs, the re-score in search.rs). A site that
+    # swapped the operands, dropped the complement or inlined a literal weight
+    # does not match. Python's object computes the identical expression.
+    from scripts.fusion_policy import CURRENT
+    formula = re.compile(
+        r"KEYWORD_WEIGHT\s*\*\s*(\w+(?:\.\w+)?)\s*\+\s*\(\s*1\.0\s*-\s*KEYWORD_WEIGHT\s*\)\s*\*\s*(\w+(?:\.\w+)?)")
+    assert formula.findall(_rust("vectors.rs")) == [("kw", "semantic")]
+    assert formula.findall(_rust("search.rs")) == [("r.keyword", "r.semantic")]
+    k, s = 0.7, 0.3
+    assert CURRENT.score(k, s) == pytest.approx(CURRENT.keyword_weight * k + (1.0 - CURRENT.keyword_weight) * s)
+
+
+def test_rust_floor_is_strictly_greater_than_like_python():
+    # `hybrid_score > MIN_HYBRID_SCORE`: a score EQUAL to the floor is dropped.
+    from scripts import hybrid_search
+    assert "hybrid_score > MIN_HYBRID_SCORE" in Path(hybrid_search.__file__).read_text(encoding="utf-8")
+    assert re.search(
+        r"fn\s+passes_floor\s*\(\s*score\s*:\s*f64\s*\)\s*->\s*bool\s*\{\s*score\s*>\s*MIN_HYBRID_SCORE\s*\}",
+        _rust("search.rs")), "rust passes_floor must be `score > MIN_HYBRID_SCORE` (strict)"
