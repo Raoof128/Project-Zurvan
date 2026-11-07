@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from scripts.llm import run_llm
 from scripts.validate_extraction import validate_extraction_json, is_safe_filename
 from scripts.ingest import extract_text # reuse extraction logic
@@ -38,9 +39,12 @@ def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir:
                       source_file: str) -> list[tuple[str, str]]:
     """Every claim page this extraction will write, as `(path, content)`, with
     nothing written yet. Raises `ExtractionConflict` if any target page exists
-    and carries a different `source_hash` — the model may not pick a filename
-    that destroys another source's evidence. A page with the same hash is the
-    same bytes re-extracted and may be rewritten."""
+    and either carries a different `source_hash` (another source's evidence) or
+    carries this one's but says something else: accepted evidence is never
+    silently replaced (roadmap F1 gate: "either preserve prior evidence or
+    return an explicit conflict"; reconcile/supersession is a separate act).
+    A page whose planned body is byte-identical to the one on disk is a retry
+    of the same extraction and is left out of the plan: no write at all."""
     plan = []
     for claim in data.get("claims", []):
         cid = sanitize_filename(claim["claim_id"])
@@ -48,9 +52,11 @@ def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir:
         if not is_safe_filename(name):
             continue
         claim_file = os.path.join(claims_dir, name)
+        existing = None
         if os.path.exists(claim_file):
             with open(claim_file, "r", encoding="utf-8") as f:
-                m = _SOURCE_HASH_LINE.search(f.read())
+                existing = f.read()
+            m = _SOURCE_HASH_LINE.search(existing)
             owner = m.group(1) if m else None
             if owner != content_hash:
                 raise ExtractionConflict(
@@ -58,16 +64,27 @@ def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir:
                     f"already exists for a different source (source_hash {owner!r}); "
                     "nothing was written"
                 )
+        # The heading is the claim id as the model wrote it (plan Task 2); only
+        # line breaks are folded so it stays one Markdown heading line.
+        heading = " ".join(str(claim["claim_id"]).split())
         tags_yaml = "\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
         body = (
             f"---\ntype: claim\nclaim_id: {cid}\nsource_id: {source_id}\n"
             f"source_file: {source_file}\nsource_hash: {content_hash}\n"
             f"claim_type: {claim['claim_type']}\nconfidence: {claim['confidence']}\n"
-            f"tags:{tags_yaml}\n---\n\n# {cid}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n"
+            f"tags:{tags_yaml}\n---\n\n# {heading}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n"
         )
         for ev in claim["evidence"]:
             body += (f"> \"{ev['quote']}\"\n\nLocation: {ev.get('location', 'Unknown')}\n"
                      f"Source: [[sources/{source_file}]]\n\n")
+        if existing is not None:
+            if existing == body:
+                continue  # identical retry: nothing to write
+            raise ExtractionConflict(
+                f"claim page {os.path.basename(claim_file)} (claim '{claim['claim_id']}') "
+                "already exists for this source with different content; accepted "
+                "evidence is not replaced. Nothing was written"
+            )
         plan.append((claim_file, body))
     return plan
 
@@ -78,6 +95,27 @@ def summary_page(source_id: str, source_file: str, summary: dict) -> str:
     return (f"---\ntype: summary\nsource_id: {source_id}\nsource_file: {source_file}\n---\n"
             f"# Summary: {source_id}\n\n## Short\n{summary['short']}\n\n"
             f"## Detailed\n{summary['detailed']}\n")
+
+
+def new_open_question_lines(oq_file: str, source_id: str, questions: list[dict]) -> list[str]:
+    """The list items to append for `source_id`, skipping any (source_id,
+    question) already in `oq_file` or repeated within `questions`. The line shape
+    is the one this module has always written, so existing files stay valid."""
+    existing = ""
+    if os.path.exists(oq_file):
+        with open(oq_file, "r", encoding="utf-8") as f:
+            existing = f.read()
+    seen_lines = set(existing.splitlines())
+    lines = []
+    for oq in questions:
+        question = " ".join(str(oq["question"]).split())
+        marker = f"- **{question}** (from {source_id}): "
+        if any(l.startswith(marker) for l in seen_lines):
+            continue
+        reason = " ".join(str(oq["reason"]).split())
+        seen_lines.add(marker + reason)
+        lines.append(f"\n{marker}{reason}\n")
+    return lines
 
 
 def extract_source(filepath):
@@ -153,11 +191,9 @@ def extract_source(filepath):
     # Plan every claim page BEFORE anything is written: a cross-owner
     # collision aborts the whole extraction with nothing on disk.
     claims_dir = os.path.join("wiki", "claims")
-    try:
-        claim_writes = plan_claim_writes(data, source_id, content_hash, claims_dir, basename)
-    except ExtractionConflict as e:
-        print(f"Extraction conflict: {e}")
-        return
+    # The conflict propagates: a caller (and the CLI's exit status) must be
+    # able to tell "refused" from "done".
+    claim_writes = plan_claim_writes(data, source_id, content_hash, claims_dir, basename)
 
     # 7. Save raw JSON
     os.makedirs(os.path.join("data", "extractions"), exist_ok=True)
@@ -186,13 +222,14 @@ def extract_source(filepath):
     from scripts.wiki_merge import merge_extraction
     merge_extraction(data)
                 
-    # Open questions (append to list)
+    # Open questions (append to list), idempotent per (source_id, question)
     if data.get("open_questions"):
         oq_file = os.path.join("wiki", "open-questions.md")
-        with open(oq_file, "a", encoding="utf-8") as f:
-            for oq in data["open_questions"]:
-                f.write(f"\n- **{oq['question']}** (from {source_id}): {oq['reason']}\n")
-                
+        new_lines = new_open_question_lines(oq_file, source_id, data["open_questions"])
+        if new_lines:
+            with open(oq_file, "a", encoding="utf-8") as f:
+                f.write("".join(new_lines))
+
     print("Markdown generation complete.")
 
 if __name__ == "__main__":
@@ -203,5 +240,15 @@ if __name__ == "__main__":
     # line commit as a single revision, and `safe_write` refuses them without
     # a boundary (2026-09-28).
     from scripts import knowledge_revision as _kr
+    conflict = None
     with _kr.operation(writer="extract", caller="scripts.extract:__main__", eager=True):
-        extract_source(args.source)
+        try:
+            extract_source(args.source)
+        except ExtractionConflict as e:
+            # Caught INSIDE the operation: the refusal wrote nothing, so the
+            # operation ends clean and mints no revision (an exception through
+            # it would be recorded as a crash). The exit status is below.
+            conflict = e
+    if conflict is not None:
+        print(f"Extraction conflict: {conflict}", file=sys.stderr)
+        sys.exit(2)
