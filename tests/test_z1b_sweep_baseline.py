@@ -823,3 +823,110 @@ def test_sb_every_allowed_worker_is_a_root_owned_file_on_the_sealed_volume():
             pytest.skip("not this macOS: %s" % path)
         st = os.lstat(path)
         assert path.startswith(sweep._SEALED_PREFIXES) and st.st_uid == 0 and not st.st_mode & 0o022, path
+
+
+# ================================================================ where a CANDIDATE_FAILED run stopped (gate 4, 2026-11-08 13:17)
+
+def test_sb_a_candidate_crash_records_the_stage_and_query_number_but_no_text(tmp_path):
+    E = _t10_build(tmp_path)
+    E.cand_cfg.update(mode="crash", at=3)
+    _t10_refused(_t10_run(E), "CANDIDATE_FAILED")
+    log = (E.paths.runs_dir / "errors.log").read_text()
+    line = [ln for ln in log.splitlines() if "candidate_failed" in ln][-1]
+    assert "stage=query qid=2 step=read" in line and "exc=SealRefusal:CANDIDATE_FAILED" in line
+    assert not any(i["query"] in log for i in E.holdout)                 # never a query, never an answer
+
+
+def test_sb_a_launch_failure_records_the_launch_stage(tmp_path):
+    E = _t10_build(tmp_path)
+
+    def launch(run_id, corpus_sha, commit):
+        B._LAUNCH_PROGRESS["stage"] = "provision"            # what broker_vm_launch sets before provisioning
+        raise B.SealRefusal("CANDIDATE_FAILED")
+    _t10_refused(_t10_run(E, ctx=_t10_ctx(E, launch_candidate=launch)), "CANDIDATE_FAILED")
+    log = (E.paths.runs_dir / "errors.log").read_text()
+    assert "candidate_failed stage=provision qid=- step=- elapsed_s=- rc=- exc=SealRefusal:CANDIDATE_FAILED" in log
+
+
+def test_sb_the_failure_note_only_admits_known_stage_and_step_names():
+    note = B.broker_failure_note({"stage": "evil text", "step": "q=secret", "qid": "7", "rc": "x"},
+                                 ValueError("the holdout query text"))
+    assert note == "candidate_failed stage=- qid=- step=- elapsed_s=- rc=- exc=ValueError"
+
+
+def test_sb_broker_vm_launch_marks_each_stage(monkeypatch):
+    from scripts.eval_seal import vm_runner as V
+    seen = []
+    monkeypatch.setattr(V, "vm_start", lambda rid, paths: seen.append(B._LAUNCH_PROGRESS["stage"]))
+    monkeypatch.setattr(B, "broker_push_candidate_tree", lambda *a: seen.append(B._LAUNCH_PROGRESS["stage"]))
+    monkeypatch.setattr(B, "broker_provision_corpus", lambda *a: seen.append(B._LAUNCH_PROGRESS["stage"]))
+    monkeypatch.setattr(V, "vm_launch", lambda *a, **k: seen.append(B._LAUNCH_PROGRESS["stage"]) or "proc")
+    assert B.broker_vm_launch("r" * 16, None, "c" * 64, "d" * 40) == "proc"
+    assert seen == ["vm_start", "push_tree", "provision", "launch"]
+
+
+# ================================================================ the candidate must reach the stage dir (gate 4, 2026-11-08)
+# The 13:17 charged run ended CANDIDATE_FAILED ~150 ms after the VM was READY: the door's vm-push-tree could not open
+# the staged bundle because the installed sealed identities had PrimaryGroupID 20 (staff), so the candidate was not in
+# the zurvaneval:zurvancandidate 0750 stage dir's group. No check caught it; seal-check now asks the candidate itself.
+
+def test_sb_stage_probe_reports_ok_when_the_stage_dir_can_be_listed(tmp_path, capsys):
+    p = _sb_paths(tmp_path)
+    p.stage_dir.mkdir(parents=True, exist_ok=True)
+    (p.stage_dir / "someone.bundle").write_text("x")
+    assert CR.main(["stage-probe"], paths=p) == 0
+    assert capsys.readouterr().out == "OK\n"                      # a verdict only: never a file name
+
+
+def test_sb_stage_probe_reports_denied_when_the_stage_dir_cannot_be_listed(tmp_path, capsys):
+    p = _sb_paths(tmp_path)
+    p.stage_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(str(p.stage_dir), 0o000)
+    try:
+        assert CR.main(["stage-probe"], paths=p) == 0
+        assert capsys.readouterr().out == "DENIED\n"
+    finally:
+        os.chmod(str(p.stage_dir), 0o700)
+
+
+def test_sb_stage_probe_reports_denied_when_the_stage_dir_is_missing(tmp_path, capsys):
+    p = _sb_paths(tmp_path)
+    assert CR.main(["stage-probe"], paths=p) == 0
+    assert capsys.readouterr().out == "DENIED\n"
+    assert CR.main(["stage-probe", "extra"], paths=p) == 2
+
+
+@pytest.mark.parametrize("rc,out,want", [
+    (0, b"OK\n", True), (0, b"DENIED\n", False), (2, b"OK\n", False), (0, b"OK\nOK\n", False), (0, b"", False),
+])
+def test_sb_production_stage_access_asks_the_door_as_the_candidate(tmp_path, monkeypatch, rc, out, want):
+    import subprocess as sp
+    paths = _sb_paths(tmp_path)
+    monkeypatch.setattr(B.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=os.getuid()))
+    calls = []
+
+    def run_tool(cmd, env, *, data=None, timeout=B.CHECK_TIMEOUT):
+        calls.append(list(cmd))
+        return sp.CompletedProcess(cmd, rc, out, b"")
+    monkeypatch.setattr(B, "_broker_run_tool", run_tool)
+    ctx = B.production_context(paths)
+    assert ctx.candidate_stage_access() is want
+    assert calls == [["/usr/bin/sudo", "-n", "-u", "zurvancandidate", str(paths.broker_bin / "zurvan-candidate-run"),
+                      "stage-probe"]]
+
+
+def test_sb_production_stage_access_is_false_when_the_door_cannot_run(tmp_path, monkeypatch):
+    paths = _sb_paths(tmp_path)
+    monkeypatch.setattr(B.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=os.getuid()))
+
+    def run_tool(cmd, env, *, data=None, timeout=B.CHECK_TIMEOUT):
+        raise OSError("sudo refused")
+    monkeypatch.setattr(B, "_broker_run_tool", run_tool)
+    assert B.production_context(paths).candidate_stage_access() is False
+
+
+def test_sb_seal_check_fails_closed_without_a_stage_access_seam():
+    assert B._broker_check_candidate_stage(None, types.SimpleNamespace()) is False
+    assert B._broker_check_candidate_stage(None, types.SimpleNamespace(candidate_stage_access=None)) is False
+    assert B._broker_check_candidate_stage(None, types.SimpleNamespace(candidate_stage_access=lambda: "OK")) is False
+    assert B._broker_check_candidate_stage(None, types.SimpleNamespace(candidate_stage_access=lambda: True)) is True

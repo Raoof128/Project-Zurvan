@@ -483,6 +483,13 @@ def plan_setup(plan, dev_home, repo):
         plan.cmd(dscl, ".", "-create", u, "IsHidden", "1")
         plan.cmd(dscl, ".", "-create", u, "Password", "*")
     plan.cmd(dscl, ".", "-append", "/Groups/" + CORPUS_GROUP, "GroupMembership", EVAL_USER, CANDIDATE_USER, AUTHOR_USER)
+    plan.comment("gate 4 (2026-11-08): the installed identities came out with PrimaryGroupID 20 (staff), not their own")
+    plan.comment("group, so the candidate could not traverse the zurvaneval:zurvancandidate 0750 stage dir and every run")
+    plan.comment("died in vm-push-tree. Each identity is ALSO an explicit member of its own group, and the primary is asserted.")
+    for user, var in ((EVAL_USER, "$ZV_EVAL_ID"), (CANDIDATE_USER, "$ZV_CAND_ID"), (AUTHOR_USER, "$ZV_AUTHOR_ID")):
+        plan.cmd(dscl, ".", "-append", "/Groups/" + user, "GroupMembership", user)
+        plan.raw('[ "$(/usr/bin/dscl . -read /Users/%s PrimaryGroupID | /usr/bin/awk \'{print $2}\')" = "%s" ] || { %s; }'
+                 % (user, var, _fail_line("user %s did not get its own primary group" % user)))
     plan.comment("directories: owner, group and mode are set in one step by install -d")
     ev = (EVAL_USER, EVAL_USER, "0700")
     cd = (CANDIDATE_USER, CANDIDATE_USER, "0700")

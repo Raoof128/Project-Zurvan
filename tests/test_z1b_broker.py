@@ -252,7 +252,7 @@ def _t10_ctx(E, **over):
         rss_mb=lambda: 12, scan=lambda paths, ctx, led: {"hits": [], "canary_hits": 0, "unreadable": 0},
         reseal=lambda paths, ctx, led: {"resealed": False}, is_tty=lambda: True,
         scan_agent_present=lambda: True, git_env=_t10_genv(), root_uid=os.getuid(), eval_uid=os.getuid(),
-        candidate_uid=os.getuid() + 1)
+        candidate_uid=os.getuid() + 1, candidate_stage_access=lambda: True)
     base.update(over)
     return B.BrokerContext(**base)
 
@@ -1264,6 +1264,8 @@ def test_t10_seal_check_passes_on_a_compliant_layout_and_fails_each_violation(tm
         failing("tm_excluded_keys", tmutil_isexcluded=lambda p: p != E.paths.keys_dir)
         failing("tm_excluded_private", tmutil_isexcluded=lambda p: p != E.paths.private_dir)  # R18
         failing("scan_agent_present", scan_agent_present=lambda: False)
+        failing("candidate_reaches_stage", candidate_stage_access=lambda: False)   # gate 4, 2026-11-08
+        failing("candidate_reaches_stage", candidate_stage_access=None)
         failing("broker_root_owned", only=False, root_uid=os.getuid() + 7)
     finally:
         _t10_unlayout(E)

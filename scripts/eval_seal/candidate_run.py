@@ -145,6 +145,19 @@ def probe(paths: SealPaths) -> dict:
     return {pid: _cr_probe_one(getattr(paths, pid)) for pid in SEALED_IDS}
 
 
+def stage_probe(paths: SealPaths) -> str:
+    """The POSITIVE twin of probe(): can this user list the stage dir, where the broker leaves each run's bundle and
+    corpus tar for the door to read? Gate 4 (2026-11-08): the installed sealed identities had PrimaryGroupID 20 (staff)
+    instead of their own group, so the candidate could not traverse the zurvaneval:zurvancandidate 0750 stage dir;
+    every charged run then died in vm-push-tree before git ran, reported only as CANDIDATE_FAILED. Asked of the
+    KERNEL (a real listing), not computed from group records. "OK" or "DENIED"; never a file name."""
+    try:
+        os.listdir(str(paths.stage_dir))
+    except OSError:
+        return "DENIED"
+    return "OK"
+
+
 # ---------------------------------------------------------------- wipe
 
 def _euid_user() -> str:
@@ -328,7 +341,7 @@ def darwin_snapshot(darwin_base=None) -> int:
 
 
 def main(argv, *, paths: SealPaths = None, killer=None, execve=None, darwin_base=None) -> int:
-    """probe | wipe <run_id> | darwin-snapshot | vm-start|vm-shell|vm-copy|vm-delete <run_id> ... | vm-list.
+    """probe | stage-probe | wipe <run_id> | darwin-snapshot | vm-start|vm-shell|vm-copy|vm-delete <run_id> ... | vm-list.
 
     Rev 3 #1: candidate CODE no longer executes through this wrapper. The candidate runs inside a
     disposable VM (vm_runner), so the privileged `sudo -u zurvancandidate zurvan-candidate-run` door
@@ -346,6 +359,10 @@ def main(argv, *, paths: SealPaths = None, killer=None, execve=None, darwin_base
             return 0
         if len(argv) == 2 and argv[0] == "wipe":
             wipe(paths, _cr_check_run_id(argv[1]), killer=killer)
+            return 0
+        if argv == ["stage-probe"]:
+            sys.stdout.write(stage_probe(paths) + "\n")
+            sys.stdout.flush()
             return 0
         if argv == ["darwin-snapshot"]:
             return darwin_snapshot(darwin_base)

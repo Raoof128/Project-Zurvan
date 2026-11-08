@@ -166,6 +166,9 @@ class BrokerContext:
     sweep_settle: object = None             # (count_fn) -> int: waits, bounded, for count_fn() to reach 0
     sweep_foreign_processes: object = None  # () -> int: candidate processes NOT a verified Apple system worker
     sweep_foreign_report: object = None     # () -> str: diagnostic only (sealed-volume exe paths or "other")
+    # Gate 4 (2026-11-08): the candidate could not list the stage dir (sealed identities had PrimaryGroupID 20), so
+    # every run died in vm-push-tree. Asked AS the candidate through the door; None (no seam) fails the check.
+    candidate_stage_access: object = None   # () -> bool
 
 
 # Rev 3 #1: the candidate executes inside a disposable VM. The in-guest candidate entry and the pinned
@@ -344,15 +347,24 @@ def broker_push_candidate_tree(run_id: str, paths: SealPaths, commit: str, *, ru
     vmr.vm_run(run_id, paths, ["sudo", "/bin/sh", "-c", script], runner=runner, timeout=600)
 
 
+# Which step a failing run last reached (gate 4, 2026-11-08: a charged run ended CANDIDATE_FAILED after 3.5 min with no
+# record of where). Stage names, query numbers, steps, seconds and exit codes only -- never text the candidate wrote.
+_LAUNCH_PROGRESS = {}
+
+
 def broker_vm_launch(run_id: str, paths: SealPaths, corpus_sha: str, commit: str):
     """The ONE candidate-execution path: boot this run's disposable VM, stage the corpus CONTENT and build +
     mount the read-only corpus IN-GUEST (bound to corpus_sha), then return a shell Popen running the candidate
     on the protocol channel with the sealed env. There is no host-side execution fallback; a boot/provision/
     protocol failure propagates as a SealRefusal the broker charges and fails closed on."""
     from . import vm_runner as vmr
+    _LAUNCH_PROGRESS["stage"] = "vm_start"
     vmr.vm_start(run_id, paths)              # the door renders the golden config itself; no image choice here
+    _LAUNCH_PROGRESS["stage"] = "push_tree"
     broker_push_candidate_tree(run_id, paths, commit)
+    _LAUNCH_PROGRESS["stage"] = "provision"
     broker_provision_corpus(run_id, paths, corpus_sha)
+    _LAUNCH_PROGRESS["stage"] = "launch"
     return vmr.vm_launch(run_id, paths, GUEST_CANDIDATE_CMD, boot=False, guest_env=broker_candidate_env(),
                          guest_user=GUEST_CANDIDATE_USER)
 
@@ -435,6 +447,13 @@ def production_context(paths: SealPaths) -> BrokerContext:
             return {}
         return got if done.returncode == 0 and isinstance(got, dict) else {}
 
+    def stage_access():
+        try:
+            done = _broker_run_tool(sudo + ["stage-probe"], env)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return done.returncode == 0 and done.stdout == b"OK\n"
+
     def darwin_snapshot():
         # AS THE CANDIDATE, through the door: the eval identity cannot list the candidate's 0700 T/ and C/. Any
         # failure raises; broker_sweep_baseline / broker_post_run_violation turn that into a violation.
@@ -468,6 +487,7 @@ def production_context(paths: SealPaths) -> BrokerContext:
         sweep_settle=sweep.settle_processes,
         sweep_foreign_processes=lambda: sweep.candidate_processes(cand_uid, allow=sweep.SYSTEM_WORKERS),
         sweep_foreign_report=lambda: sweep.foreign_process_report(cand_uid),
+        candidate_stage_access=stage_access,
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,
         scan=scan_mod.scan_run, reseal=scan_mod.reseal_after_burn,
@@ -786,9 +806,32 @@ def _broker_read_line(fd: int, buf: bytearray, deadline: float) -> bytes:
         buf.extend(chunk)
 
 
-def broker_drive(proc, items, spec, sent: list):
+def broker_failure_note(progress: dict, exc) -> str:
+    """One line for the private errors.log: the stage reached, the query number, step, seconds into that step,
+    the candidate's exit code and the exception TYPE (plus a SealRefusal's code). No candidate-written text."""
+    def num(v):
+        return str(v) if type(v) is int else "-"
+    t0 = progress.get("t0")
+    elapsed = int(time.monotonic() - t0) if isinstance(t0, float) else None
+    code = getattr(exc, "code", None)
+    return "candidate_failed stage=%s qid=%s step=%s elapsed_s=%s rc=%s exc=%s%s" % (
+        progress.get("stage") if progress.get("stage") in _FAILURE_STAGES else "-",
+        num(progress.get("qid")),
+        progress.get("step") if progress.get("step") in _FAILURE_STEPS else "-",
+        num(elapsed), num(progress.get("rc")), type(exc).__name__,
+        (":" + code) if isinstance(code, str) and re.fullmatch(r"[A-Z_]{1,40}", code) else "")
+
+
+_FAILURE_STAGES = ("launch_candidate", "vm_start", "push_tree", "provision", "launch", "query")
+_FAILURE_STEPS = ("write", "read", "decode", "finish_eof", "finish_exit")
+
+
+def broker_drive(proc, items, spec, sent: list, progress=None):
     """Send one query at a time, decode each answer strictly. Returns (results per item, latencies ms).
-    `sent` is appended BEFORE each send so a burn covers exactly what the candidate may have seen."""
+    `sent` is appended BEFORE each send so a burn covers exactly what the candidate may have seen.
+    `progress` (optional dict) records the query number and step reached, for the private failure note."""
+    progress = {} if progress is None else progress
+    progress["stage"] = "query"
     policy = spec["run_policy"]
     qt, max_results = policy["query_timeout_s"], policy["max_results"]
     run_deadline = time.monotonic() + policy["run_timeout_s"]
@@ -803,10 +846,14 @@ def broker_drive(proc, items, spec, sent: list):
             raise _broker_fail() from None
         sent.append(item["id"])
         t0 = time.monotonic()
+        progress.update(qid=qid, t0=t0)
         limit = min(run_deadline, t0 + (qt * STARTUP_FACTOR if qid == 0 else qt))
+        progress["step"] = "write"
         _broker_write_all(in_fd, line, limit)
+        progress["step"] = "read"
         raw = _broker_read_line(out_fd, buf, limit)
         latencies.append((time.monotonic() - t0) * 1000.0)
+        progress["step"] = "decode"
         try:
             results.append(protocol.decode_response(raw, qid, max_results)["results"])
         except ValueError:
@@ -816,6 +863,7 @@ def broker_drive(proc, items, spec, sent: list):
         proc.stdin.close()
     except OSError:
         pass
+    progress.update(step="finish_eof", t0=time.monotonic())
     end = time.monotonic() + FINISH_TIMEOUT
     while True:
         left = end - time.monotonic()
@@ -828,10 +876,12 @@ def broker_drive(proc, items, spec, sent: list):
         if not chunk:
             break
         raise _broker_fail()  # unsolicited output after the last answer
+    progress["step"] = "finish_exit"
     try:
         rc = proc.wait(timeout=FINISH_TIMEOUT)
     except subprocess.TimeoutExpired:
         raise _broker_fail() from None
+    progress["rc"] = rc if type(rc) is int else None
     if rc != 0:
         raise _broker_fail()
     return results, latencies
@@ -1222,11 +1272,14 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
     try:
         sent, proc, failure, results, latencies = [], None, None, None, None
         sweep_base = broker_sweep_baseline(ctx)   # strictly before the candidate exists
+        _LAUNCH_PROGRESS.clear()
+        _LAUNCH_PROGRESS["stage"] = "launch_candidate"
         try:
             proc = ctx.launch_candidate(run_id, corpus_sha, args["commit"])
-            results, latencies = broker_drive(proc, items, spec, sent)
-        except Exception:  # noqa: BLE001 - any candidate-side failure, however it surfaces
+            results, latencies = broker_drive(proc, items, spec, sent, progress=_LAUNCH_PROGRESS)
+        except Exception as exc:  # noqa: BLE001 - any candidate-side failure, however it surfaces
             failure = "CANDIDATE_FAILED"
+            broker_log_error(paths, "run %s: %s" % (run_id, broker_failure_note(_LAUNCH_PROGRESS, exc)))
         finally:
             broker_kill(proc)
         def sweep_note(text):
@@ -1463,6 +1516,13 @@ def _broker_check_probe(paths, ctx) -> bool:
             and all(v in ("EACCES", "ENOENT") for v in got.values()))
 
 
+def _broker_check_candidate_stage(paths, ctx) -> bool:
+    """The candidate can list the stage dir (the kernel's answer, asked through the door). Without it every charged
+    run fails in vm-push-tree: the seal must refuse before a run can spend budget."""
+    fn = getattr(ctx, "candidate_stage_access", None)
+    return fn is not None and fn() is True
+
+
 def _broker_check_tm(paths, ctx) -> bool:
     return bool(ctx.tmutil_isexcluded(paths.keys_dir))
 
@@ -1555,6 +1615,7 @@ _SEAL_CHECKS = (
     ("ledger_valid", _broker_check_ledger),
     ("manifest_valid", _broker_check_manifest),
     ("tm_excluded_private", _broker_check_tm_private),
+    ("candidate_reaches_stage", _broker_check_candidate_stage),
 )
 
 

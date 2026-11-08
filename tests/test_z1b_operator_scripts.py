@@ -314,6 +314,12 @@ def test_t12_setup_users_groups_and_login_hiding(t12_world):
         assert re.search(rf"/usr/bin/dscl \. -create /Users/{user} Password '?\*'?$", text, re.M)
         assert f"NFSHomeDirectory /Users/{user}" in text
     assert "/usr/bin/dscl . -append /Groups/zurvancorpus GroupMembership zurvaneval zurvancandidate zurvanauthor" in text
+    # gate 4 (2026-11-08): installed identities came out with PrimaryGroupID 20 and the candidate could not reach the
+    # stage dir. Each identity is an explicit member of its own group, and its primary group is asserted.
+    for user, var in (("zurvaneval", "ZV_EVAL_ID"), ("zurvancandidate", "ZV_CAND_ID"), ("zurvanauthor", "ZV_AUTHOR_ID")):
+        assert f"/usr/bin/dscl . -append /Groups/{user} GroupMembership {user}" in text
+        assert re.search(r'\[ "\$\(/usr/bin/dscl \. -read /Users/%s PrimaryGroupID \| .*\)" = "\$%s" \] \|\| \{ echo '
+                         % (user, var), text), user
     assert "-create /Groups/zurvancorpus" in text and "-create /Groups/zurvancandidate" in text
     # non-admin: neither user is ever appended to the admin group
     assert "/Groups/admin" not in text
