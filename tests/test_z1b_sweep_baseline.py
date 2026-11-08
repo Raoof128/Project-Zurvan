@@ -175,17 +175,19 @@ _sb_needs_nonroot = pytest.mark.skipif(os.geteuid() == 0, reason="chmod-based de
 
 @pytest.fixture
 def _sb_opaque(tmp_path):
-    """A candidate-owned darwin tree with a mode-000 directory (as production's eval identity sees the
-    candidate's 0700 C/ and T/). Yields (base, opaque_dir, lock, unlock); perms are always restored."""
+    """A candidate-owned darwin tree with a directory its OWNER cannot list but OTHER identities can traverse
+    (mode 0311). Since Option A (2026-11-08) a directory nobody else can enter is private and its contents are not
+    tracked; this traversable-but-unlistable case must stay strict, because the dev identity could open a file in
+    it by a name agreed in advance. Yields (base, opaque_dir, lock, unlock); perms are always restored."""
     base, root = _sb_folders(tmp_path)
     d = root / "T"
     (d / "kept").write_text("x")
 
     def lock():
-        os.chmod(str(d), 0o000)
+        os.chmod(str(d), 0o311)
 
     def unlock():
-        os.chmod(str(d), 0o700)
+        os.chmod(str(d), 0o755)
 
     lock()
     try:
@@ -629,17 +631,18 @@ def _sb_settle_ctx(calls, all_procs, foreign_procs, settle_result=None):
 
 def test_sb_post_run_settles_first_then_sweeps_then_checks_foreign_processes():
     calls = []
-    assert B.broker_post_run_violation(_sb_settle_ctx(calls, [0], [0]), "r" * 16, {}) is False
-    assert calls == ["wipe", "settle", "procs", "leftovers", "darwin", "foreign"]
+    assert B.broker_post_run_violation(_sb_settle_ctx(calls, [], [0, 0]), "r" * 16, {}) is False
+    # the settle waits on FOREIGN processes (Option A): Apple's per-user agents never count
+    assert calls == ["wipe", "settle", "foreign", "leftovers", "darwin", "foreign"]
 
 
 def test_sb_a_spotlight_worker_launchd_starts_during_the_sweep_is_not_a_violation():
-    # all candidate processes: 0 at settle; then launchd starts an importer: foreign (non-Apple) count stays 0
-    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [0]), "r" * 16, {}) is False
+    # launchd starts an importer during the sweep: the foreign (non-Apple) count stays 0 at both checks
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [], [0, 0]), "r" * 16, {}) is False
 
 
 def test_sb_a_foreign_process_at_the_final_check_is_a_violation():
-    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [1]), "r" * 16, {}) is True
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [], [0, 1]), "r" * 16, {}) is True
 
 
 def test_sb_a_process_that_never_exits_is_a_violation_and_the_fs_sweep_never_runs():
@@ -673,11 +676,11 @@ def test_sb_production_context_wires_the_settle_and_the_verified_worker_allowanc
 # ================================================================ which arm fired: counts only, in the private errors.log
 
 @pytest.mark.parametrize("ctx_over,want", [
-    (dict(settle_result=2), "processes_did_not_settle n=2"),
+    (dict(settle_result=2), "processes_did_not_settle n=2 exe=unknown"),
     (dict(leftovers=["/private/tmp/a", "/private/tmp/b"]), "strict_leftovers n=2"),
     (dict(changes=["/private/var/folders/6f/h/T/q-text-chosen-by-candidate", "/private/var/folders/6f/h/T/x",
                    "/private/var/folders/6f/h/C/y"]), "darwin_changes n=3 C:1,T:2"),
-    (dict(foreign=[1]), "foreign_processes n=1"),
+    (dict(foreign=[0, 1]), "foreign_processes n=1 exe=unknown"),
 ])
 def test_sb_the_violation_note_names_the_arm_with_counts_only(ctx_over, want):
     notes = []
@@ -686,7 +689,8 @@ def test_sb_the_violation_note_names_the_arm_with_counts_only(ctx_over, want):
         sweep_settle=lambda count: ctx_over.get("settle_result", count()),
         sweep_leftovers=lambda: list(ctx_over.get("leftovers", [])),
         sweep_darwin_changes=lambda b: list(ctx_over.get("changes", [])),
-        sweep_foreign_processes=lambda: list(ctx_over.get("foreign", [0])).pop(0))
+        sweep_foreign_processes=lambda: foreign_seq.pop(0))
+    foreign_seq = list(ctx_over.get("foreign", [0, 0]))
     assert B.broker_post_run_violation(ctx, "r" * 16, {}, note=notes.append) is True
     assert notes == [want]
     assert "q-text" not in notes[0] and "/" not in notes[0]       # no path, no name ever reaches the note
@@ -694,13 +698,13 @@ def test_sb_the_violation_note_names_the_arm_with_counts_only(ctx_over, want):
 
 def test_sb_a_clean_sweep_writes_no_note_and_a_broken_note_never_changes_the_verdict():
     notes = []
-    ctx = _sb_settle_ctx([], [0], [0])
+    ctx = _sb_settle_ctx([], [], [0, 0])
     assert B.broker_post_run_violation(ctx, "r" * 16, {}, note=notes.append) is False and notes == []
 
     def broken(text):
         raise OSError("disk full")
-    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [1]), "r" * 16, {}, note=broken) is True
-    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [0]), "r" * 16, {}, note=broken) is False
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [], [0, 1]), "r" * 16, {}, note=broken) is True
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [], [0, 0]), "r" * 16, {}, note=broken) is False
 
 
 def test_sb_a_sweep_exception_is_noted_by_type_only():
@@ -719,3 +723,103 @@ def test_sb_a_real_violation_records_its_arm_in_the_private_errors_log(tmp_path)
     log = (E.paths.runs_dir / "errors.log").read_text()
     assert "post-run sweep " in log and "processes_did_not_settle n=3" in log
     assert oct(os.lstat(str(E.paths.runs_dir / "errors.log")).st_mode & 0o777) == "0o600"
+
+
+
+# ================================================================ Option A: a directory nobody else can enter is private (2026-11-08)
+# Gate 4 failed three times on macOS's own per-user services (Spotlight importers, lsd, distnoted) writing into the
+# candidate's 0700 T/ and C/ (and data vaults in 0/). Raouf chose Option A: judge by who could read it. A private
+# directory is tracked by identity and mode only; anything another identity can enter keeps the strict diff.
+
+def _sb_private_T(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    t = root / "T"
+    (t / "existing").write_text("x")
+    os.chmod(str(t), 0o700)
+    return base, root, t
+
+
+def test_sb_content_inside_a_private_directory_is_not_tracked(tmp_path):
+    base, root, t = _sb_private_T(tmp_path)
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    assert snap[str(t)][5] is True and not any(k.startswith(str(t) + os.sep) for k in snap)
+    (t / "mdworker-temp").write_text("x")                  # what Spotlight/lsd/distnoted do as the candidate
+    (t / "sub").mkdir()
+    (t / "sub" / "cache").write_text("y")
+    _sb_bump(t / "existing")
+    assert sweep.darwin_changes(uid, snap, str(base)) == []
+
+
+@pytest.mark.parametrize("mode", [0o750, 0o710, 0o701, 0o755])
+def test_sb_opening_a_private_directory_to_group_or_others_is_a_change(tmp_path, mode):
+    base, root, t = _sb_private_T(tmp_path)
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    os.chmod(str(t), mode)                                   # staff (the dev's group) or everyone may now enter
+    assert str(t) in sweep.darwin_changes(uid, snap, str(base))
+
+
+def test_sb_an_acl_added_to_a_private_directory_is_a_change(tmp_path):
+    import subprocess as sp
+    base, root, t = _sb_private_T(tmp_path)
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    assert sp.run(["/bin/chmod", "+a", "everyone allow list,search,read", str(t)]).returncode == 0
+    changes = sweep.darwin_changes(uid, snap, str(base))
+    assert str(t) in changes and str(t / "existing") in changes   # no longer private: its contents now count
+
+
+def test_sb_a_new_private_directory_in_a_traversable_folder_is_still_a_new_path(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    snap = sweep.snapshot_darwin(uid, str(base))
+    (root / "X" / "hidden").mkdir(mode=0o700)
+    assert sweep.darwin_changes(uid, snap, str(base)) == [str(root / "X" / "hidden")]
+
+
+@_sb_needs_nonroot
+def test_sb_a_mode_000_directory_is_private_and_its_content_is_not_tracked(tmp_path):
+    base, root, t = _sb_private_T(tmp_path)
+    uid = os.getuid()
+    os.chmod(str(t), 0o000)
+    try:
+        snap = sweep.snapshot_darwin(uid, str(base))
+        os.chmod(str(t), 0o700)
+        (t / "dropped").write_text("x")
+        os.chmod(str(t), 0o000)
+        assert sweep.darwin_changes(uid, snap, str(base)) == []
+    finally:
+        os.chmod(str(t), 0o700)
+
+
+def test_sb_the_acl_probe_fails_closed():
+    assert sweep._sweep_has_acl("/nonexistent/zurvan/acl/probe") is True   # cannot tell -> treated as open
+
+
+
+def test_sb_the_settle_waits_on_foreign_processes_not_on_apples_agents():
+    # lsd/distnoted stay up for half an hour as the candidate; waiting for ALL processes would always time out
+    seen = []
+    ctx = types.SimpleNamespace(wipe=lambda r: None, sweep_processes=lambda: 3,
+                                sweep_settle=lambda count: seen.append(count) or count(),
+                                sweep_foreign_processes=lambda: 0, sweep_leftovers=lambda: [],
+                                sweep_darwin_changes=lambda b: [])
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}) is False
+    assert seen == [ctx.sweep_foreign_processes]
+
+
+def test_sb_the_foreign_report_prints_only_sealed_volume_paths():
+    paths = {1: "/usr/libexec/lsd", 2: "/usr/bin/python3", 3: "/Users/zurvancandidate/l/evil", 4: None,
+             5: "/System/x y"}
+    rep = sweep.foreign_process_report(os.getuid(), runner=_sb_ps([1, 2, 3, 4, 5]), pid_path=paths.get,
+                                       alive=lambda p: True)
+    assert rep == "/usr/bin/python3,other,unreadable"              # lsd allowed; candidate-chosen names hidden
+
+
+def test_sb_every_allowed_worker_is_a_root_owned_file_on_the_sealed_volume():
+    for path in sorted(sweep.SYSTEM_WORKERS):
+        if not os.path.exists(path):
+            pytest.skip("not this macOS: %s" % path)
+        st = os.lstat(path)
+        assert path.startswith(sweep._SEALED_PREFIXES) and st.st_uid == 0 and not st.st_mode & 0o022, path

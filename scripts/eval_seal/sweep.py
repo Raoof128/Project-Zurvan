@@ -5,6 +5,7 @@ candidate escaped its sandbox or left a process alive, so queries may have leake
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -99,10 +100,51 @@ def _sweep_signature(st, opaque: bool = False) -> tuple:
     return (st.st_ino, st.st_mtime_ns, st.st_size, st.st_mode, st.st_ctime_ns, opaque)
 
 
+def _sweep_has_acl(path: str) -> bool:
+    """True when `path` carries an extended (NFSv4-style) ACL, or when that cannot be determined (fail closed: an
+    ACL can grant another identity access that the mode bits do not show)."""
+    import ctypes
+    import ctypes.util
+    try:
+        os.lstat(path)            # acl_get_link_np reports ENOENT for "no ACL" AND for "no such path"
+    except OSError:
+        return True
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "/usr/lib/libSystem.B.dylib", use_errno=True)
+        libc.acl_get_link_np.restype = ctypes.c_void_p
+        libc.acl_get_link_np.argtypes = (ctypes.c_char_p, ctypes.c_int)
+        acl = libc.acl_get_link_np(os.fsencode(path), 0x00000100)          # ACL_TYPE_EXTENDED
+    except (OSError, AttributeError, ValueError):
+        return True
+    if not acl:
+        return ctypes.get_errno() != errno.ENOENT                           # ENOENT = no ACL; anything else: unknown
+    try:
+        libc.acl_free(ctypes.c_void_p(acl))
+    except (OSError, AttributeError):
+        pass
+    return True
+
+
+def _sweep_private_dir(path: str, st) -> bool:
+    """A directory no other identity can enter: no group/other execute bit and no ACL. Its CONTENTS cannot reach
+    the development identity (the OS permission is the wall the whole seal rests on), so only its identity and mode
+    are tracked -- a chmod or an added ACL that would open it is still a change."""
+    return stat.S_ISDIR(st.st_mode) and not st.st_mode & 0o011 and not _sweep_has_acl(path)
+
+
+def _sweep_private_signature(st) -> tuple:
+    return (st.st_ino, 0, 0, st.st_mode, 0, True)
+
+
 def snapshot_darwin(candidate_uid: int, base=None) -> dict:
-    """path -> signature (see _sweep_signature) for every candidate-owned entry under the candidate's
-    darwin per-user roots (the roots themselves included). lstat only, never follows symlinks; an entry that
-    vanishes mid-walk is skipped. Any other failure propagates: the caller treats it as a violation."""
+    """path -> signature for every candidate-owned entry under the candidate's darwin per-user roots (the roots
+    themselves included). lstat only, never follows symlinks; an entry that vanishes mid-walk, or that the kernel
+    refuses even to lstat (an Apple data vault, e.g. 0/com.apple.LaunchServices.dv), is skipped.
+
+    Option A (Raouf, 2026-11-08, after gate 4 failed three times on macOS's own per-user services -- Spotlight
+    importers, lsd, distnoted -- writing there as the candidate): a PRIVATE directory (_sweep_private_dir: T/ and
+    C/ are 0700) is recorded by identity and mode only and not descended. Everything another identity can enter
+    keeps the full content signature, including a directory its owner cannot list but others can traverse."""
     uid = _sweep_check_uid(candidate_uid)
     snap = {}
     opaque = set()
@@ -118,25 +160,40 @@ def snapshot_darwin(candidate_uid: int, base=None) -> dict:
         except OSError:
             continue
         if st.st_uid == uid:
+            if _sweep_private_dir(root, st):
+                snap[root] = _sweep_private_signature(st)
+                continue
             snap[root] = _sweep_signature(st)
         for top, dirnames, filenames in os.walk(root, topdown=True, onerror=unlistable, followlinks=False):
+            keep = []
             for name in list(dirnames) + list(filenames):
                 full = os.path.join(top, name)
                 try:
                     st = os.lstat(full)
                 except OSError:
                     continue
-                if st.st_uid == uid:
-                    snap[full] = _sweep_signature(st)
+                if st.st_uid != uid:
+                    if name in dirnames:
+                        keep.append(name)
+                    continue
+                if _sweep_private_dir(full, st):
+                    snap[full] = _sweep_private_signature(st)
+                    continue                                  # never descended: its contents are not tracked
+                snap[full] = _sweep_signature(st)
+                if name in dirnames:
+                    keep.append(name)
+            dirnames[:] = keep
     for path in opaque:
-        # each directory os.walk could not list is re-signed in full (lstat only; vanished -> skipped)
+        # each directory os.walk could not list is re-signed (lstat only; vanished -> skipped): in full when other
+        # identities can traverse it (its own times are the only evidence of a child), else as a private directory
         try:
             st = os.lstat(path)
         except OSError:
             snap.pop(path, None)
             continue
         if st.st_uid == uid and stat.S_ISDIR(st.st_mode):
-            snap[path] = _sweep_signature(st, opaque=True)
+            snap[path] = (_sweep_private_signature(st) if _sweep_private_dir(path, st)
+                          else _sweep_signature(st, opaque=True))
     return snap
 
 
@@ -161,7 +218,7 @@ def darwin_changes(candidate_uid: int, baseline: dict, base=None) -> list:
 # (running as the candidate) moved T/'s mtime and failed a clean run closed. The candidate door therefore takes
 # the snapshot AS THE CANDIDATE, who can list its own folders, and prints it here; the broker keeps the baseline
 # and diffs. Every malformed document is refused (the caller turns that into a violation).
-SNAPSHOT_SCHEMA = "zurvan.z1b.darwin-snapshot.v1"
+SNAPSHOT_SCHEMA = "zurvan.z1b.darwin-snapshot.v2"   # v2: private directories are identity+mode only
 MAX_SNAPSHOT_ENTRIES = 200000
 
 
@@ -216,7 +273,23 @@ def _sweep_default_runner(cmd):
 # is the sealed, signed system volume, so no candidate-owned file can have this path.
 SPOTLIGHT_WORKER = ("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/"
                     "Versions/A/Support/mdworker_shared")
-SYSTEM_WORKERS = frozenset({SPOTLIGHT_WORKER})
+_METADATA_SUPPORT = ("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/"
+                     "Versions/A/Support/")
+# Per-user Apple agents launchd keeps running AS THE CANDIDATE (observed live 2026-11-08: mdworker_shared after the
+# 12:31 run; distnoted, lsd and mdbulkimport alive 33 min after the 12:14 run), plus the per-user Security/CF agents
+# any Apple framework the VM tooling loads can start. None of them executes caller-supplied code.
+SYSTEM_WORKERS = frozenset({
+    SPOTLIGHT_WORKER,
+    _METADATA_SUPPORT + "mdbulkimport",
+    "/usr/sbin/distnoted",
+    "/usr/libexec/lsd",
+    "/usr/sbin/cfprefsd",
+    "/usr/libexec/trustd",
+    "/usr/libexec/secinitd",
+})
+# Paths on the sealed system volume: a process running one of these files cannot have a name the candidate chose,
+# so the diagnostic may print it. Anything else is printed as "other".
+_SEALED_PREFIXES = ("/System/", "/usr/bin/", "/usr/sbin/", "/usr/libexec/", "/usr/lib/", "/bin/", "/sbin/")
 SETTLE_TIMEOUT_S = 300
 SETTLE_POLL_S = 2
 
@@ -301,3 +374,29 @@ def candidate_processes(candidate_uid: int, runner=None, allow=frozenset(), pid_
         elif path not in allow:
             count += 1
     return count
+
+
+def foreign_process_report(candidate_uid: int, runner=None, allow=SYSTEM_WORKERS, pid_path=None, alive=None) -> str:
+    """For the private diagnostic only: the kernel exe path of each candidate process that is NOT an allowed
+    worker, printed only when it lies on the sealed system volume (a name the candidate cannot choose); else
+    "other" / "unreadable". Never raises (a diagnostic never changes a verdict)."""
+    try:
+        uid = _sweep_check_uid(candidate_uid)
+        rc, out = (runner or _sweep_default_runner)([_PS, "-U", str(uid), "-o", "pid="])
+        pids = [int(ln) for ln in out.split() if ln.isascii() and ln.isdigit()]
+    except Exception:  # noqa: BLE001
+        return "ps_failed"
+    pid_path = pid_path or _sweep_pid_path
+    alive = alive or _sweep_pid_alive
+    seen = []
+    for pid in pids:
+        path = pid_path(pid)
+        if path is None:
+            if alive(pid):
+                seen.append("unreadable")
+            continue
+        if path in allow:
+            continue
+        seen.append(path if path.startswith(_SEALED_PREFIXES) and ".." not in path
+                    and all(c.isprintable() and c not in " ,;" for c in path) else "other")
+    return ",".join(sorted(set(seen))) or "none"

@@ -165,6 +165,7 @@ class BrokerContext:
     # seams default to the STRICTER behaviour (no wait; every process counts); production_context sets them.
     sweep_settle: object = None             # (count_fn) -> int: waits, bounded, for count_fn() to reach 0
     sweep_foreign_processes: object = None  # () -> int: candidate processes NOT a verified Apple system worker
+    sweep_foreign_report: object = None     # () -> str: diagnostic only (sealed-volume exe paths or "other")
 
 
 # Rev 3 #1: the candidate executes inside a disposable VM. The in-guest candidate entry and the pinned
@@ -466,6 +467,7 @@ def production_context(paths: SealPaths) -> BrokerContext:
         sweep_processes=lambda: sweep.candidate_processes(cand_uid),
         sweep_settle=sweep.settle_processes,
         sweep_foreign_processes=lambda: sweep.candidate_processes(cand_uid, allow=sweep.SYSTEM_WORKERS),
+        sweep_foreign_report=lambda: sweep.foreign_process_report(cand_uid),
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,
         scan=scan_mod.scan_run, reseal=scan_mod.reseal_after_burn,
@@ -906,16 +908,23 @@ def broker_post_run_violation(ctx, run_id: str, baseline, note=None) -> bool:
         # Candidate-uid processes can only descend from existing ones, so zero of them BEFORE the filesystem
         # sweep means nothing can write after it; the second check closes the window the sweep itself leaves.
         #
-        # The first check WAITS (bounded) for every candidate process to exit -- the system's Spotlight workers
-        # included -- so the filesystem sweep sees their temp files gone; waiting only delays the sweep, it never
-        # skips it, and a process that outlives the bound is a violation. After zero, nothing the candidate ran can
-        # fork, so a candidate-uid process seen by the final check was started by launchd: it is tolerated only if
-        # its real executable (proc_pidpath, on the sealed system volume) is a listed Apple worker.
+        # Option A (2026-11-08): macOS keeps per-user Apple agents (lsd, distnoted, Spotlight importers...) running
+        # AS THE CANDIDATE for tens of minutes, launched by launchd, not by the run. Every check counts the FOREIGN
+        # processes: candidate-uid processes whose kernel executable path (proc_pidpath, sealed system volume) is
+        # NOT a listed Apple agent. The first check WAITS (bounded) for those to exit -- waiting only delays the
+        # sweep, never skips it, and one that outlives the bound is a violation; the final check repeats it.
         settle = getattr(ctx, "sweep_settle", None) or (lambda count: count())
         foreign = getattr(ctx, "sweep_foreign_processes", None) or ctx.sweep_processes
-        n = int(settle(ctx.sweep_processes))
+
+        def report():
+            fn = getattr(ctx, "sweep_foreign_report", None)
+            try:
+                return fn() if fn is not None else "unknown"
+            except Exception:  # noqa: BLE001
+                return "unknown"
+        n = int(settle(foreign))
         if n > 0:
-            say("processes_did_not_settle n=%d" % n)
+            say("processes_did_not_settle n=%d exe=%s" % (n, report()))
             return True
         left = ctx.sweep_leftovers()
         if left:
@@ -927,7 +936,7 @@ def broker_post_run_violation(ctx, run_id: str, baseline, note=None) -> bool:
             return True
         n = int(foreign())
         if n > 0:
-            say("foreign_processes n=%d" % n)
+            say("foreign_processes n=%d exe=%s" % (n, report()))
             return True
         return False
     except Exception as exc:  # noqa: BLE001
