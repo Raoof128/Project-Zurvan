@@ -34,12 +34,14 @@ GUEST_IMAGE_URL = ("https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/"
 GUEST_IMAGE_ARCH = "aarch64"
 GUEST_IMAGE_DIGEST = ("sha512:737b0eb365944ffcf6da477c059c105bbde222942fd5a8380c07db088365b18db"
                       "c60a0f2824ea9a3904d57e194e0d05a7074302c3ebc104d0aecb6ddc6ffd91c")
-# The GOLDEN image the broker actually boots (Debian 12 aarch64 + /opt/z1b runtime/candidate/model, baked
-# and validated end-to-end 2026-10-03, design §7m). Its sha512 is computed AFTER flattening; install.sh
+# The GOLDEN image the broker actually boots (Debian 12 aarch64 + /opt/z1b runtime/model + scripts tree).
+# Re-baked 2026-11-08 by scripts/eval_seal/bake_golden.sh at eabcf17 (CPU torch 2.8.0, host-matched stack,
+# sqlite-vec 0.1.7; bake user, keys and cloud-init sudoers removed before the flatten); the 2026-10-03 hand
+# bake (design §7m) was lost. Its sha512 is computed AFTER flattening; install.sh
 # places broker_dir/images/guest.qcow2 only when it matches this, and it is bound into the run identity so
 # a changed image is never served from cache. A rebake (e.g. CPU-only torch) re-pins this.
-GOLDEN_IMAGE_DIGEST = ("sha512:41bfeb0bac30ec1c00b2ba766265c0b0d365abffd683f57e717b44deb2b17ac43ecfb"
-                       "ea709a3f4fabf5528e9e9b301dd3a7d7826fd0f969baf4aecf39c121728")
+GOLDEN_IMAGE_DIGEST = ("sha512:d185b7fb77201ce5e5ddb3a06dab865541ad0933b8c59c33c010eed6c86e498da191b"
+                       "31c89478cced79649098671bc6a22913f93d7f542b269b0183c4c533259")
 # Security review 2026-10-05 (egress bypass): the candidate identity owns the VM's host processes, and lima's
 # user-mode network maps the guest gateway onto HOST LOOPBACK -- where this machine serves mysqld, cloudflared,
 # local Python servers... pf therefore lets the candidate identity reach loopback ONLY on this reserved range,
