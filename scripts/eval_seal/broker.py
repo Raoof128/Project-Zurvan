@@ -160,6 +160,11 @@ class BrokerContext:
     root_uid: int
     eval_uid: int
     candidate_uid: int
+    # Gate 4 (2026-11-08): macOS's launchd starts Spotlight importers (mdworker_shared) AS THE CANDIDATE for files
+    # the run wrote; they lived ~1-2 min past teardown and the zero-process rule failed clean runs closed. Both
+    # seams default to the STRICTER behaviour (no wait; every process counts); production_context sets them.
+    sweep_settle: object = None             # (count_fn) -> int: waits, bounded, for count_fn() to reach 0
+    sweep_foreign_processes: object = None  # () -> int: candidate processes NOT a verified Apple system worker
 
 
 # Rev 3 #1: the candidate executes inside a disposable VM. The in-guest candidate entry and the pinned
@@ -459,6 +464,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
         sweep_baseline=darwin_snapshot,
         sweep_darwin_changes=lambda baseline: sweep.diff_snapshots(baseline, darwin_snapshot()),
         sweep_processes=lambda: sweep.candidate_processes(cand_uid),
+        sweep_settle=sweep.settle_processes,
+        sweep_foreign_processes=lambda: sweep.candidate_processes(cand_uid, allow=sweep.SYSTEM_WORKERS),
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,
         scan=scan_mod.scan_run, reseal=scan_mod.reseal_after_burn,
@@ -860,24 +867,71 @@ def broker_sweep_baseline(ctx):
         return _BASELINE_FAILED
 
 
-def broker_post_run_violation(ctx, run_id: str, baseline) -> bool:
+def _broker_darwin_root_counts(changes) -> str:
+    """'T:2,C:1' -- which darwin per-user subfolder each changed path is in, by count. Never a path or a name: an
+    escaped candidate chooses those, and this line is read by the operator."""
+    counts = {}
+    for path in changes:
+        parts = str(path).split("/")
+        try:
+            sub = parts[parts.index("folders") + 3]
+        except (ValueError, IndexError):
+            sub = "?"
+        sub = sub if sub in ("0", "C", "T", "X") else ("root" if sub == "" else "?")
+        counts[sub] = counts.get(sub, 0) + 1
+    return ",".join("%s:%d" % kv for kv in sorted(counts.items()))
+
+
+def broker_post_run_violation(ctx, run_id: str, baseline, note=None) -> bool:
     """Wipe the candidate's scratch, then sweep. Any strict-root leftover, any darwin path new or changed since
     `baseline`, any live process, or ANY failure to find out (including a failed baseline) is a violation
-    (assume the worst)."""
+    (assume the worst). `note(text)` (optional) receives WHICH arm fired and counts only -- never a path, name
+    or process detail -- for the broker's private errors.log (gate 4, 2026-11-08: two failed charged runs had
+    no record of which arm fired)."""
+    def say(text):
+        try:
+            if note is not None:
+                note(text)
+        except Exception:  # noqa: BLE001 - a diagnostic never changes the verdict
+            pass
+
     try:
         ctx.wipe(run_id)
     except Exception:  # noqa: BLE001
         pass
     try:
         if baseline is _BASELINE_FAILED:
+            say("baseline_failed")
             return True
         # Candidate-uid processes can only descend from existing ones, so zero of them BEFORE the filesystem
         # sweep means nothing can write after it; the second check closes the window the sweep itself leaves.
-        if int(ctx.sweep_processes()) > 0:
+        #
+        # The first check WAITS (bounded) for every candidate process to exit -- the system's Spotlight workers
+        # included -- so the filesystem sweep sees their temp files gone; waiting only delays the sweep, it never
+        # skips it, and a process that outlives the bound is a violation. After zero, nothing the candidate ran can
+        # fork, so a candidate-uid process seen by the final check was started by launchd: it is tolerated only if
+        # its real executable (proc_pidpath, on the sealed system volume) is a listed Apple worker.
+        settle = getattr(ctx, "sweep_settle", None) or (lambda count: count())
+        foreign = getattr(ctx, "sweep_foreign_processes", None) or ctx.sweep_processes
+        n = int(settle(ctx.sweep_processes))
+        if n > 0:
+            say("processes_did_not_settle n=%d" % n)
             return True
-        return (bool(ctx.sweep_leftovers()) or bool(ctx.sweep_darwin_changes(baseline))
-                or int(ctx.sweep_processes()) > 0)
-    except Exception:  # noqa: BLE001
+        left = ctx.sweep_leftovers()
+        if left:
+            say("strict_leftovers n=%d" % len(left))
+            return True
+        changes = ctx.sweep_darwin_changes(baseline)
+        if changes:
+            say("darwin_changes n=%d %s" % (len(changes), _broker_darwin_root_counts(changes)))
+            return True
+        n = int(foreign())
+        if n > 0:
+            say("foreign_processes n=%d" % n)
+            return True
+        return False
+    except Exception as exc:  # noqa: BLE001
+        say("sweep_error %s" % type(exc).__name__)
         return True
 
 
@@ -1166,7 +1220,9 @@ def _broker_run_charged(args, paths, ctx, led, spec, items, pages, m, smsha, cor
             failure = "CANDIDATE_FAILED"
         finally:
             broker_kill(proc)
-        if broker_post_run_violation(ctx, run_id, sweep_base):
+        def sweep_note(text):
+            broker_log_error(paths, "post-run sweep %s: %s" % (run_id, text))
+        if broker_post_run_violation(ctx, run_id, sweep_base, note=sweep_note):
             led.burn_items(list(sent), "sandbox_violation", broker_today(ctx))
             broker_record_incident(paths, led, "sandbox_violation", list(sent), ctx.now())
             try:

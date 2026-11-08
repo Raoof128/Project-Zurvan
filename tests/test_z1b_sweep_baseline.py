@@ -546,3 +546,176 @@ def test_sb_a_failed_or_garbled_door_snapshot_is_a_violation_before_and_after(tm
     probe = types.SimpleNamespace(wipe=lambda r: None, sweep_processes=lambda: 0, sweep_leftovers=lambda: [],
                                   sweep_darwin_changes=ctx.sweep_darwin_changes)
     assert B.broker_post_run_violation(probe, "r" * 16, {}) is True
+
+
+# ================================================================ Spotlight workers started by launchd AS THE CANDIDATE (gate 4, 2026-11-08)
+# The second charged gate-4 run (12:31) also ended SANDBOX_VIOLATION: right after it, `ps -U zurvancandidate` showed
+# nine /System/.../mdworker_shared processes (Spotlight importers launchd starts for files the run wrote), ~40 s old,
+# gone a minute or two later. The zero-process rule counted them. Now: the first check WAITS (bounded) for every
+# candidate process to exit; the final check tolerates only a verified Apple worker (kernel exe path, sealed volume).
+
+def test_sb_settle_waits_until_the_count_reaches_zero():
+    seq, slept = [3, 2, 0], []
+    clock = iter(range(100))
+    n = sweep.settle_processes(lambda: seq.pop(0), timeout=50, poll=2,
+                               sleep=slept.append, monotonic=lambda: next(clock))
+    assert n == 0 and slept == [2, 2] and seq == []
+
+
+def test_sb_settle_gives_up_at_the_deadline_and_returns_the_live_count():
+    t = [0.0]
+
+    def sleep(s):
+        t[0] += s
+    n = sweep.settle_processes(lambda: 1, timeout=10, poll=2, sleep=sleep, monotonic=lambda: t[0])
+    assert n == 1 and t[0] >= 10                        # bounded: a process that never exits is still reported
+
+
+def test_sb_settle_lets_a_failing_count_propagate():
+    def boom():
+        raise B.SealRefusal("SANDBOX_VIOLATION")
+    with pytest.raises(B.SealRefusal):
+        sweep.settle_processes(boom, timeout=10, poll=1, sleep=lambda s: None, monotonic=lambda: 0)
+
+
+def _sb_ps(pids):
+    return lambda cmd: (0, "".join("%d\n" % p for p in pids))
+
+
+def test_sb_only_a_verified_apple_worker_is_not_counted():
+    paths = {11: sweep.SPOTLIGHT_WORKER, 12: "/private/tmp/mdworker_shared",       # same name, wrong file
+             13: "/Users/zurvancandidate/x/System/Library/Frameworks/CoreServices.framework/Versions/A/"
+                 "Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared"}  # suffix match is not enough
+    n = sweep.candidate_processes(os.getuid(), runner=_sb_ps([11, 12, 13]), allow=sweep.SYSTEM_WORKERS,
+                                  pid_path=paths.get, alive=lambda p: True)
+    assert n == 2
+
+
+def test_sb_an_unreadable_process_counts_unless_it_has_exited():
+    n = sweep.candidate_processes(os.getuid(), runner=_sb_ps([21, 22]), allow=sweep.SYSTEM_WORKERS,
+                                  pid_path=lambda p: None, alive=lambda p: p == 21)
+    assert n == 1
+
+
+def test_sb_without_an_allowance_every_process_counts_and_no_path_is_read():
+    def never(pid):
+        raise AssertionError("pid_path must not be consulted")
+    assert sweep.candidate_processes(os.getuid(), runner=_sb_ps([1, 2, 3]), pid_path=never) == 3
+
+
+def test_sb_the_real_kernel_path_lookup_reads_this_process_and_launchd():
+    assert sweep._sweep_pid_path(1) == "/sbin/launchd"
+    assert sweep._sweep_pid_path(os.getpid()) == os.path.realpath(__import__("sys").executable)
+
+
+@pytest.mark.skipif(not os.path.isfile(sweep.SPOTLIGHT_WORKER), reason="not macOS with Spotlight")
+def test_sb_the_allowlisted_worker_is_the_real_file_on_the_sealed_system_volume():
+    st = os.lstat(sweep.SPOTLIGHT_WORKER)
+    assert st.st_uid == 0 and not st.st_mode & 0o022
+
+
+def _sb_settle_ctx(calls, all_procs, foreign_procs, settle_result=None):
+    def settle(count):
+        calls.append("settle")
+        return count() if settle_result is None else settle_result
+    return types.SimpleNamespace(
+        wipe=lambda r: calls.append("wipe"),
+        sweep_processes=lambda: calls.append("procs") or all_procs.pop(0),
+        sweep_settle=settle,
+        sweep_foreign_processes=lambda: calls.append("foreign") or foreign_procs.pop(0),
+        sweep_leftovers=lambda: calls.append("leftovers") or [],
+        sweep_darwin_changes=lambda b: calls.append("darwin") or [])
+
+
+def test_sb_post_run_settles_first_then_sweeps_then_checks_foreign_processes():
+    calls = []
+    assert B.broker_post_run_violation(_sb_settle_ctx(calls, [0], [0]), "r" * 16, {}) is False
+    assert calls == ["wipe", "settle", "procs", "leftovers", "darwin", "foreign"]
+
+
+def test_sb_a_spotlight_worker_launchd_starts_during_the_sweep_is_not_a_violation():
+    # all candidate processes: 0 at settle; then launchd starts an importer: foreign (non-Apple) count stays 0
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [0]), "r" * 16, {}) is False
+
+
+def test_sb_a_foreign_process_at_the_final_check_is_a_violation():
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [1]), "r" * 16, {}) is True
+
+
+def test_sb_a_process_that_never_exits_is_a_violation_and_the_fs_sweep_never_runs():
+    calls = []
+    assert B.broker_post_run_violation(_sb_settle_ctx(calls, [], [], settle_result=1), "r" * 16, {}) is True
+    assert calls == ["wipe", "settle"]
+
+
+def test_sb_without_the_new_seams_the_old_strict_rule_applies():
+    calls = []
+    ctx = _sb_proc_ctx([0, 1], calls)            # no sweep_settle / sweep_foreign_processes on this ctx
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}) is True
+    assert calls == ["wipe", "procs", "leftovers", "darwin", "procs"]
+
+
+def test_sb_production_context_wires_the_settle_and_the_verified_worker_allowance(tmp_path, monkeypatch):
+    uid = os.getuid()
+    monkeypatch.setattr(B.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=uid))
+    ctx = B.production_context(_sb_paths(tmp_path))
+    assert ctx.sweep_settle is sweep.settle_processes
+    seen = {}
+
+    def fake(cand_uid, runner=None, allow=frozenset(), pid_path=None, alive=None):
+        seen["allow"] = allow
+        return 0
+    monkeypatch.setattr(sweep, "candidate_processes", fake)
+    assert ctx.sweep_foreign_processes() == 0 and seen["allow"] == sweep.SYSTEM_WORKERS
+    assert ctx.sweep_processes() == 0 and seen["allow"] == frozenset()   # the settle counts EVERY process
+
+
+# ================================================================ which arm fired: counts only, in the private errors.log
+
+@pytest.mark.parametrize("ctx_over,want", [
+    (dict(settle_result=2), "processes_did_not_settle n=2"),
+    (dict(leftovers=["/private/tmp/a", "/private/tmp/b"]), "strict_leftovers n=2"),
+    (dict(changes=["/private/var/folders/6f/h/T/q-text-chosen-by-candidate", "/private/var/folders/6f/h/T/x",
+                   "/private/var/folders/6f/h/C/y"]), "darwin_changes n=3 C:1,T:2"),
+    (dict(foreign=[1]), "foreign_processes n=1"),
+])
+def test_sb_the_violation_note_names_the_arm_with_counts_only(ctx_over, want):
+    notes = []
+    ctx = types.SimpleNamespace(
+        wipe=lambda r: None, sweep_processes=lambda: 0,
+        sweep_settle=lambda count: ctx_over.get("settle_result", count()),
+        sweep_leftovers=lambda: list(ctx_over.get("leftovers", [])),
+        sweep_darwin_changes=lambda b: list(ctx_over.get("changes", [])),
+        sweep_foreign_processes=lambda: list(ctx_over.get("foreign", [0])).pop(0))
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}, note=notes.append) is True
+    assert notes == [want]
+    assert "q-text" not in notes[0] and "/" not in notes[0]       # no path, no name ever reaches the note
+
+
+def test_sb_a_clean_sweep_writes_no_note_and_a_broken_note_never_changes_the_verdict():
+    notes = []
+    ctx = _sb_settle_ctx([], [0], [0])
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}, note=notes.append) is False and notes == []
+
+    def broken(text):
+        raise OSError("disk full")
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [1]), "r" * 16, {}, note=broken) is True
+    assert B.broker_post_run_violation(_sb_settle_ctx([], [0], [0]), "r" * 16, {}, note=broken) is False
+
+
+def test_sb_a_sweep_exception_is_noted_by_type_only():
+    notes = []
+
+    def boom():
+        raise OSError("/secret/path/in/the/message")
+    ctx = types.SimpleNamespace(wipe=lambda r: None, sweep_processes=boom)
+    assert B.broker_post_run_violation(ctx, "r" * 16, {}, note=notes.append) is True
+    assert notes == ["sweep_error OSError"]
+
+
+def test_sb_a_real_violation_records_its_arm_in_the_private_errors_log(tmp_path):
+    E = _t10_build(tmp_path)
+    _t10_refused(_t10_run(E, ctx=_t10_ctx(E, sweep_processes=lambda: 3)), "SANDBOX_VIOLATION")
+    log = (E.paths.runs_dir / "errors.log").read_text()
+    assert "post-run sweep " in log and "processes_did_not_settle n=3" in log
+    assert oct(os.lstat(str(E.paths.runs_dir / "errors.log")).st_mode & 0o777) == "0o600"

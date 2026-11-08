@@ -211,11 +211,68 @@ def _sweep_default_runner(cmd):
     return res.returncode, res.stdout.decode("ascii", "replace")
 
 
-def candidate_processes(candidate_uid: int, runner=None) -> int:
+# Apple system workers launchd may start AS THE CANDIDATE on its own (not descended from anything the run started).
+# Identified by the kernel's executable path (proc_pidpath), never argv or comm, which a process can choose; /System
+# is the sealed, signed system volume, so no candidate-owned file can have this path.
+SPOTLIGHT_WORKER = ("/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/"
+                    "Versions/A/Support/mdworker_shared")
+SYSTEM_WORKERS = frozenset({SPOTLIGHT_WORKER})
+SETTLE_TIMEOUT_S = 300
+SETTLE_POLL_S = 2
+
+
+def _sweep_pid_path(pid: int):
+    """The kernel's executable path for pid, or None when it cannot be read (exited, or refused)."""
+    import ctypes
+    import ctypes.util
+    try:
+        lib = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib", use_errno=True)
+        buf = ctypes.create_string_buffer(4096)
+        n = lib.proc_pidpath(int(pid), buf, 4096)
+    except (OSError, AttributeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    try:
+        return buf.value.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _sweep_pid_alive(pid: int) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True      # EPERM: it exists, it is just not ours
+    return True
+
+
+def settle_processes(count_fn, timeout=None, poll=None, *, sleep=None, monotonic=None) -> int:
+    """Poll count_fn() until it is 0 or `timeout` seconds pass; returns the last count. An exception propagates
+    (the caller treats it as a violation). Waiting never skips a check; it only lets system workers exit."""
+    import time
+    timeout = SETTLE_TIMEOUT_S if timeout is None else timeout
+    poll = SETTLE_POLL_S if poll is None else poll
+    sleep = sleep or time.sleep
+    monotonic = monotonic or time.monotonic
+    deadline = monotonic() + timeout
+    while True:
+        n = int(count_fn())
+        if n <= 0 or monotonic() >= deadline:
+            return n
+        sleep(poll)
+
+
+def candidate_processes(candidate_uid: int, runner=None, allow=frozenset(), pid_path=None, alive=None) -> int:
     """How many processes the candidate uid still owns (via /bin/ps -U).
 
     Ruling R13: an unparsable or failed ps is SANDBOX_VIOLATION (assume the worst: the caller burns
     every item it sent), not INTERNAL. A bad uid is still BAD_ARGS.
+
+    `allow`: kernel executable paths not counted (SYSTEM_WORKERS). A process whose path cannot be read is
+    counted unless it has exited -- an unknown process is never assumed to be a system worker.
     """
     uid = _sweep_check_uid(candidate_uid)
     runner = runner or _sweep_default_runner
@@ -232,4 +289,15 @@ def candidate_processes(candidate_uid: int, runner=None) -> int:
     for ln in lines:
         if not (ln.isascii() and ln.isdigit()):
             raise SealRefusal("SANDBOX_VIOLATION")
-    return len(lines)
+    if not allow:
+        return len(lines)
+    pid_path = pid_path or _sweep_pid_path
+    alive = alive or _sweep_pid_alive
+    count = 0
+    for ln in lines:
+        path = pid_path(int(ln))
+        if path is None:
+            count += 1 if alive(int(ln)) else 0
+        elif path not in allow:
+            count += 1
+    return count
