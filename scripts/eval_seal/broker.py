@@ -56,7 +56,8 @@ CHECK_TIMEOUT = 60
 STARTUP_FACTOR = 10          # the first query also pays for loading the candidate's models
 FINISH_TIMEOUT = 30          # after the last answer: EOF and a clean exit
 MAX_DECLARATION_BYTES = 65536
-EXEC_FILES = frozenset(("setup.sh", "install.sh", "install_corpus.sh", "tamper_drill.sh", "uninstall.sh", "refresh_acl.sh"))
+EXEC_FILES = frozenset(("setup.sh", "install.sh", "install_corpus.sh", "tamper_drill.sh", "uninstall.sh", "refresh_acl.sh",
+                        "bake_golden.sh"))
 
 _HEX16 = re.compile(r"[0-9a-f]{16}")
 _HEX40 = re.compile(r"[0-9a-f]{40}")
