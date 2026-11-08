@@ -289,6 +289,10 @@ SYSTEM_WORKERS = frozenset({
     # observed live 2026-11-08 19:52 run: PlugInKit's per-user registry daemon (com.apple.pluginkit.pkd), still alive
     # 300 s after teardown. It indexes plugin bundles; it never runs them.
     "/usr/libexec/pkd",
+    # observed live 2026-11-08 20:49 run (alive past the 300 s settle window) and in the uncharged rehearsal of a full
+    # host-side run lifecycle as the candidate (21:07): the container manager. It creates app-container directories;
+    # it never runs them. That rehearsal saw exactly the eight Apple workers in this set and nothing else.
+    "/usr/libexec/containermanagerd",
 })
 # Paths on the sealed system volume: a process running one of these files cannot have a name the candidate chose,
 # so the diagnostic may print it. Anything else is printed as "other".

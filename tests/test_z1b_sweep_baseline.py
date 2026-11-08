@@ -821,7 +821,8 @@ def test_sb_the_allowlist_is_exactly_the_observed_apple_workers():
     # every entry was seen live AS THE CANDIDATE after a run; adding one is a reviewed decision, never a prefix
     assert sweep.SYSTEM_WORKERS == frozenset({
         sweep.SPOTLIGHT_WORKER, sweep._METADATA_SUPPORT + "mdbulkimport", "/usr/sbin/distnoted", "/usr/libexec/lsd",
-        "/usr/sbin/cfprefsd", "/usr/libexec/trustd", "/usr/libexec/secinitd", "/usr/libexec/pkd"})
+        "/usr/sbin/cfprefsd", "/usr/libexec/trustd", "/usr/libexec/secinitd", "/usr/libexec/pkd",
+        "/usr/libexec/containermanagerd"})
     assert "/usr/bin/python3" not in sweep.SYSTEM_WORKERS and "/bin/sh" not in sweep.SYSTEM_WORKERS
 
 
