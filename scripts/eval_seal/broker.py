@@ -53,6 +53,7 @@ from .spec import STRATA, load_spec, validate_item
 ZERO_SHA = "0" * 40
 ZERO_SHA64 = "0" * 64
 CHECK_TIMEOUT = 60
+SWEEP_SNAPSHOT_TIMEOUT = 300
 STARTUP_FACTOR = 10          # the first query also pays for loading the candidate's models
 FINISH_TIMEOUT = 30          # after the last answer: EOF and a clean exit
 MAX_DECLARATION_BYTES = 65536
@@ -428,6 +429,14 @@ def production_context(paths: SealPaths) -> BrokerContext:
             return {}
         return got if done.returncode == 0 and isinstance(got, dict) else {}
 
+    def darwin_snapshot():
+        # AS THE CANDIDATE, through the door: the eval identity cannot list the candidate's 0700 T/ and C/. Any
+        # failure raises; broker_sweep_baseline / broker_post_run_violation turn that into a violation.
+        done = _broker_run_tool(sudo + ["darwin-snapshot"], env, timeout=SWEEP_SNAPSHOT_TIMEOUT)
+        if done.returncode != 0:
+            raise SealRefusal("SANDBOX_VIOLATION")
+        return sweep.parse_snapshot(done.stdout)
+
     def tmutil(path):
         try:
             done = _broker_run_tool(["/usr/bin/tmutil", "isexcluded", str(path)], env)
@@ -447,8 +456,8 @@ def production_context(paths: SealPaths) -> BrokerContext:
         sudo_uid=sysenv.sudo_uid,
         sweep_leftovers=lambda: (sweep.find_candidate_leftovers(
             paths, cand_uid, roots=sweep.sweep_roots(paths, cand_uid)) + broker_vm_leftovers(paths)),
-        sweep_baseline=lambda: sweep.snapshot_darwin(cand_uid),
-        sweep_darwin_changes=lambda baseline: sweep.darwin_changes(cand_uid, baseline),
+        sweep_baseline=darwin_snapshot,
+        sweep_darwin_changes=lambda baseline: sweep.diff_snapshots(baseline, darwin_snapshot()),
         sweep_processes=lambda: sweep.candidate_processes(cand_uid),
         runtime_sha256=lambda: broker_runtime_sha256(paths),
         rss_mb=broker_rss_mb,

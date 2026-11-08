@@ -312,8 +312,23 @@ def _cr_commit_tree_tar(rid, commit, paths):
 
 # ---------------------------------------------------------------- entry point
 
-def main(argv, *, paths: SealPaths = None, killer=None, execve=None) -> int:
-    """probe | wipe <run_id> | vm-start|vm-shell|vm-copy|vm-delete <run_id> ... | vm-list.
+def darwin_snapshot(darwin_base=None) -> int:
+    """Print the candidate's OWN darwin per-user folders (sweep.snapshot_darwin) as one JSON document. Runs only
+    as the candidate (the broker invokes it through the door before launch and after teardown): the candidate
+    can list its 0700 T/ and C/, the eval identity cannot, so the broker diffs real entries instead of an opaque
+    directory mtime that the VM machinery's transient temp files move (gate 4 failure, 2026-11-08)."""
+    from . import sweep
+    uid = os.geteuid()
+    if uid != pwd.getpwnam(CANDIDATE_USER).pw_uid:
+        return 2
+    snap = sweep.snapshot_darwin(uid, darwin_base)
+    sys.stdout.write(sweep.serialize_snapshot(snap) + "\n")
+    sys.stdout.flush()
+    return 0
+
+
+def main(argv, *, paths: SealPaths = None, killer=None, execve=None, darwin_base=None) -> int:
+    """probe | wipe <run_id> | darwin-snapshot | vm-start|vm-shell|vm-copy|vm-delete <run_id> ... | vm-list.
 
     Rev 3 #1: candidate CODE no longer executes through this wrapper. The candidate runs inside a
     disposable VM (vm_runner), so the privileged `sudo -u zurvancandidate zurvan-candidate-run` door
@@ -332,6 +347,8 @@ def main(argv, *, paths: SealPaths = None, killer=None, execve=None) -> int:
         if len(argv) == 2 and argv[0] == "wipe":
             wipe(paths, _cr_check_run_id(argv[1]), killer=killer)
             return 0
+        if argv == ["darwin-snapshot"]:
+            return darwin_snapshot(darwin_base)
         if argv[:1] and argv[0].startswith("vm-"):
             return _cr_vm(argv, paths, execve=execve)
         return 2

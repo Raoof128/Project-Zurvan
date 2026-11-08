@@ -5,6 +5,7 @@ candidate escaped its sandbox or left a process alive, so queries may have leake
 """
 from __future__ import annotations
 
+import json
 import os
 import stat
 import subprocess
@@ -139,13 +140,68 @@ def snapshot_darwin(candidate_uid: int, base=None) -> dict:
     return snap
 
 
+def diff_snapshots(baseline: dict, now: dict) -> list:
+    """Paths in `now` that are new, or whose signature differs from `baseline`. A path that has disappeared is not
+    reported (a transient file the VM machinery created and removed leaves no residue to leak through)."""
+    if type(baseline) is not dict or type(now) is not dict:
+        raise SealRefusal("BAD_ARGS")
+    return sorted(path for path, sig in now.items() if baseline.get(path) != sig)
+
+
 def darwin_changes(candidate_uid: int, baseline: dict, base=None) -> list:
     """Paths under the darwin roots that are new, or whose signature differs from `baseline`. A path that has
     disappeared is not reported. A root that did not exist at baseline contributes all its entries."""
     if type(baseline) is not dict:
         raise SealRefusal("BAD_ARGS")
-    now = snapshot_darwin(candidate_uid, base)
-    return sorted(path for path, sig in now.items() if baseline.get(path) != sig)
+    return diff_snapshots(baseline, snapshot_darwin(candidate_uid, base))
+
+
+# Gate 4 (2026-11-08): the candidate's T/ and C/ are 0700, so from the EVAL identity they are opaque and their
+# own mtime is the only evidence -- and a transient temp file made and removed by the host-side VM machinery
+# (running as the candidate) moved T/'s mtime and failed a clean run closed. The candidate door therefore takes
+# the snapshot AS THE CANDIDATE, who can list its own folders, and prints it here; the broker keeps the baseline
+# and diffs. Every malformed document is refused (the caller turns that into a violation).
+SNAPSHOT_SCHEMA = "zurvan.z1b.darwin-snapshot.v1"
+MAX_SNAPSHOT_ENTRIES = 200000
+
+
+def serialize_snapshot(snap: dict) -> str:
+    return json.dumps({"schema": SNAPSHOT_SCHEMA, "entries": sorted([p, list(sig)] for p, sig in snap.items())},
+                      separators=(",", ":"))
+
+
+def parse_snapshot(text, base: str = None) -> dict:
+    """The inverse of serialize_snapshot, strict: every path absolute under the darwin folders base, unique, no
+    NUL/newline, no `..`; every signature exactly (ino, mtime_ns, size, mode, ctime_ns) ints >= 0 + an opaque bool."""
+    base = (FOLDERS_BASE if base is None else base).rstrip("/") + "/"
+    bad = SealRefusal("SANDBOX_VIOLATION")
+    if isinstance(text, bytes):
+        try:
+            text = text.decode("utf-8")
+        except UnicodeDecodeError:
+            raise bad from None
+    try:
+        doc = json.loads(text)
+    except (ValueError, TypeError, RecursionError):
+        raise bad from None
+    if type(doc) is not dict or set(doc) != {"schema", "entries"} or doc["schema"] != SNAPSHOT_SCHEMA:
+        raise bad
+    entries = doc["entries"]
+    if type(entries) is not list or len(entries) > MAX_SNAPSHOT_ENTRIES:
+        raise bad
+    out = {}
+    for entry in entries:
+        if type(entry) is not list or len(entry) != 2:
+            raise bad
+        path, sig = entry
+        if (type(path) is not str or not path.startswith(base) or "\x00" in path or "\n" in path
+                or "/../" in path + "/" or path in out):
+            raise bad
+        if (type(sig) is not list or len(sig) != 6 or type(sig[5]) is not bool
+                or not all(type(v) is int and v >= 0 for v in sig[:5])):
+            raise bad
+        out[path] = tuple(sig)
+    return out
 
 
 def _sweep_default_runner(cmd):

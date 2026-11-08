@@ -422,6 +422,7 @@ def test_sb_production_context_wires_strict_roots_and_the_darwin_diff(tmp_path, 
     monkeypatch.setattr(sweep, "FOLDERS_BASE", str(base))
     monkeypatch.setattr(sweep, "DEFAULT_ROOTS", (str(strict),))
     monkeypatch.setattr(B, "broker_vm_leftovers", lambda p: [])
+    calls = _sb_door(monkeypatch, base)
     ctx = B.production_context(paths)
     assert ctx.candidate_uid == uid
 
@@ -433,3 +434,115 @@ def test_sb_production_context_wires_strict_roots_and_the_darwin_diff(tmp_path, 
     assert ctx.sweep_darwin_changes(baseline) == [str(root / "T" / "dropped")]
     (strict / "dropped").write_text("x")
     assert ctx.sweep_leftovers() == [str(strict / "dropped")]
+    # both darwin snapshots came through the door, as the candidate -- never read by the eval identity
+    assert calls and all(c[:4] == ["/usr/bin/sudo", "-n", "-u", "zurvancandidate"] and c[-1] == "darwin-snapshot"
+                         for c in calls)
+
+
+# ================================================================ the darwin snapshot is taken AS THE CANDIDATE (gate 4, 2026-11-08)
+# The first charged gate-4 run after the 2026-11-07 fix still ended SANDBOX_VIOLATION: the candidate's T/ is 0700,
+# so from the eval identity it was OPAQUE and its own mtime was the only evidence -- and a transient temp file
+# created and removed by the host-side VM machinery (running as the candidate) moved it at 12:16:57, inside the
+# run window. The door now lists the candidate's own folders as the candidate and the broker diffs real entries.
+
+from scripts.eval_seal import candidate_run as CR  # noqa: E402
+
+
+def _sb_door(monkeypatch, base, rc=None, stdout=None):
+    """Route the broker's door call for `darwin-snapshot` through candidate_run.main in-process (the test uid
+    plays the candidate); other tool calls are refused. Returns the list of door argv seen."""
+    import io
+    import subprocess as sp
+    calls = []
+
+    def run_tool(cmd, env, *, data=None, timeout=B.CHECK_TIMEOUT):
+        calls.append(list(cmd))
+        if cmd[-1] != "darwin-snapshot":
+            raise OSError("unexpected tool in this test: %r" % (cmd,))
+        if rc is not None:
+            return sp.CompletedProcess(cmd, rc, stdout or b"", b"")
+        buf = io.StringIO()
+        monkeypatch.setattr(CR.sys, "stdout", buf)
+        code = CR.main(["darwin-snapshot"], darwin_base=str(base))
+        return sp.CompletedProcess(cmd, code, buf.getvalue().encode(), b"")
+    monkeypatch.setattr(B, "_broker_run_tool", run_tool)
+    return calls
+
+
+def test_sb_snapshot_round_trips_through_its_serialized_form(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    snap = sweep.snapshot_darwin(os.getuid(), str(base))
+    assert snap and sweep.parse_snapshot(sweep.serialize_snapshot(snap), str(base)) == snap
+    assert sweep.parse_snapshot(sweep.serialize_snapshot(snap).encode(), str(base)) == snap  # bytes from a pipe
+
+
+@pytest.mark.parametrize("doc", [
+    "", "not json", "[]", "{}",
+    '{"schema":"zurvan.z1b.darwin-snapshot.v0","entries":[]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[],"extra":1}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":{}}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["/elsewhere/x",[1,2,3,4,5,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a/../../etc",[1,2,3,4,5,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,5]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,5,0]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,true,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,-5,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,5.0,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a",[1,2,3,4,5,false]],["BASE/a",[1,2,3,4,5,false]]]}',
+    '{"schema":"zurvan.z1b.darwin-snapshot.v1","entries":[["BASE/a\\nb",[1,2,3,4,5,false]]]}',
+])
+def test_sb_a_malformed_snapshot_is_refused_as_a_violation(tmp_path, doc):
+    base = str(tmp_path / "folders")
+    with pytest.raises(B.SealRefusal) as ei:
+        sweep.parse_snapshot(doc.replace("BASE", base), base)
+    assert ei.value.code == "SANDBOX_VIOLATION"
+
+
+def test_sb_a_transient_file_the_vm_machinery_made_and_removed_is_not_a_change(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    before = sweep.snapshot_darwin(uid, str(base))
+    (root / "T" / "lima-vz-transient").write_text("x")       # T/ seen AS ITS OWNER: listable, not opaque
+    (root / "T" / "lima-vz-transient").unlink()
+    assert sweep.diff_snapshots(before, sweep.snapshot_darwin(uid, str(base))) == []
+
+
+def test_sb_a_residue_in_the_candidates_own_t_is_still_a_change(tmp_path):
+    base, root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    before = sweep.snapshot_darwin(uid, str(base))
+    (root / "T" / "sub").mkdir()
+    (root / "T" / "sub" / "leak").write_text("query text")
+    _sb_bump(root / "C" / "entry")
+    assert sweep.diff_snapshots(before, sweep.snapshot_darwin(uid, str(base))) == sorted(
+        [str(root / "T" / "sub"), str(root / "T" / "sub" / "leak"), str(root / "C" / "entry")])
+
+
+def test_sb_door_prints_the_candidates_snapshot_and_refuses_any_other_uid(tmp_path, monkeypatch, capsys):
+    base, _root = _sb_folders(tmp_path)
+    uid = os.getuid()
+    monkeypatch.setattr(CR.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=uid))
+    assert CR.main(["darwin-snapshot"], darwin_base=str(base)) == 0
+    out = capsys.readouterr().out
+    assert sweep.parse_snapshot(out, str(base)) == sweep.snapshot_darwin(uid, str(base))
+    monkeypatch.setattr(CR.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=uid + 1))
+    assert CR.main(["darwin-snapshot"], darwin_base=str(base)) == 2      # not the candidate: nothing printed
+    assert capsys.readouterr().out == ""
+    assert CR.main(["darwin-snapshot", "extra"], darwin_base=str(base)) == 2
+
+
+@pytest.mark.parametrize("rc,stdout", [(2, b""), (3, b""), (0, b"garbage"), (0, b"")])
+def test_sb_a_failed_or_garbled_door_snapshot_is_a_violation_before_and_after(tmp_path, monkeypatch, rc, stdout):
+    uid = os.getuid()
+    paths = _sb_paths(tmp_path)
+    base, _root = _sb_folders(tmp_path)
+    monkeypatch.setattr(B.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_uid=uid))
+    monkeypatch.setattr(sweep, "FOLDERS_BASE", str(base))
+    _sb_door(monkeypatch, base, rc=rc, stdout=stdout)
+    ctx = B.production_context(paths)
+    assert B.broker_sweep_baseline(ctx) is B._BASELINE_FAILED          # before launch
+    with pytest.raises(B.SealRefusal):
+        ctx.sweep_darwin_changes({})                                    # after teardown
+    probe = types.SimpleNamespace(wipe=lambda r: None, sweep_processes=lambda: 0, sweep_leftovers=lambda: [],
+                                  sweep_darwin_changes=ctx.sweep_darwin_changes)
+    assert B.broker_post_run_violation(probe, "r" * 16, {}) is True
