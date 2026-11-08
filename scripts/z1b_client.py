@@ -262,6 +262,8 @@ def client_run(commit: str, suite: str, declare: str = None, final_acceptance: b
         shutil.rmtree(work, ignore_errors=True)
     if client_status()["stale"]:
         raise ClientRefusal("BROKER_STALE")
+    if not _client_no_passwordless_root():
+        raise ClientRefusal("SEAL_COMPROMISED")  # root defeats the seal: never spend a budget run under it
     name = make_bundle(commit, repo=REPO, drop_dir=DROP_DIR)
     argv = ["run", "--commit", commit, "--bundle", name, "--suite", suite]
     if declare is not None:
@@ -393,12 +395,75 @@ def _client_broker_tree(broker_dir: Path):
     return True, owned, writable
 
 
+# Gate 9 red-team finding (2026-11-07): the dev identity held `(ALL) NOPASSWD:` grants for brew (a binary it owns),
+# launchctl and softwareupdate -- root without a password, and root reads the keys. The OS permission wall the whole
+# seal rests on is void while that holds, so the dev half refuses it. The only passwordless grant the seal itself
+# installs is the dev -> EVAL_USER broker rule; any other NOPASSWD runas (root, ALL, a group, a uid) fails closed.
+_SUDO_ALLOWED_NOPASSWD_RUNAS = frozenset({EVAL_USER})
+_SUDO_RULE_RE = re.compile(r"\s+\((?P<runas>[^)]*)\)\s*(?P<rest>.*)")
+_SUDO_TAG_RE = re.compile(r"([A-Z_]+):\s*")
+_SUDO_TIMEOUT_S = 20
+
+
+def _client_sudo_probe():
+    """(rc, text) of `sudo -n -l`, and the rc of `sudo -n /usr/bin/true` (0 = root right now, no password)."""
+    env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL": "C", "LANG": "C"}
+    lst = subprocess.run([SUDO, "-n", "-l"], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, timeout=_SUDO_TIMEOUT_S)
+    now = subprocess.run([SUDO, "-n", "/usr/bin/true"], env=env, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=_SUDO_TIMEOUT_S)
+    return lst.returncode, lst.stdout.decode("utf-8", "replace"), now.returncode
+
+
+def client_passwordless_root_grants(list_rc: int, text: str) -> list:
+    """The `sudo -l` rules that give this identity a passwordless runas outside the allowlist. Anything this
+    parser does not recognise inside the rule block is returned too (fail closed). An `sudo -n -l` that is
+    refused only for want of a password means there is no NOPASSWD rule at all: no grants."""
+    if list_rc != 0:
+        return [] if "password is required" in text else ["<sudo -n -l failed: rc=%d>" % list_rc]
+    bad, in_rules = [], False
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            in_rules = "may run the following commands" in line
+            continue
+        if not in_rules:
+            continue
+        m = _SUDO_RULE_RE.fullmatch(line)
+        if m is None:
+            bad.append(line.strip())
+            continue
+        rest, tags = m.group("rest"), set()
+        while True:
+            t = _SUDO_TAG_RE.match(rest)
+            if t is None:
+                break
+            tags.add(t.group(1))
+            rest = rest[t.end():]
+        if "NOPASSWD" not in tags:
+            continue
+        users = {u.strip() for u in m.group("runas").split(":", 1)[0].split(",")}
+        if not users or not users <= _SUDO_ALLOWED_NOPASSWD_RUNAS:
+            bad.append(line.strip())
+    return bad
+
+
+def _client_no_passwordless_root() -> bool:
+    try:
+        rc, text, now_rc = _client_sudo_probe()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return now_rc != 0 and not client_passwordless_root_grants(rc, text)
+
+
 def local_seal_check(paths: SealPaths) -> dict:
     """The development-identity half of Z1b gate 1 and 1b.
 
     Every sealed path must refuse this identity with EACCES. ENOENT means the seal is not there:
     it is reported as not configured and is never a pass. Also: the settings deny rules cover every
-    sealed path for Read and Edit, and the broker tree is root-owned and writable by nobody else.
+    sealed path for Read and Edit, the broker tree is root-owned and writable by nobody else, and this
+    identity cannot become root without a password (dev_no_passwordless_root).
     """
     sealed = _client_sealed_paths(paths)
     probed = {str(p): _client_probe(p) for p in sealed}
@@ -410,6 +475,7 @@ def local_seal_check(paths: SealPaths) -> dict:
         "local_deny_rules_present": _client_deny_rules_present([str(p) for p in sealed]),
         "local_broker_root_owned": exists and owned,
         "local_broker_not_writable": exists and not_writable,
+        "dev_no_passwordless_root": _client_no_passwordless_root(),
     }
     return {"configured": configured, "ok": configured and all(checks.values()),
             "paths": probed, "checks": checks}

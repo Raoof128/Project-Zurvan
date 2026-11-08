@@ -148,6 +148,7 @@ def t13(tmp_path, monkeypatch):
     monkeypatch.setattr(zc, "DROP_DIR", drop)
     monkeypatch.setattr(zc, "BROKER", str(broker))
     monkeypatch.setattr(zc.pwd, "getpwnam", lambda name: types.SimpleNamespace(pw_name=name))
+    monkeypatch.setattr(zc, "_client_no_passwordless_root", lambda: True)  # the machine's real sudoers is not under test
     real_call = zc.call_broker
     monkeypatch.setattr(zc, "call_broker", lambda argv, *, runner=None: real_call(argv, runner=runner or fake.runner))
     tree = _t13_git(repo, "rev-parse", "HEAD:scripts/eval_seal")
@@ -527,7 +528,8 @@ def test_t13_run_wrong_document_kind_is_internal(t13):
 def _t13_local(**over):
     doc = {"configured": True, "ok": True, "paths": {},
            "checks": {"dev_cannot_read_sealed": True, "local_deny_rules_present": True,
-                      "local_broker_root_owned": True, "local_broker_not_writable": True}}
+                      "local_broker_root_owned": True, "local_broker_not_writable": True,
+                      "dev_no_passwordless_root": True}}
     doc.update(over)
     return doc
 
@@ -583,6 +585,7 @@ def t13seal(tmp_path, monkeypatch):
     settings.write_text(json.dumps({"permissions": {"deny": zc.client_deny_rules(paths)}}))
     monkeypatch.setattr(zc, "SETTINGS_PATH", settings)
     monkeypatch.setattr(zc, "ROOT_UID", os.getuid())
+    monkeypatch.setattr(zc, "_client_sudo_probe", lambda: (0, _T13_SUDO_CLEAN, 1))
     for d in (paths.broker_dir, paths.broker_bin, paths.broker_lib):
         d.chmod(0o755)
     (paths.broker_bin / "zurvan-broker").chmod(0o555)
@@ -804,3 +807,82 @@ def test_t13_module_defines_no_name_that_collides_with_another_part_of_the_plan(
     for generic in ("status", "run", "seal_check", "main"):
         assert not re.search(r"^def %s\(" % generic, text, re.M), generic
     assert zc.status is zc.client_status and zc.run is zc.client_run and zc.seal_check is zc.client_seal_check
+
+
+# ------------------------------------------------------------------ dev_no_passwordless_root (gate 9 finding)
+
+_T13_SUDO_HEAD = (
+    "Matching Defaults entries for dev on host:\n"
+    "    env_reset, env_keep+=BLOCKSIZE\n\n"
+    "Runas and Command-specific defaults for dev:\n"
+    "    Defaults>zurvaneval env_reset, !setenv\n\n"
+    "User dev may run the following commands on host:\n")
+_T13_SUDO_CLEAN = (_T13_SUDO_HEAD + "    (ALL) ALL\n"
+                   "    (zurvaneval) NOPASSWD: sha256:" + "ab" * 32 + " /Library/ZurvanEval/broker/bin/zurvan-broker\n")
+# the exact shape the gate 9 red-team found on this machine (2026-11-07)
+_T13_SUDO_BREW = (_T13_SUDO_CLEAN + "    (ALL) NOPASSWD: /opt/homebrew/bin/brew, /usr/local/bin/brew, "
+                  "/usr/sbin/softwareupdate, /bin/launchctl\n")
+
+
+def test_t13_sudo_parser_allows_only_the_broker_rule_passwordless():
+    assert zc.client_passwordless_root_grants(0, _T13_SUDO_CLEAN) == []
+
+
+def test_t13_sudo_parser_flags_the_red_team_brew_launchctl_grant():
+    bad = zc.client_passwordless_root_grants(0, _T13_SUDO_BREW)
+    assert len(bad) == 1 and "/bin/launchctl" in bad[0]
+
+
+@pytest.mark.parametrize("rule", [
+    "(root) NOPASSWD: /usr/bin/true",
+    "(ALL : ALL) NOPASSWD: ALL",
+    "(zurvaneval, root) NOPASSWD: /bin/ls",
+    "(#0) NOPASSWD: /bin/ls",
+    "(%admin) NOPASSWD: /bin/ls",
+    "(zurvancandidate) NOPASSWD: /bin/sh",
+    "(ALL) SETENV: NOPASSWD: /bin/ls",
+    "(ALL) NOPASSWD:/bin/ls",
+    "something sudo printed that this parser does not know",
+])
+def test_t13_sudo_parser_fails_closed_on_any_other_passwordless_runas(rule):
+    assert zc.client_passwordless_root_grants(0, _T13_SUDO_CLEAN + "    " + rule + "\n") != []
+
+
+def test_t13_sudo_parser_password_required_rules_are_not_grants():
+    text = _T13_SUDO_CLEAN + "    (ALL) PASSWD: /bin/launchctl\n    (root) /usr/sbin/softwareupdate\n"
+    assert zc.client_passwordless_root_grants(0, text) == []
+
+
+def test_t13_sudo_parser_list_refused_for_a_password_means_no_nopasswd_rule_at_all():
+    assert zc.client_passwordless_root_grants(1, "sudo: a password is required\n") == []
+    assert zc.client_passwordless_root_grants(1, "sudo: unable to resolve host\n") != []  # anything else: closed
+
+
+def test_t13_no_passwordless_root_fails_when_root_works_right_now(monkeypatch):
+    # a cached sudo ticket (or any rule) that lets `sudo -n true` succeed is root without a password
+    monkeypatch.setattr(zc, "_client_sudo_probe", lambda: (0, _T13_SUDO_CLEAN, 0))
+    assert zc._client_no_passwordless_root() is False
+    monkeypatch.setattr(zc, "_client_sudo_probe", lambda: (0, _T13_SUDO_CLEAN, 1))
+    assert zc._client_no_passwordless_root() is True
+
+
+def test_t13_no_passwordless_root_fails_closed_when_sudo_cannot_be_probed(monkeypatch):
+    def boom():
+        raise OSError("no sudo")
+    monkeypatch.setattr(zc, "_client_sudo_probe", boom)
+    assert zc._client_no_passwordless_root() is False
+
+
+def test_t13_local_check_a_passwordless_root_grant_fails_the_dev_half(t13seal, monkeypatch):
+    monkeypatch.setattr(zc, "_client_sudo_probe", lambda: (0, _T13_SUDO_BREW, 1))
+    doc = zc.local_seal_check(t13seal.paths)
+    assert doc["checks"]["dev_no_passwordless_root"] is False and doc["ok"] is False
+    assert doc["configured"] is True  # a configured seal that is compromised, not an absent one
+
+
+def test_t13_run_refuses_seal_compromised_before_any_budget_is_spent(t13, monkeypatch):
+    monkeypatch.setattr(zc, "_client_no_passwordless_root", lambda: False)
+    t13.fake.set({"status": _t13_ok_status(t13)})
+    _t13_refused("SEAL_COMPROMISED", zc.run, t13.c2, "holdout")
+    assert [c for c in t13.fake.calls() if c and c[0] == "run"] == []  # the broker was never asked to run
+    assert list(t13.drop.iterdir()) == []                              # and no bundle was dropped
