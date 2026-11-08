@@ -1264,3 +1264,85 @@ def test_t9_door_vm_push_tree_refuses_a_bad_commit_or_a_missing_bundle(tmp_path,
         assert candidate_run.main(["vm-push-tree", _T9_RUN, bad], paths=p) == 2
     assert candidate_run.main(["vm-push-tree", _T9_RUN, "d" * 40], paths=p) == 2      # commit not in the bundle
     assert copied == [] and not (p.scratch_dir / _T9_RUN).exists()
+
+
+# ================================================================ the adapter's answers always decode (gate 4, 2026-11-08)
+# The 19:52 charged gate-4 run died at query 18, step=decode: the adapter passed a chunk heading through unchanged and
+# the index holds 3,773 chunks whose heading is longer than protocol.MAX_HEADING_CHARS (up to 7,275 chars). The broker's
+# strict decoder refused the WHOLE answer, so one long heading in a top-10 failed the run. The adapter now emits only
+# what the decoder accepts: an over-long or NUL-bearing heading becomes null (never a truncated, invented string), a
+# page with control characters or a non-finite score is skipped, and trailing results are dropped to fit MAX_LINE.
+
+from scripts import z1b_candidate as Z  # noqa: E402
+
+
+def _z_answer(chunks, qid=7, limit=10):
+    line = Z._adapter_answer(qid, chunks, "", limit)
+    return line, protocol.decode_response(line, qid, limit)["results"]
+
+
+def test_z_heading_longer_than_the_protocol_cap_is_reported_as_null_and_the_page_kept():
+    long_h = "h" * (protocol.MAX_HEADING_CHARS + 1)
+    _line, got = _z_answer([{"source_path": "wiki/a.md", "heading": long_h, "hybrid_score": 0.9},
+                            {"source_path": "wiki/b.md", "heading": "ok", "hybrid_score": 0.8}])
+    assert got == [{"page": "wiki/a.md", "heading": None, "score": 0.9},
+                   {"page": "wiki/b.md", "heading": "ok", "score": 0.8}]
+
+
+def test_z_heading_exactly_at_the_cap_is_kept_verbatim():
+    h = "ش" * protocol.MAX_HEADING_CHARS
+    _line, got = _z_answer([{"source_path": "wiki/a.md", "heading": h, "hybrid_score": 0.5}])
+    assert got[0]["heading"] == h
+
+
+def test_z_heading_with_a_nul_is_reported_as_null():
+    _line, got = _z_answer([{"source_path": "wiki/a.md", "heading": "a\x00b", "hybrid_score": 0.5}])
+    assert got == [{"page": "wiki/a.md", "heading": None, "score": 0.5}]
+
+
+@pytest.mark.parametrize("bad", ["wiki/a\tb.md", "wiki/a\x7fb.md", "wiki/a\rb.md"])
+def test_z_page_with_control_characters_is_skipped(bad):
+    _line, got = _z_answer([{"source_path": bad, "heading": None, "hybrid_score": 0.9},
+                            {"source_path": "wiki/ok.md", "heading": None, "hybrid_score": 0.1}])
+    assert [r["page"] for r in got] == ["wiki/ok.md"]
+
+
+@pytest.mark.parametrize("score", [float("nan"), float("inf"), float("-inf"), "x", None])
+def test_z_non_finite_or_non_numeric_score_is_skipped(score):
+    _line, got = _z_answer([{"source_path": "wiki/a.md", "heading": None, "hybrid_score": score},
+                            {"source_path": "wiki/b.md", "heading": None, "hybrid_score": 0.2}])
+    assert [r["page"] for r in got] == ["wiki/b.md"]
+
+
+def test_z_integer_score_is_sent_as_a_float():
+    _line, got = _z_answer([{"source_path": "wiki/a.md", "heading": None, "hybrid_score": 1}])
+    assert got[0]["score"] == 1.0
+
+
+def test_z_a_line_over_max_line_drops_trailing_results_and_keeps_rank_order():
+    # ten non-ASCII headings at the cap escape to ~6 KB each; with long pages the line would exceed MAX_LINE
+    h = "ش" * protocol.MAX_HEADING_CHARS
+    chunks = [{"source_path": ("wiki/%02d/" % i) + "p" * 400 + ".md", "heading": h, "hybrid_score": 1.0 - i / 100}
+              for i in range(10)]
+    line, got = _z_answer(chunks)
+    assert len(line) <= protocol.MAX_LINE
+    assert 0 < len(got) < 10
+    assert [r["page"] for r in got] == [c["source_path"] for c in chunks[:len(got)]]
+
+
+def test_z_adversarial_chunks_always_produce_a_decodable_answer():
+    import random
+    rng = random.Random(20261108)
+    alphabet = ["a", "/", ".", "..", "\x00", "\t", "\x7f", "\\", "ش", "\U0001F600", " ", "\n"]
+    for _ in range(400):
+        chunks = []
+        for _j in range(rng.randint(0, 45)):
+            sp = "".join(rng.choice(alphabet) for _k in range(rng.randint(0, 40)))
+            if rng.random() < 0.1:
+                sp = "x" * rng.randint(500, 600)
+            heading = rng.choice([None, 3, "".join(rng.choice(alphabet) for _k in range(rng.randint(0, 30))),
+                                  "ش" * rng.randint(900, 1500), "z" * rng.randint(1000, 8000)])
+            score = rng.choice([0.5, 1, -2.25, float("nan"), float("inf"), None, "s"])
+            chunks.append({"source_path": sp, "heading": heading, "hybrid_score": score})
+        line, got = _z_answer(chunks)
+        assert len(line) <= protocol.MAX_LINE and len(got) <= 10

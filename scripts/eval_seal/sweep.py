@@ -286,6 +286,9 @@ SYSTEM_WORKERS = frozenset({
     "/usr/sbin/cfprefsd",
     "/usr/libexec/trustd",
     "/usr/libexec/secinitd",
+    # observed live 2026-11-08 19:52 run: PlugInKit's per-user registry daemon (com.apple.pluginkit.pkd), still alive
+    # 300 s after teardown. It indexes plugin bundles; it never runs them.
+    "/usr/libexec/pkd",
 })
 # Paths on the sealed system volume: a process running one of these files cannot have a name the candidate chose,
 # so the diagnostic may print it. Anything else is printed as "other".

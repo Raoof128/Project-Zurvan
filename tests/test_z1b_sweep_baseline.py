@@ -817,6 +817,14 @@ def test_sb_the_foreign_report_prints_only_sealed_volume_paths():
     assert rep == "/usr/bin/python3,other,unreadable"              # lsd allowed; candidate-chosen names hidden
 
 
+def test_sb_the_allowlist_is_exactly_the_observed_apple_workers():
+    # every entry was seen live AS THE CANDIDATE after a run; adding one is a reviewed decision, never a prefix
+    assert sweep.SYSTEM_WORKERS == frozenset({
+        sweep.SPOTLIGHT_WORKER, sweep._METADATA_SUPPORT + "mdbulkimport", "/usr/sbin/distnoted", "/usr/libexec/lsd",
+        "/usr/sbin/cfprefsd", "/usr/libexec/trustd", "/usr/libexec/secinitd", "/usr/libexec/pkd"})
+    assert "/usr/bin/python3" not in sweep.SYSTEM_WORKERS and "/bin/sh" not in sweep.SYSTEM_WORKERS
+
+
 def test_sb_every_allowed_worker_is_a_root_owned_file_on_the_sealed_volume():
     for path in sorted(sweep.SYSTEM_WORKERS):
         if not os.path.exists(path):

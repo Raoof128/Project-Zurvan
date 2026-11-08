@@ -8,6 +8,7 @@ Environment from the sealed runner: ZURVAN_SEARCH_DB (required), ZURVAN_CORPUS, 
 HF_HUB_OFFLINE=1, HF_HOME. Nothing is guessed: a missing index is a hard exit.
 """
 import json
+import math
 import os
 import posixpath
 import sys
@@ -17,10 +18,16 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from scripts.trace_writer import protected_eval_context  # noqa: E402
+# The broker decodes every answer with protocol.decode_response and refuses the WHOLE answer on any field it rejects,
+# so the adapter takes its limits from the same module (gate 4, 2026-11-08: a heading over MAX_HEADING_CHARS failed
+# a charged run at query 18).
+from scripts.eval_seal.protocol import MAX_HEADING_CHARS, MAX_LINE, MAX_PAGE_CHARS  # noqa: E402
 
-MAX_LINE = 65536
 TOP_K = 10
-MAX_PAGE_CHARS = 512
+
+
+def _adapter_clean(text):
+    return not any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in text)
 
 
 def chunk_to_page(source_path, wiki_root):
@@ -38,7 +45,26 @@ def chunk_to_page(source_path, wiki_root):
     page = posixpath.normpath(source_path)
     if page in ("", ".") or page.startswith("../") or page == "..":
         return None
+    if not _adapter_clean(page):
+        return None
     return page
+
+
+def _adapter_heading(heading):
+    """A heading the protocol accepts, else None. Never a truncated string: a cut heading is text that is not in
+    the corpus, and a section locator compares headings exactly."""
+    if type(heading) is not str or len(heading) > MAX_HEADING_CHARS or "\x00" in heading:
+        return None
+    return heading
+
+
+def _adapter_score(chunk):
+    """A finite float, or None to skip the chunk. A missing score is 0.0 (the adapter's long-standing default)."""
+    score = chunk.get("hybrid_score", 0.0)
+    if type(score) not in (int, float):
+        return None
+    score = float(score)
+    return score if math.isfinite(score) else None
 
 
 def _adapter_parse_request(line):
@@ -63,19 +89,28 @@ def _adapter_parse_request(line):
     return qid, query
 
 
+def _adapter_line(qid, results):
+    return (json.dumps({"qid": qid, "results": results, "abstain": False},
+                       ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
+
+
 def _adapter_answer(qid, chunks, wiki_root, limit):
     results = []
     for chunk in list(chunks or [])[:limit * 4]:
-        page = chunk_to_page(chunk.get("source_path"), wiki_root)
-        if page is None:
+        if not isinstance(chunk, dict):
             continue
-        heading = chunk.get("heading")
-        results.append({"page": page, "heading": heading if isinstance(heading, str) else None,
-                        "score": float(chunk.get("hybrid_score", 0.0))})
+        page = chunk_to_page(chunk.get("source_path"), wiki_root)
+        score = _adapter_score(chunk)
+        if page is None or score is None:
+            continue
+        results.append({"page": page, "heading": _adapter_heading(chunk.get("heading")), "score": score})
         if len(results) == limit:
             break
-    return (json.dumps({"qid": qid, "results": results, "abstain": False},
-                       ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
+    line = _adapter_line(qid, results)
+    while len(line) > MAX_LINE and results:      # ranked best-first: drop from the tail until the line fits
+        results.pop()
+        line = _adapter_line(qid, results)
+    return line
 
 
 def serve(stdin, stdout, search_fn, wiki_root="", limit=TOP_K):
