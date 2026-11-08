@@ -15,6 +15,9 @@
 #
 # Versions are pinned to the host stack that builds the production search index, so the query embedding
 # in-guest and the document embeddings on the host come from the same code and the same model snapshot.
+# ONE deviation: sqlite-vec 0.1.7, not the host's 0.1.6 -- the 0.1.6 manylinux aarch64 wheel ships a 32-bit
+# ARM vec0.so ("wrong ELF class: ELFCLASS32", found 2026-11-08). Zurvan only calls the scalar
+# vec_distance_cosine() over a full scan (vec_storage.py: never the vec0 KNN path).
 #
 # Hygiene: the bake runs as its own guest user (z1bbake). Before the disk is frozen, that user, its ssh key
 # and every cloud-init sudoers grant are removed and cloud-init is reset, so a VM booted from the image
@@ -35,7 +38,7 @@ BASE_DIGEST="sha512:f42866fe22b4baf9f0ed4f81d620064f2a4b86b18b92bfe3aaaa40babf68
 TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 TORCH_PIN="torch==2.8.0"
 PIP_PINS="sentence-transformers==5.2.0 transformers==4.46.3 tokenizers==0.20.3 huggingface-hub==0.35.0 \
-safetensors==0.6.2 numpy==1.26.4 sqlite-vec==0.1.6 scikit-learn==1.4.0 scipy==1.16.1"
+safetensors==0.6.2 numpy==1.26.4 sqlite-vec==0.1.7 scikit-learn==1.4.0 scipy==1.16.1"
 
 die() { echo "bake_golden: $*" >&2; exit 1; }
 
@@ -104,19 +107,22 @@ g sudo env -i HF_HUB_OFFLINE=1 HF_HOME=/opt/z1b/runtime/hf /opt/z1b/runtime/bin/
 import sys
 sys.path.insert(0, "/opt/z1b")
 assert sys.prefix == "/opt/z1b/runtime", sys.prefix
-import torch, sqlite_vec, numpy
+import sqlite3, struct, torch, sqlite_vec, numpy
 from sentence_transformers import SentenceTransformer
+c = sqlite3.connect(":memory:"); c.enable_load_extension(True); sqlite_vec.load(c)
+d = c.execute("select vec_distance_cosine(?, ?)", (struct.pack("2f", 1, 0), struct.pack("2f", 0, 1))).fetchone()[0]
+assert abs(d - 1.0) < 1e-6, d
 from scripts.eval_seal.corpus import corpus_sha256
 assert not torch.cuda.is_available()
 v = SentenceTransformer("all-MiniLM-L6-v2").encode("frobnicator widget")
 assert len(v) == 384, len(v)
-print("GOLDEN_OK torch=%s dim=%d" % (torch.__version__, len(v)))
+print("GOLDEN_OK torch=%s sqlite_vec=%s dim=%d" % (torch.__version__, c.execute("select vec_version()").fetchone()[0], len(v)))
 '
 g sh -c 'command -v mksquashfs && command -v iptables && command -v ip6tables'
 
 echo "bake_golden: hygiene + freeze"
 g sudo sh -c "apt-get clean; rm -rf /var/lib/apt/lists/* /root/.cache /tmp/* /var/tmp/*; \
-  cloud-init clean --logs; rm -f /etc/sudoers.d/90-cloud-init-users /etc/sudoers.d/*lima*; \
+  cloud-init clean --logs; rm -f /etc/sudoers.d/90-cloud-init-users /etc/sudoers.d/*lima* /root/.ssh/authorized_keys; \
   fstrim -av || true; \
   nohup sh -c 'sleep 2; pkill -KILL -u $BAKE_USER; userdel -r -f $BAKE_USER; sync; poweroff' >/dev/null 2>&1 &"
 for _ in $(seq 1 60); do

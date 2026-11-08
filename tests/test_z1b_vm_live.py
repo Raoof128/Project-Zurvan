@@ -63,9 +63,21 @@ def _ensure_image():
     return "file://" + str(_IMG_CACHE)
 
 
+def _b36(n: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while True:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+        if n == 0:
+            return out
+
+
 def _live_paths(tmp_path):
-    # A SHORT real root so <LIMA_HOME>/<name>/ssh.sock stays under UNIX_PATH_MAX. /tmp/zv-<pid> is short.
-    root = Path("/tmp") / ("zv%d" % os.getpid())
+    # A SHORT real root so <LIMA_HOME>/<name>/ssh.sock stays under UNIX_PATH_MAX (104 on macOS, and /tmp is
+    # /private/tmp). "/tmp/zv<decimal pid>" overflowed by one byte once pids reached five digits (2026-11-08:
+    # every live test died CANDIDATE_FAILED at `limactl start`), so the pid is base-36: at most 4 characters.
+    root = Path("/tmp") / ("z" + _b36(os.getpid()))
     shutil.rmtree(str(root), ignore_errors=True)
     p = SealPaths.for_root(root)
     for d in (p.broker_bin, p.scratch_dir):
