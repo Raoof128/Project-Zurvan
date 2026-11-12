@@ -3,6 +3,44 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-08 (Australia/Sydney) — Z1b operator blockers cleared on the dev side: golden image re-baked reproducibly and pinned; seal-check refuses passwordless root; Z1b still NOT closed
+
+Raouf:
+- **Scope:** the 2026-11-07d follow-ups that need no sudo. The four operator steps (sudoers, broker reinstall, `ack-incident`, the gate 4/5 runs) are still the operator's. No charged run was made; budget stays **7**, open incidents **1**.
+- **Golden image re-baked (blocker 2 of 2026-11-07d).** The hand-baked 2026-10-03 image (`41bfeb0b…`, 10 GiB, CUDA torch) is gone, and no script existed to rebuild it. New `scripts/eval_seal/bake_golden.sh` builds it as the dev user (no sudo):
+  - pinned Debian 12 genericcloud arm64 (`20261026-2643`, Lima 2.3.0's digest);
+  - a `--copies` venv at `/opt/z1b/runtime`, pinned to the host stack that builds the index (CPU torch 2.8.0, sentence-transformers 5.2.0, transformers 4.46.3, numpy 1.26.4…);
+  - the host's own MiniLM snapshot copied in at `/opt/z1b/runtime/hf`;
+  - the commit's `scripts/` tree, and `squashfs-tools`/`iptables`;
+  - an in-guest acceptance check: offline 384-dim encode, sqlite-vec load plus a known cosine, the `corpus_sha256` import;
+  - hygiene, then the flatten: bake user, its home and key, root's `authorized_keys` and the cloud-init sudoers file are removed, and cloud-init is reset.
+
+  Result: `~/.zurvan/z1b/guest.qcow2`, **2.0 GB**, sha512 `d185b7fb…c533259` (sidecar `guest.qcow2.sha512`; the old sidecar is kept as `.2026-10-03`). It is pinned as `vm_runner.GOLDEN_IMAGE_DIGEST` (`b973b9e`).
+- **Deviation, stated plainly:** the guest runs **sqlite-vec 0.1.7**, not the host's pinned 0.1.6. The 0.1.6 manylinux aarch64 wheel ships a 32-bit ARM `vec0.so`: the first re-bake served nothing and failed `wrong ELF class: ELFCLASS32`. `file` on the PyPI wheels shows 0.1.6 32-bit and 0.1.7–0.1.9 64-bit. `vec_storage` calls only scalar `vec_distance_cosine()` over a full scan, never vec0 KNN.
+- **Seal-check: `dev_no_passwordless_root` (gate 9 finding).** `z1b_client.local_seal_check` now fails when the dev identity can become root without a password. It runs `sudo -n -l` and allows a passwordless rule only for runas `zurvaneval`; any other NOPASSWD runas (root, ALL, a group, a uid, `zurvancandidate`) or any unrecognised rule line fails closed. It also runs `sudo -n /usr/bin/true`, so a cached ticket counts. `client_run` refuses **`SEAL_COMPROMISED`** before bundling, so no budget run is spent under a void seal. Live, it flags the real `(ALL) NOPASSWD: brew, …, launchctl` line.
+- **Bugs found and fixed on the way:**
+  - (1) `bake_golden.sh` is committed 100755 but was missing from `broker.EXEC_FILES`. Every install's `broker_sha_matches` would have read false, because `broker_tree_id` takes modes from that list (`2f4c503`; caught by `test_t10_broker_tree_id_equals_the_git_tree_id_of_the_committed_sources`).
+  - (2) `test_z1b_vm_live._live_paths` used `/tmp/zv<decimal pid>`. With five-digit pids the lima `ssh.sock` path is 105 bytes, over macOS's 104-byte `UNIX_PATH_MAX`, so every live VM test died `CANDIDATE_FAILED` at `limactl start`. The root is now `/tmp/z<base-36 pid>`. Production paths are ~88 bytes and were never affected.
+- **Housekeeping:** the five merged, clean agent worktrees under `.claude/worktrees/` and their branches were removed (each commit verified as an ancestor of `main` first).
+- **Files:** `scripts/eval_seal/bake_golden.sh` (new), `scripts/eval_seal/vm_runner.py`, `scripts/eval_seal/broker.py`, `scripts/z1b_client.py`, `tests/test_z1b_client.py` (+17 tests), `tests/test_z1b_vm_live.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). Outside the repo: `~/.zurvan/z1b/guest.qcow2` (+ `.sha512`).
+- **Verification:**
+  - **Live VM gate on the final image:** `ZURVAN_Z1B_VM_LIVE=1 pytest tests/test_z1b_vm_live.py` → **3 passed**. That covers isolation, kill teardown, and the read-only corpus gate: in-guest digest, squashfs ro mount, z1bcand without sudo, TCP/DNS egress REJECT, tamper refused. It ran twice, on the first and the final image.
+  - **Dev-side end to end:**
+    - The broker's own `broker_provision_corpus` + `broker_push_candidate_tree` with the HEAD tree ran on a **host-built** 4-chunk MiniLM index (built in a scratch `ZURVAN_ROOT`; the live index was untouched).
+    - The candidate ran as `z1bcand` with `broker_candidate_env()`. `{"qid":1,"q":"frobnicator widget sparks"}` → top `wiki/concepts/widget.md` 0.887; `{"qid":2,"q":"tomatoes sun"}` → top `wiki/concepts/garden.md` 0.891.
+    - Hygiene: no `z1bbake` user, and every `authorized_keys` line is the per-run key (0 foreign). Teardown left nothing.
+  - The image sha512 was re-hashed independently and equals the pin and the sidecar.
+  - Z1b unit modules: 659 passed, then 345 after the EXEC_FILES fix.
+  - **Full suite** on `main` at `2f4c503`: **3470 passed / 3 failed / 8 skipped** in 31:36. All three failures are reported as failed and all are live seal tests: `test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets` (pre-existing, no cached operator sudo), and `test_t17_live_gate1_dev_identity_gets_eacces_on_every_sealed_path` + `test_t17_live_gate1b_the_broker_reports_its_own_files_keys_and_exclusions_ok`. Those two are NEW and are the gate 9 finding itself: the merged seal-check's only false item is `dev_no_passwordless_root` (checked directly). They turn green when follow-up (1) is done.
+  - `public_repo_guard.py` and `git diff --check` before every commit.
+- **Follow-ups (operator, in order, in a real Terminal):**
+  - (1) Remove the `(ALL) NOPASSWD: /opt/homebrew/bin/brew, /usr/local/bin/brew, /usr/sbin/softwareupdate, /bin/launchctl` line: `sudo grep -rl 'NOPASSWD: /opt/homebrew/bin/brew' /etc/sudoers /etc/sudoers.d/`, then `sudo visudo -f <that file>`. Then `sudo -k; sudo -n -l` must list only the `(zurvaneval) NOPASSWD: sha256:…` rule.
+  - (2) `sudo /Users/raoof.r12/Desktop/Raouf/Zurvan/scripts/eval_seal/install.sh <HEAD sha> --guest-image /Users/raoof.r12/.zurvan/z1b/guest.qcow2`.
+  - (3) `sudo ls /Users/zurvaneval/incidents/` for the open incident's 16-hex id, then `sudo -u zurvaneval /Library/ZurvanEval/broker/bin/zurvan-broker ack-incident <id>`.
+  - (4) Then the agent runs `seal-check` (it must be all green, `dev_no_passwordless_root` included), gate 4 twice (`--declare eval/z1b/declarations/closure-baseline.json`) and gate 5 (`--commit c753dbf…`).
+  - Open risk (unchanged): if the VM host processes legitimately touch the candidate's `T/`/`C/`, the post-run sweep fails closed and needs a design decision.
+  - Known red until (1) is done: the two gate-1/1b live tests above. That is the finding itself, reported as failed, not a regression to mask.
+
 ### 2026-10-20d (Australia/Sydney) — Rust MCP closeout: design status corrected, session logged
 **Raouf:**
 - **Scope:** documentation only. The design doc's status line still said the harness cut-over was not done; it now records the merge to `main`, the 2026-10-20 cut-over (both clients launch `~/.zurvan/bin/zurvan-mcp` built from `main`, main checkout as code root), the paid IOUs and every §1 latency target met.

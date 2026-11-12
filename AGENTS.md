@@ -88,6 +88,45 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-11-13 (Australia/Sydney) — Gates 4 and 5 PASSED at `2eb8876`; gate 8 FAILED (live suite burned to HOLDOUT 61 / RESERVE 0); author `claude` call hardened for a fresh suite; Z1b NOT closed
+
+Raouf:
+- **Scope:** Package B, continued from 2026-11-08b (authorised: "proceed", then "gate 8 make a new professionally, before search the 2026 docs"). This entry also logs the 11-08 work committed after 11-08b, which was never logged.
+- **Committed 2026-11-08 after 11-08b, unlogged until now.** Each commit message carries its evidence.
+  - `41d0878`, `763b1d2`, `980df55`: the post-run sweep. Option A, Raouf's decision: judge the candidate's darwin folders by who could read them; settle on non-Apple processes only; wait out Spotlight workers.
+  - `a8cdcbe`: seal-check `candidate_reaches_stage` (now 25 checks); the installer pins each identity's own primary group.
+  - `cd502ae`: candidate answers always pass the broker's decoder (over-long headings become null); `pkd` is an allowed Apple worker.
+  - `2eb8876`: `containermanagerd` is an allowed Apple worker, found by an uncharged lifecycle rehearsal.
+  - Charged runs on 11-08 failed in turn, on SANDBOX_VIOLATION, CANDIDATE_FAILED, and SANDBOX_VIOLATION twice more (budget 6 → 2).
+- **2026-11-11, the operator steps:** Raouf read `errors.log` in a terminal. The last two failures were `c42b74d7` (decode + `pkd`) and `c2dfeaeb` (`containermanagerd`), both fixed in the installed `2eb8876`. Raouf acknowledged incident `1f898c297e2ef6ee` in a terminal. Raouf offered his sudo password in chat; the agent declined it, because the evaluated identity acknowledging its own incident would void the seal. **The password is in the session transcript and should be rotated.**
+- **Gate 4: PASSED.** Run from a clean detached worktree `.worktrees/z1b-gate4` at `2eb8876`, using that worktree's own `scripts/zurvan`. From the main checkout, the client refused `CANDIDATE_NOT_FROZEN` (uncharged), because it checks the checkout its code runs from.
+  - Run 1: `ok`, `seal_valid: true`, recall@1 0.749, recall@3 0.846, recall@10 0.922, MRR 0.849, n=61, abstain 4. Budget 2 → 1.
+  - Run 2: identical, `cached: true`, budget unchanged at 1.
+- **Gate 5: PASSED.** Escape probe `c753dbf` ended `CANDIDATE_FAILED`, charged (budget 1 → 0). `/tmp/z1b-escape-probe` is absent; open incidents 0.
+- **Gate 8: FAILED, reported as failed.** The committed `eval/z1b/manifest.json` still says HOLDOUT 160 / RESERVE 80, `short: []`. The broker-verified live manifest has **HOLDOUT 61 / RESERVE 0**: each SANDBOX_VIOLATION burns every item it sent (`broker.py`, `led.burn_items(..., "sandbox_violation")`) and the reseal refills from RESERVE until it is empty. So the gate 4 numbers above are on 61 items, not 160. Raouf chose a fresh suite.
+- **Fresh suite, prep (2026-11-13).** The current Claude Code docs were checked first (CLI reference, headless, tools reference, sub-agents, authentication, env vars). Findings that touch the author's `claude -p` call:
+  - (a) `Task` was renamed `Agent` in 2.1.63, so the deny list no longer named the subagent tool. Newer tools reach the network or run commands: `Artifact`, `RemoteTrigger`, `Monitor`, `Skill`, `Workflow`.
+  - (b) Without `--setting-sources` / `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `-p` loads `CLAUDE.md` from the cwd. The author and resolver run with cwd = the corpus, whose root carries the repo's own `CLAUDE.md`/`AGENTS.md` (`scripts/z1b_corpus.py` `_ROOT_FILES`). **Falsified live** against the pinned binary (2.1.319), with a planted `CLAUDE.md` holding a codeword: the 10-06 argv returned the codeword, the new argv returned `NONE`. So the 10-06 and October suites were drafted with Zurvan's own `CLAUDE.md` in every author and resolver call.
+  - (c) With `"verbose": true` in user settings, `--output-format json` prints the whole message ARRAY; the runner refused anything but an object (found live on the dev account).
+- **Fix (`scripts/eval_seal/author.py`):**
+  - The argv gains `--tools Read,Grep,Glob`, `--setting-sources user` and `--disable-slash-commands`.
+  - The deny list adds `Agent`, `PowerShell`, `Monitor`, `Skill`, `Workflow`, `Artifact`, `RemoteTrigger`, `EnterWorktree`, the MCP resource tools and `mcp__*`.
+  - The env adds `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
+  - The runner takes the last `type: result` element of an array and still fails closed on an error result, no result, or a non-string result.
+  - 5 tests, red first.
+- **Operator script** `~/.zurvan/z1b/new_suite.sh` (outside the repo), with phases `install <sha>` → `preflight` → `draft` → `seal`:
+  - `preflight` makes one tiny call per model through the INSTALLED `claude_runner`.
+  - Models are pinned as full ids (`claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5`), not aliases.
+  - `draft` runs as `zurvanauthor`, with its keychain unlocked in the same process tree, and leaves the old suite live.
+  - `seal` reads the next sequence from the broker's own ledger and active generation (anti-rollback; `new_generation` deletes a same-sequence dir). It archives the old suite to `/Users/zurvaneval/retired/bedc01c1dce53b46-20261113/` (moved, never deleted), then seals.
+- **Files:** `scripts/eval_seal/author.py`, `tests/test_z1b_author.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation).
+- **Verification:** `tests/test_z1b_author.py` 100 passed (the 5 new tests failed first). `-k z1b`: 1831 passed / 4 skipped / 1 failed; the failure is the pre-existing live `test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets`, which needs cached operator sudo. A live falsification probe against the pinned binary is described above. `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Raouf: `bash ~/.zurvan/z1b/new_suite.sh install <sha of this commit>`, then `preflight`, then `draft` (hours), then `seal`.
+  - (2) Agent: `seal-check`, commit the new public manifest + a new baseline declaration (new `suite_id`), then gates 4 (×2), 5 and 8 on the fresh budget of 8. Then tamper drill, gate 9 red-team and verdict.
+  - (3) Rotate the sudo password.
+  - (4) Gate 4/5 above stand as passed for the BROKER at `2eb8876`. The broker changes only in the author path, which candidate runs never execute; they will be re-run on the new suite anyway.
+
 ### 2026-11-08b (Australia/Sydney) — Operator steps done; seal-check 24/24 green; gate 4 run 1 FAILED SANDBOX_VIOLATION (candidate's darwin `T/` modified by host-side VM processes); Z1b NOT closed
 
 Raouf:
@@ -111,41 +150,3 @@ Raouf:
 - **Follow-ups:**
   - (1) **Decision needed (Raouf):** how the post-run sweep should treat the candidate's darwin `T/`/`C/`. Recommended: the broker-verified door, running as the candidate, enumerates `T/` and `C/` (lstat, no follow) before launch and after teardown; the broker keeps the baseline and fails closed on any new or changed path, or on any unreadable entry. Alternative: give every host-side candidate process a `TMPDIR` inside the wiped scratch dir and accept a changed `T/` mtime only when the door's enumeration shows no residue.
   - (2) After the fix: reinstall at the new SHA, then `ack-incident` (operator TTY), then gate 4 (two runs) and gate 5. Budget left: **6**.
-
-### 2026-11-08 (Australia/Sydney) — Z1b operator blockers cleared on the dev side: golden image re-baked reproducibly and pinned; seal-check refuses passwordless root; Z1b still NOT closed
-
-Raouf:
-- **Scope:** the 2026-11-07d follow-ups that need no sudo. The four operator steps (sudoers, broker reinstall, `ack-incident`, the gate 4/5 runs) are still the operator's. No charged run was made; budget stays **7**, open incidents **1**.
-- **Golden image re-baked (blocker 2 of 2026-11-07d).** The hand-baked 2026-10-03 image (`41bfeb0b…`, 10 GiB, CUDA torch) is gone, and no script existed to rebuild it. New `scripts/eval_seal/bake_golden.sh` builds it as the dev user (no sudo):
-  - pinned Debian 12 genericcloud arm64 (`20261026-2643`, Lima 2.3.0's digest);
-  - a `--copies` venv at `/opt/z1b/runtime`, pinned to the host stack that builds the index (CPU torch 2.8.0, sentence-transformers 5.2.0, transformers 4.46.3, numpy 1.26.4…);
-  - the host's own MiniLM snapshot copied in at `/opt/z1b/runtime/hf`;
-  - the commit's `scripts/` tree, and `squashfs-tools`/`iptables`;
-  - an in-guest acceptance check: offline 384-dim encode, sqlite-vec load plus a known cosine, the `corpus_sha256` import;
-  - hygiene, then the flatten: bake user, its home and key, root's `authorized_keys` and the cloud-init sudoers file are removed, and cloud-init is reset.
-
-  Result: `~/.zurvan/z1b/guest.qcow2`, **2.0 GB**, sha512 `d185b7fb…c533259` (sidecar `guest.qcow2.sha512`; the old sidecar is kept as `.2026-10-03`). It is pinned as `vm_runner.GOLDEN_IMAGE_DIGEST` (`b973b9e`).
-- **Deviation, stated plainly:** the guest runs **sqlite-vec 0.1.7**, not the host's pinned 0.1.6. The 0.1.6 manylinux aarch64 wheel ships a 32-bit ARM `vec0.so`: the first re-bake served nothing and failed `wrong ELF class: ELFCLASS32`. `file` on the PyPI wheels shows 0.1.6 32-bit and 0.1.7–0.1.9 64-bit. `vec_storage` calls only scalar `vec_distance_cosine()` over a full scan, never vec0 KNN.
-- **Seal-check: `dev_no_passwordless_root` (gate 9 finding).** `z1b_client.local_seal_check` now fails when the dev identity can become root without a password. It runs `sudo -n -l` and allows a passwordless rule only for runas `zurvaneval`; any other NOPASSWD runas (root, ALL, a group, a uid, `zurvancandidate`) or any unrecognised rule line fails closed. It also runs `sudo -n /usr/bin/true`, so a cached ticket counts. `client_run` refuses **`SEAL_COMPROMISED`** before bundling, so no budget run is spent under a void seal. Live, it flags the real `(ALL) NOPASSWD: brew, …, launchctl` line.
-- **Bugs found and fixed on the way:**
-  - (1) `bake_golden.sh` is committed 100755 but was missing from `broker.EXEC_FILES`. Every install's `broker_sha_matches` would have read false, because `broker_tree_id` takes modes from that list (`2f4c503`; caught by `test_t10_broker_tree_id_equals_the_git_tree_id_of_the_committed_sources`).
-  - (2) `test_z1b_vm_live._live_paths` used `/tmp/zv<decimal pid>`. With five-digit pids the lima `ssh.sock` path is 105 bytes, over macOS's 104-byte `UNIX_PATH_MAX`, so every live VM test died `CANDIDATE_FAILED` at `limactl start`. The root is now `/tmp/z<base-36 pid>`. Production paths are ~88 bytes and were never affected.
-- **Housekeeping:** the five merged, clean agent worktrees under `.claude/worktrees/` and their branches were removed (each commit verified as an ancestor of `main` first).
-- **Files:** `scripts/eval_seal/bake_golden.sh` (new), `scripts/eval_seal/vm_runner.py`, `scripts/eval_seal/broker.py`, `scripts/z1b_client.py`, `tests/test_z1b_client.py` (+17 tests), `tests/test_z1b_vm_live.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). Outside the repo: `~/.zurvan/z1b/guest.qcow2` (+ `.sha512`).
-- **Verification:**
-  - **Live VM gate on the final image:** `ZURVAN_Z1B_VM_LIVE=1 pytest tests/test_z1b_vm_live.py` → **3 passed**. That covers isolation, kill teardown, and the read-only corpus gate: in-guest digest, squashfs ro mount, z1bcand without sudo, TCP/DNS egress REJECT, tamper refused. It ran twice, on the first and the final image.
-  - **Dev-side end to end:**
-    - The broker's own `broker_provision_corpus` + `broker_push_candidate_tree` with the HEAD tree ran on a **host-built** 4-chunk MiniLM index (built in a scratch `ZURVAN_ROOT`; the live index was untouched).
-    - The candidate ran as `z1bcand` with `broker_candidate_env()`. `{"qid":1,"q":"frobnicator widget sparks"}` → top `wiki/concepts/widget.md` 0.887; `{"qid":2,"q":"tomatoes sun"}` → top `wiki/concepts/garden.md` 0.891.
-    - Hygiene: no `z1bbake` user, and every `authorized_keys` line is the per-run key (0 foreign). Teardown left nothing.
-  - The image sha512 was re-hashed independently and equals the pin and the sidecar.
-  - Z1b unit modules: 659 passed, then 345 after the EXEC_FILES fix.
-  - **Full suite** on `main` at `2f4c503`: **3470 passed / 3 failed / 8 skipped** in 31:36. All three failures are reported as failed and all are live seal tests: `test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets` (pre-existing, no cached operator sudo), and `test_t17_live_gate1_dev_identity_gets_eacces_on_every_sealed_path` + `test_t17_live_gate1b_the_broker_reports_its_own_files_keys_and_exclusions_ok`. Those two are NEW and are the gate 9 finding itself: the merged seal-check's only false item is `dev_no_passwordless_root` (checked directly). They turn green when follow-up (1) is done.
-  - `public_repo_guard.py` and `git diff --check` before every commit.
-- **Follow-ups (operator, in order, in a real Terminal):**
-  - (1) Remove the `(ALL) NOPASSWD: /opt/homebrew/bin/brew, /usr/local/bin/brew, /usr/sbin/softwareupdate, /bin/launchctl` line: `sudo grep -rl 'NOPASSWD: /opt/homebrew/bin/brew' /etc/sudoers /etc/sudoers.d/`, then `sudo visudo -f <that file>`. Then `sudo -k; sudo -n -l` must list only the `(zurvaneval) NOPASSWD: sha256:…` rule.
-  - (2) `sudo /Users/raoof.r12/Desktop/Raouf/Zurvan/scripts/eval_seal/install.sh <HEAD sha> --guest-image /Users/raoof.r12/.zurvan/z1b/guest.qcow2`.
-  - (3) `sudo ls /Users/zurvaneval/incidents/` for the open incident's 16-hex id, then `sudo -u zurvaneval /Library/ZurvanEval/broker/bin/zurvan-broker ack-incident <id>`.
-  - (4) Then the agent runs `seal-check` (it must be all green, `dev_no_passwordless_root` included), gate 4 twice (`--declare eval/z1b/declarations/closure-baseline.json`) and gate 5 (`--commit c753dbf…`).
-  - Open risk (unchanged): if the VM host processes legitimately touch the candidate's `T/`/`C/`, the post-run sweep fails closed and needs a design decision.
-  - Known red until (1) is done: the two gate-1/1b live tests above. That is the finding itself, reported as failed, not a regression to mask.

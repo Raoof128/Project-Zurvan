@@ -60,8 +60,17 @@ AUTHOR_REJECT_REASONS = (
 )
 AUTHOR_DEFAULT_MODELS = {"author": "opus", "reviewer": "sonnet", "resolver": "haiku"}
 AUTHOR_ALLOWED_TOOLS = "Read,Grep,Glob"
-AUTHOR_DENIED_TOOLS = "Bash,WebFetch,WebSearch,Write,Edit,NotebookEdit,Task"
-AUTHOR_CLAUDE_ENV = {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+# 2026-11-13 (Claude Code docs, tools-reference / sub-agents): Task was renamed Agent in 2.1.63, and newer tools
+# reach the network or run commands (Artifact, RemoteTrigger, Monitor, Skill, Workflow). `--tools` keeps only the
+# three read tools in the model's context; this list denies the escape tools by name as well (belt and braces).
+# The OS boundary (zurvanauthor reads only the corpus) is still the real control.
+AUTHOR_DENIED_TOOLS = ("Bash,PowerShell,Monitor,WebFetch,WebSearch,Write,Edit,NotebookEdit,Agent,Task,Skill,"
+                       "Workflow,Artifact,RemoteTrigger,EnterWorktree,ListMcpResourcesTool,ReadMcpResourceTool,"
+                       "mcp__*")
+# The author and resolver run with cwd = the corpus, whose root carries the repo's own CLAUDE.md/AGENTS.md: those
+# must be corpus DATA, never loaded as instructions (CLAUDE_MDS), and nothing is remembered between calls.
+AUTHOR_CLAUDE_ENV = {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                     "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 # A sealed drafting run is ~300+ model calls over hours; one transient infrastructure failure (DNS, network, a
 # timed-out call) must not discard every completed call. Each call is retried a BOUNDED number of times with
 # backoff, re-sending the identical prompt; after the last attempt it still fails closed (bare INTERNAL).
@@ -95,13 +104,16 @@ def _author_check_model(model) -> str:
 
 
 def author_claude_argv(claude_bin, model, mcp_config) -> list:
-    """The exact argv. The prompt travels on stdin, never in argv. Tools: Read/Grep/Glob only, no MCP."""
+    """The exact argv. The prompt travels on stdin, never in argv. Tools: Read/Grep/Glob only, no MCP, no project
+    settings or slash commands from the corpus cwd."""
     claude_bin, mcp_config = Path(claude_bin), Path(mcp_config)
     if not claude_bin.is_absolute() or not mcp_config.is_absolute():
         raise ValueError("paths must be absolute")
     return [
         str(claude_bin), "-p", "--model", _author_check_model(model), "--output-format", "json",
+        "--tools", AUTHOR_ALLOWED_TOOLS,
         "--allowedTools", AUTHOR_ALLOWED_TOOLS, "--disallowedTools", AUTHOR_DENIED_TOOLS,
+        "--setting-sources", "user", "--disable-slash-commands",
         "--strict-mcp-config", "--mcp-config", str(mcp_config),
     ]
 
@@ -143,6 +155,9 @@ def claude_runner(claude_bin, home, *, mcp_config=None, timeout_s: int = 900, ru
             raise
         except Exception:  # noqa: BLE001 - nothing from the child may travel in an exception
             raise SealRefusal("INTERNAL") from None
+        if type(doc) is list:   # `verbose` settings print the whole message array; the final result is last
+            results = [m for m in doc if type(m) is dict and m.get("type") == "result"]
+            doc = results[-1] if results else None
         if type(doc) is not dict or doc.get("is_error") or type(doc.get("result")) is not str:
             raise SealRefusal("INTERNAL")
         return doc["result"]

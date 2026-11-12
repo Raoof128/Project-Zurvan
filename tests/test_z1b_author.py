@@ -177,6 +177,50 @@ def test_t15_claude_argv_grants_only_read_grep_glob_and_loads_no_mcp():
     assert argv[argv.index("--mcp-config") + 1] == "/Library/ZurvanEval/broker/empty-mcp.json"
 
 
+def test_t15_claude_argv_restricts_builtin_tools_and_denies_current_escape_tools():
+    """2026-11-13: Claude Code renamed Task -> Agent (2.1.63) and added tools that reach the network or run
+    commands (Artifact, Monitor, Skill, Workflow, RemoteTrigger, ...). `--tools` removes every built-in tool but
+    the three from the model's context; the deny list names the current escape tools explicitly as well."""
+    argv = A.author_claude_argv(Path("/b/claude"), "opus", Path("/b/empty-mcp.json"))
+    assert argv[argv.index("--tools") + 1] == "Read,Grep,Glob"
+    denied = set(argv[argv.index("--disallowedTools") + 1].split(","))
+    assert {"Agent", "Task", "Monitor", "Skill", "Workflow", "Artifact", "RemoteTrigger", "EnterWorktree",
+            "PowerShell", "ListMcpResourcesTool", "ReadMcpResourceTool", "NotebookEdit", "mcp__*"} <= denied
+    assert not denied & {"Read", "Grep", "Glob"}
+
+
+def test_t15_claude_argv_loads_no_project_settings_or_commands_from_the_corpus_cwd():
+    """The author and resolver run with cwd = the corpus, whose root carries the repo's own CLAUDE.md,
+    AGENTS.md and README.md. `-p` must not load project/local settings or skills from there."""
+    argv = A.author_claude_argv(Path("/b/claude"), "opus", Path("/b/empty-mcp.json"))
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert "--disable-slash-commands" in argv
+
+
+def test_t15_claude_env_disables_claude_md_and_auto_memory():
+    assert A.AUTHOR_CLAUDE_ENV["CLAUDE_CODE_DISABLE_CLAUDE_MDS"] == "1"
+    assert A.AUTHOR_CLAUDE_ENV["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+    sysenv.clean_env(Path("/h"), dict(A.AUTHOR_CLAUDE_ENV))   # every key passes the clean-env rules
+
+
+def test_t15_claude_runner_reads_the_result_message_when_json_output_is_the_verbose_array(tmp_path):
+    """Found live 2026-11-13: with `"verbose": true` in the user settings, `-p --output-format json` prints the
+    whole message ARRAY (system init, assistant, ..., result). The runner takes the LAST `type: result` element,
+    and still fails closed on an error result, an array with no result, or a non-string result."""
+    def run_with(stdout_doc):
+        def fake_run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(stdout_doc).encode(), stderr=b"")
+        return A.claude_runner(tmp_path / "b" / "bin" / "claude", tmp_path / "h", run=fake_run, sleep=lambda s: None)
+
+    ok = [{"type": "system", "subtype": "init"}, {"type": "assistant", "message": {}},
+          {"type": "result", "subtype": "success", "is_error": False, "result": "TEXT"}]
+    assert run_with(ok)("author", "opus", "P", cwd=tmp_path) == "TEXT"
+    for bad in ([{"type": "system"}], [], [{"type": "result", "is_error": True, "result": "x"}],
+                [{"type": "result", "is_error": False, "result": 7}], ["result"]):
+        with pytest.raises(SealRefusal):
+            run_with(bad)("author", "opus", "P", cwd=tmp_path)
+
+
 def test_t15_claude_argv_refuses_unsafe_model_names_and_relative_binaries():
     for bad in ("opus; rm -rf /", "--dangerously-skip-permissions", "", "a b", "x" * 81):
         with pytest.raises(ValueError):
@@ -206,6 +250,7 @@ def test_t15_claude_runner_uses_clean_env_pinned_binary_and_corpus_cwd(tmp_path,
     assert kw["cwd"] == str(tmp_path / "corpus")
     assert kw["input"] == b"THE PROMPT" and "THE PROMPT" not in " ".join(seen["argv"])
     expect = sysenv.clean_env(home, {"DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                                     "CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
                                      "CLAUDE_CONFIG_DIR": str(home / "private" / "claude")})  # R18
     assert kw["env"] == expect
     assert "ANTHROPIC_API_KEY" not in kw["env"] and kw["env"]["HOME"] == str(home)
