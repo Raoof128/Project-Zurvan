@@ -1,5 +1,26 @@
 ## Change Log
 
+### 2026-11-13b (Australia/Sydney) — Fresh suite `97d564c6d51b048b` SEALED (HOLDOUT 160 / RESERVE 80, budget 8); seal-check 25/25; gates 4, 5 and 8 to re-run on it; Z1b NOT closed
+
+Raouf:
+- **Scope:** Package B, gate 8 remedy (continues 2026-11-13). Raouf ran `draft` and `seal` from `~/.zurvan/z1b/new_suite.sh` in a terminal.
+- **Draft:** exit 0 after ~150 min. Accepted 327 items; every stratum full (10 holdout + 5 reserve × 16), `short: []`. Rejected: reviewer 57, resolve_miss 13, corpus_quote 6, answer_leak 1; dup / dev-contamination / unparseable / bad-schema 0. Only aggregate counts reached the screen.
+- **Seal:** suite `97d564c6d51b048b`, sequence **6** (above the ledger's last manifest sequence), models `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5`, `dev_sha256` `36c69543…` (unchanged), `burn_ledger: []`. Broker status after: `holdout_n` 160, `reserve_n` 80, `budget_remaining` 8, `open_incidents` 0, `manifest_valid`/`corpus_match` true, not stale. The old suite `bedc01c1dce53b46` is ARCHIVED (moved, not deleted) at `/Users/zurvaneval/retired/bedc01c1dce53b46-20261113/`.
+- **Seal took three attempts; the first two wrote nothing.** All three defects were in the operator script (outside the repo), not the broker:
+  - (a) `sudo test -f` ran `/opt/anaconda3/bin/test`, a pytest launcher on the dev `PATH`. Fixed: the script pins `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and calls `/bin/test`.
+  - (b) `zurvan-author seal` refused `BAD_ARGS`: `_author_parse` requires `--spec/--rubric/--prompts` for every subcommand, and `seal` ignores them. This refusal came AFTER the archive step, so for a few minutes no suite was live. Fixed: the flags are passed, and the archive step is idempotent on a re-run.
+  - (c) Found before the third attempt: `zurvaneval` cannot create `public-out` inside the 0755 dev-owned inbox, so the public copy would have crashed AFTER signing. Fixed: the dir is pre-created `zurvaneval`-owned. Also `trap 'sudo -k' EXIT`, because `set -e` had skipped the final `sudo -k`.
+- **seal-check:** `ok: true`, **25/25** checks true, every sealed path EACCES to the dev identity.
+- **Public manifest:** copied from `/Users/Shared/zurvan-eval-inbox/public-20261113/` into `eval/z1b/manifest.json(.sig)`. `manifest.verify` against the tracked `eval/z1b/allowed_signers` passes (suite `97d564c6d51b048b`, seq 6, accepted 327).
+- **Declaration:** `eval/z1b/declarations/closure-baseline.json` is rebound to `97d564c6d51b048b`. Its `suite_id` is the only change. Metric, critical strata, margins, improvement target and budgets are byte-identical, committed before any run on the new suite.
+- **Gate 2 (author isolation): PASSED** with Raouf's operator ticket (`sudo -v` … `sudo -k`), 1 passed. The test used to FAIL whenever no ticket was cached (`sudo -n` refused, so the probe never ran: rc 1, empty output). It now SKIPS as `Z1b: gate 2 UNVERIFIED`. Not running is not evidence of isolation, and it was never evidence of a breach.
+- **Files:** `eval/z1b/manifest.json`, `eval/z1b/manifest.json.sig`, `eval/z1b/declarations/closure-baseline.json`, `tests/test_z1b_seal_live.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation).
+- **Verification:** `tests/test_z1b_seal_live.py`: 10 passed, 2 skipped (gate 2 without a ticket; gate 7 on a dirty tree). seal-check 25/25. Manifest signature verified. `-k z1b`: 1831 passed / 5 skipped / 0 failed. `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Agent: gate 4 twice (from a clean worktree at this commit, `--declare` the baseline), gate 5 (`c753dbf`), gate 8 (committed manifest == live status, 160/80).
+  - (2) Then the tamper drill, the gate 9 red-team and the verdict.
+  - (3) Rotate the sudo password.
+
 ### 2026-11-13 (Australia/Sydney) — Gates 4 and 5 PASSED at `2eb8876`; gate 8 FAILED (live suite burned to HOLDOUT 61 / RESERVE 0); author `claude` call hardened for a fresh suite; Z1b NOT closed
 
 Raouf:

@@ -84,6 +84,11 @@ def test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets():
              "print(json.dumps(r))\n")
     sealed = [str(REAL.keys_dir), str(REAL.keys_dir / "age.key"), str(REAL.sets_dir),
               str(REAL.sets_dir / "holdout.age"), str(REAL.runs_dir), str(REAL.incidents_dir)]
+    # The probe needs the OPERATOR's cached sudo ticket (`sudo -v`); the dev identity has no passwordless
+    # root by design (seal-check dev_no_passwordless_root). Without a ticket the probe never runs, which says
+    # nothing about isolation: that is UNVERIFIED, not a failure (2026-11-13: it FAILED with b'', rc 1).
+    if _t17_sudo_n(AUTHOR_USER, "/usr/bin/true")[0] != 0:
+        pytest.skip("Z1b: gate 2 UNVERIFIED - needs a cached operator sudo ticket (sudo -v, then sudo -k)")
     rc, out = _t17_sudo_n(AUTHOR_USER, "/usr/bin/python3", "-c", probe, *sealed)
     assert rc == 0, out
     import json as _j

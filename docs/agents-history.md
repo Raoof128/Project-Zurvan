@@ -3,6 +3,30 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-08b (Australia/Sydney) — Operator steps done; seal-check 24/24 green; gate 4 run 1 FAILED SANDBOX_VIOLATION (candidate's darwin `T/` modified by host-side VM processes); Z1b NOT closed
+
+Raouf:
+- **Scope:** Package B continued, authorised by Raouf ("go finish the current B"). The operator ran `~/.zurvan/z1b/finish_package_b.sh` (outside the repo). The first version died silently after "y": `grep -v` exits 1 when the removed line was the whole file, so `set -e` stopped the script with nothing changed. The script was fixed to delete a drop-in that held only that grant, and the second run completed.
+  - `/etc/sudoers.d/99-claude-agent` was removed; it held only `raoof.r12 ALL=(ALL) NOPASSWD: /opt/homebrew/bin/brew, /usr/local/bin/brew, /usr/sbin/softwareupdate, /bin/launchctl`.
+  - The broker was reinstalled at `2b00c9d` with `--guest-image`.
+  - The 2026-11-07 incident was acknowledged.
+- **Live state before the runs:**
+  - `sudo -n -l` lists only the `(zurvaneval)` broker rule.
+  - `status`: installed = broker = `2b00c9d`, not stale, `open_incidents 0`, budget 7, and `/Library/ZurvanEval/broker/images/guest.qcow2` installed root:wheel 0444.
+  - `zurvan eval z1b seal-check`: **ok, all 24 checks true**, `dev_no_passwordless_root` included.
+- **Gate 4:**
+  - Dirty tree: the main checkout (one untracked file from another session) → `CANDIDATE_NOT_FROZEN`, budget unchanged at 7. **Held.**
+  - Run 1: from a clean detached worktree at `2b00c9d`, `zurvan eval z1b run --commit 2b00c9d… --suite holdout --declare eval/z1b/declarations/closure-baseline.json`, 12:14:50 → 2m21s → **`SANDBOX_VIOLATION`, charged: budget 6, open_incidents 1. GATE 4 FAILED** (reported as failed). Run 2 and gate 5 were not attempted: the open incident refuses every run, and no further budget is spent without a design decision.
+- **Cause (evidence, not the broker's private record, which the dev side cannot read):**
+  - The candidate's darwin per-user folder `/private/var/folders/6f/hdz9vssj0wl12_rzkjx0v11m0000ks/`: `T/` (0700) has mtime/ctime **2026-11-08 12:16:57**, inside the run window. `0/` and `C/` are unchanged since 11-01 and `X/` since 10-05.
+  - The sweep cannot list a 0700 candidate dir, so `T/` carries the full "opaque" signature, and any create or remove of a direct child fails the run closed. This is the risk recorded open in 2026-11-07d ("if the macOS VM host processes legitimately touch the candidate's `T/`/`C/`, the new check fails closed and needs a design decision"), now observed.
+  - On the dev uid, a golden-profile VZ boot + shell + teardown with the broker's exact `_vm_env` (no TMPDIR) left no lasting new file in `T/` or `C/` (recursive diff; the only new files were from an unrelated plugin). So the candidate-side change is most likely a transient create/remove by a host-side candidate-identity process (Virtualization.framework / limactl / the door). Which one is NOT established.
+- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). No code changed.
+- **Verification:** the commands and outputs above. Code verification is unchanged from 2026-11-08 (full suite 3470 passed / 3 failed live seal / 8 skipped). Of those, `test_t17_live_gate1_*` and `gate1b` should now pass, because sudoers is fixed; not re-run here.
+- **Follow-ups:**
+  - (1) **Decision needed (Raouf):** how the post-run sweep should treat the candidate's darwin `T/`/`C/`. Recommended: the broker-verified door, running as the candidate, enumerates `T/` and `C/` (lstat, no follow) before launch and after teardown; the broker keeps the baseline and fails closed on any new or changed path, or on any unreadable entry. Alternative: give every host-side candidate process a `TMPDIR` inside the wiped scratch dir and accept a changed `T/` mtime only when the door's enumeration shows no residue.
+  - (2) After the fix: reinstall at the new SHA, then `ack-incident` (operator TTY), then gate 4 (two runs) and gate 5. Budget left: **6**.
+
 ### 2026-11-08 (Australia/Sydney) — Z1b operator blockers cleared on the dev side: golden image re-baked reproducibly and pinned; seal-check refuses passwordless root; Z1b still NOT closed
 
 Raouf:

@@ -1,6 +1,6 @@
 {
   "role": "baseline",
-  "suite_id": "bedc01c1dce53b46",
+  "suite_id": "97d564c6d51b048b",
   "primary_metric": "recall_at_10",
   "critical_strata": ["exact_identifier", "path", "hash", "error_string"],
   "non_inferiority_margins": {"critical": 0.05, "overall": 0.02},
