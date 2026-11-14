@@ -1,5 +1,30 @@
 ## Change Log
 
+### 2026-11-14 (Australia/Sydney) — On suite `97d564c6d51b048b`: gate 4 PASSED (re-run on a quiet host), gate 5 PASSED, gate 8 PASSED; budget 5; Z1b NOT closed (tamper drill, gate 9 and the verdict remain)
+
+Raouf:
+- **Scope:** Package B, continued from 2026-11-13b. Raouf said "proceed".
+- **Host check before spending:** load average 2.02 (from 77.7 at 15:16 on 11-13). Worktree `.worktrees/z1b-gate4` clean at `dfef49a`; not stale; budget 7; open incidents 0; every scan target carries the `zurvaneval` ACL.
+- **Gate 4: PASSED.** A NEW measurement under the unchanged pre-registered limits (`query_timeout_s` 30, `run_timeout_s` 3600); 2026-11-13b run 1 stays recorded as FAILED.
+  - Run 1, 18:40:28–18:51:02: `ok`, `seal_valid: true`, `n_items` 160, `target_missing` 0. Recall@1 **0.627**, @3 **0.826**, @10 **0.897**, MRR **0.760**. Latency p50/p95 5000 ms (public ladder), peak RSS 1024 MB (ladder). Abstain 10, **passed 0**. Budget 7 → **6**. Load at the end: 5.63.
+  - Run 2: identical, `cached: true`, budget unchanged at 6.
+  - **Not comparable with 11-13** (0.922 @10, MRR 0.849): those were on the 61 items the burns left, these are on all 160.
+  - **The candidate never abstained correctly (0/10 on `not_found`).** Gate 4 does not test this; it is a real retrieval weakness, recorded for Z2.
+- **Gate 5: PASSED.**
+  - First attempt with `--commit c753dbf`: refused `DECLARATION_INVALID`, uncharged. The client reads the declaration committed AT the candidate commit, and at `c753dbf` it names the retired suite `bedc01c1dce53b46`.
+  - The probe was rebuilt as `2c426bd`, on the local branch `z1b-gate5-probe-97d564c6`, never merged: the tree of `dfef49a` with ONLY `scripts/z1b_candidate.py` taken from `c753dbf`. The blob is identical (checked by `git rev-parse`).
+  - Run, 18:57:24–19:00:56: `CANDIDATE_FAILED`, charged (budget 6 → **5**). `/tmp/z1b-escape-probe` absent before and after; open incidents 0; holdout/reserve still 160/80.
+- **Gate 8: PASSED.** The committed `eval/z1b/manifest.json` (suite `97d564c6d51b048b`, seq 6, holdout 160 / reserve 80, `short: []`, `burn_ledger: []`) has SHA-256 `3dff0612…`, equal to the `suite_manifest_sha256` the broker returned in the gate 4 result. Live status after gate 5 is 160/80.
+- **seal-check after the runs:** `ok: true`, 25/25, every sealed path EACCES to the dev identity.
+- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). No code changed. Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`), not merged, not pushed.
+- **Verification:** the commands and outputs above. Code unchanged since `dfef49a` (`-k z1b`: 1831 passed / 5 skipped / 0 failed). `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Tamper drill (`scripts/eval_seal/tamper_drill.sh`; operator).
+  - (2) Gate 9 red-team: a fresh agent, transcript to `~/.zurvan/reports/z1b-redteam-<date>.jsonl`.
+  - (3) The Z1b verdict, with `tests/test_z1b_closure.py` mapping each gate to evidence.
+  - (4) Open question: should a charged run refuse (uncharged) under host overload?
+  - (5) Rotate the sudo password.
+
 ### 2026-11-13b (Australia/Sydney) — Fresh suite `97d564c6d51b048b` SEALED (HOLDOUT 160 / RESERVE 80, budget 8); seal-check 25/25; gate 4 run 1 FAILED `CANDIDATE_FAILED` (query 16 read timeout, host overloaded); Z1b NOT closed
 
 Raouf:

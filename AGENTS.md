@@ -88,6 +88,31 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-11-14 (Australia/Sydney) — On suite `97d564c6d51b048b`: gate 4 PASSED (re-run on a quiet host), gate 5 PASSED, gate 8 PASSED; budget 5; Z1b NOT closed (tamper drill, gate 9 and the verdict remain)
+
+Raouf:
+- **Scope:** Package B, continued from 2026-11-13b. Raouf said "proceed".
+- **Host check before spending:** load average 2.02 (from 77.7 at 15:16 on 11-13). Worktree `.worktrees/z1b-gate4` clean at `dfef49a`; not stale; budget 7; open incidents 0; every scan target carries the `zurvaneval` ACL.
+- **Gate 4: PASSED.** A NEW measurement under the unchanged pre-registered limits (`query_timeout_s` 30, `run_timeout_s` 3600); 2026-11-13b run 1 stays recorded as FAILED.
+  - Run 1, 18:40:28–18:51:02: `ok`, `seal_valid: true`, `n_items` 160, `target_missing` 0. Recall@1 **0.627**, @3 **0.826**, @10 **0.897**, MRR **0.760**. Latency p50/p95 5000 ms (public ladder), peak RSS 1024 MB (ladder). Abstain 10, **passed 0**. Budget 7 → **6**. Load at the end: 5.63.
+  - Run 2: identical, `cached: true`, budget unchanged at 6.
+  - **Not comparable with 11-13** (0.922 @10, MRR 0.849): those were on the 61 items the burns left, these are on all 160.
+  - **The candidate never abstained correctly (0/10 on `not_found`).** Gate 4 does not test this; it is a real retrieval weakness, recorded for Z2.
+- **Gate 5: PASSED.**
+  - First attempt with `--commit c753dbf`: refused `DECLARATION_INVALID`, uncharged. The client reads the declaration committed AT the candidate commit, and at `c753dbf` it names the retired suite `bedc01c1dce53b46`.
+  - The probe was rebuilt as `2c426bd`, on the local branch `z1b-gate5-probe-97d564c6`, never merged: the tree of `dfef49a` with ONLY `scripts/z1b_candidate.py` taken from `c753dbf`. The blob is identical (checked by `git rev-parse`).
+  - Run, 18:57:24–19:00:56: `CANDIDATE_FAILED`, charged (budget 6 → **5**). `/tmp/z1b-escape-probe` absent before and after; open incidents 0; holdout/reserve still 160/80.
+- **Gate 8: PASSED.** The committed `eval/z1b/manifest.json` (suite `97d564c6d51b048b`, seq 6, holdout 160 / reserve 80, `short: []`, `burn_ledger: []`) has SHA-256 `3dff0612…`, equal to the `suite_manifest_sha256` the broker returned in the gate 4 result. Live status after gate 5 is 160/80.
+- **seal-check after the runs:** `ok: true`, 25/25, every sealed path EACCES to the dev identity.
+- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). No code changed. Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`), not merged, not pushed.
+- **Verification:** the commands and outputs above. Code unchanged since `dfef49a` (`-k z1b`: 1831 passed / 5 skipped / 0 failed). `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Tamper drill (`scripts/eval_seal/tamper_drill.sh`; operator).
+  - (2) Gate 9 red-team: a fresh agent, transcript to `~/.zurvan/reports/z1b-redteam-<date>.jsonl`.
+  - (3) The Z1b verdict, with `tests/test_z1b_closure.py` mapping each gate to evidence.
+  - (4) Open question: should a charged run refuse (uncharged) under host overload?
+  - (5) Rotate the sudo password.
+
 ### 2026-11-13b (Australia/Sydney) — Fresh suite `97d564c6d51b048b` SEALED (HOLDOUT 160 / RESERVE 80, budget 8); seal-check 25/25; gate 4 run 1 FAILED `CANDIDATE_FAILED` (query 16 read timeout, host overloaded); Z1b NOT closed
 
 Raouf:
@@ -118,42 +143,3 @@ Raouf:
   - (1b) Proposal, prospective only: the client refuses a charged run (uncharged) when host load or swap is above a stated threshold, so contention cannot consume budget.
   - (2) Then the tamper drill, the gate 9 red-team and the verdict.
   - (3) Rotate the sudo password.
-
-### 2026-11-13 (Australia/Sydney) — Gates 4 and 5 PASSED at `2eb8876`; gate 8 FAILED (live suite burned to HOLDOUT 61 / RESERVE 0); author `claude` call hardened for a fresh suite; Z1b NOT closed
-
-Raouf:
-- **Scope:** Package B, continued from 2026-11-08b (authorised: "proceed", then "gate 8 make a new professionally, before search the 2026 docs"). This entry also logs the 11-08 work committed after 11-08b, which was never logged.
-- **Committed 2026-11-08 after 11-08b, unlogged until now.** Each commit message carries its evidence.
-  - `41d0878`, `763b1d2`, `980df55`: the post-run sweep. Option A, Raouf's decision: judge the candidate's darwin folders by who could read them; settle on non-Apple processes only; wait out Spotlight workers.
-  - `a8cdcbe`: seal-check `candidate_reaches_stage` (now 25 checks); the installer pins each identity's own primary group.
-  - `cd502ae`: candidate answers always pass the broker's decoder (over-long headings become null); `pkd` is an allowed Apple worker.
-  - `2eb8876`: `containermanagerd` is an allowed Apple worker, found by an uncharged lifecycle rehearsal.
-  - Charged runs on 11-08 failed in turn, on SANDBOX_VIOLATION, CANDIDATE_FAILED, and SANDBOX_VIOLATION twice more (budget 6 → 2).
-- **2026-11-11, the operator steps:** Raouf read `errors.log` in a terminal. The last two failures were `c42b74d7` (decode + `pkd`) and `c2dfeaeb` (`containermanagerd`), both fixed in the installed `2eb8876`. Raouf acknowledged incident `1f898c297e2ef6ee` in a terminal. Raouf offered his sudo password in chat; the agent declined it, because the evaluated identity acknowledging its own incident would void the seal. **The password is in the session transcript and should be rotated.**
-- **Gate 4: PASSED.** Run from a clean detached worktree `.worktrees/z1b-gate4` at `2eb8876`, using that worktree's own `scripts/zurvan`. From the main checkout, the client refused `CANDIDATE_NOT_FROZEN` (uncharged), because it checks the checkout its code runs from.
-  - Run 1: `ok`, `seal_valid: true`, recall@1 0.749, recall@3 0.846, recall@10 0.922, MRR 0.849, n=61, abstain 4. Budget 2 → 1.
-  - Run 2: identical, `cached: true`, budget unchanged at 1.
-- **Gate 5: PASSED.** Escape probe `c753dbf` ended `CANDIDATE_FAILED`, charged (budget 1 → 0). `/tmp/z1b-escape-probe` is absent; open incidents 0.
-- **Gate 8: FAILED, reported as failed.** The committed `eval/z1b/manifest.json` still says HOLDOUT 160 / RESERVE 80, `short: []`. The broker-verified live manifest has **HOLDOUT 61 / RESERVE 0**: each SANDBOX_VIOLATION burns every item it sent (`broker.py`, `led.burn_items(..., "sandbox_violation")`) and the reseal refills from RESERVE until it is empty. So the gate 4 numbers above are on 61 items, not 160. Raouf chose a fresh suite.
-- **Fresh suite, prep (2026-11-13).** The current Claude Code docs were checked first (CLI reference, headless, tools reference, sub-agents, authentication, env vars). Findings that touch the author's `claude -p` call:
-  - (a) `Task` was renamed `Agent` in 2.1.63, so the deny list no longer named the subagent tool. Newer tools reach the network or run commands: `Artifact`, `RemoteTrigger`, `Monitor`, `Skill`, `Workflow`.
-  - (b) Without `--setting-sources` / `CLAUDE_CODE_DISABLE_CLAUDE_MDS`, `-p` loads `CLAUDE.md` from the cwd. The author and resolver run with cwd = the corpus, whose root carries the repo's own `CLAUDE.md`/`AGENTS.md` (`scripts/z1b_corpus.py` `_ROOT_FILES`). **Falsified live** against the pinned binary (2.1.319), with a planted `CLAUDE.md` holding a codeword: the 10-06 argv returned the codeword, the new argv returned `NONE`. So the 10-06 and October suites were drafted with Zurvan's own `CLAUDE.md` in every author and resolver call.
-  - (c) With `"verbose": true` in user settings, `--output-format json` prints the whole message ARRAY; the runner refused anything but an object (found live on the dev account).
-- **Fix (`scripts/eval_seal/author.py`):**
-  - The argv gains `--tools Read,Grep,Glob`, `--setting-sources user` and `--disable-slash-commands`.
-  - The deny list adds `Agent`, `PowerShell`, `Monitor`, `Skill`, `Workflow`, `Artifact`, `RemoteTrigger`, `EnterWorktree`, the MCP resource tools and `mcp__*`.
-  - The env adds `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`.
-  - The runner takes the last `type: result` element of an array and still fails closed on an error result, no result, or a non-string result.
-  - 5 tests, red first.
-- **Operator script** `~/.zurvan/z1b/new_suite.sh` (outside the repo), with phases `install <sha>` → `preflight` → `draft` → `seal`:
-  - `preflight` makes one tiny call per model through the INSTALLED `claude_runner`.
-  - Models are pinned as full ids (`claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5`), not aliases.
-  - `draft` runs as `zurvanauthor`, with its keychain unlocked in the same process tree, and leaves the old suite live.
-  - `seal` reads the next sequence from the broker's own ledger and active generation (anti-rollback; `new_generation` deletes a same-sequence dir). It archives the old suite to `/Users/zurvaneval/retired/bedc01c1dce53b46-20261113/` (moved, never deleted), then seals.
-- **Files:** `scripts/eval_seal/author.py`, `tests/test_z1b_author.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation).
-- **Verification:** `tests/test_z1b_author.py` 100 passed (the 5 new tests failed first). `-k z1b`: 1831 passed / 4 skipped / 1 failed; the failure is the pre-existing live `test_t17_live_gate2_author_identity_cannot_read_the_keys_or_sealed_sets`, which needs cached operator sudo. A live falsification probe against the pinned binary is described above. `public_repo_guard.py` passed; `git diff --check` clean.
-- **Follow-ups:**
-  - (1) Raouf: `bash ~/.zurvan/z1b/new_suite.sh install <sha of this commit>`, then `preflight`, then `draft` (hours), then `seal`.
-  - (2) Agent: `seal-check`, commit the new public manifest + a new baseline declaration (new `suite_id`), then gates 4 (×2), 5 and 8 on the fresh budget of 8. Then tamper drill, gate 9 red-team and verdict.
-  - (3) Rotate the sudo password.
-  - (4) Gate 4/5 above stand as passed for the BROKER at `2eb8876`. The broker changes only in the author path, which candidate runs never execute; they will be re-run on the new suite anyway.
