@@ -513,7 +513,23 @@ def tool_zurvan_claim_show(claim_id: str, as_of_revision: int | None = None,
     s = state.get(claim_id)
     if s is None:
         return f"Error: UNKNOWN_CLAIM: {claim_id}"
-    return _json.dumps(asdict(s), sort_keys=True, default=str)
+    doc = asdict(s)
+    # Security review 2026-11-14: the capsule and the selector's prefix/suffix
+    # carry text AROUND the quote, and the fingerprint confirms a guessed file.
+    # Through MCP they are returned only for a source on the read allow-list;
+    # the quote itself (`exact`) is already on the claim page.
+    allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
+    for ev in doc.get("evidence") or []:
+        if is_readable_path(ev.get("source") or "", allow_raw=allow_raw):
+            continue
+        ev["capsule"] = None
+        sel = ev.get("selector") or {}
+        quote = sel.get("TextQuoteSelector") or {}
+        quote["prefix"] = quote["suffix"] = None
+        if isinstance(sel.get("state"), dict):
+            sel["state"]["sha256"] = None
+        ev["redacted"] = "source outside the MCP read allow-list"
+    return _json.dumps(doc, sort_keys=True, default=str)
 
 
 @_protocol_safe

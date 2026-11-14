@@ -218,3 +218,24 @@ def test_prune_never_selects_a_generated_page(tmp_path):
                                      "# Claim\nEvidence missing? No, cited from x\n",
                                      encoding="utf-8")
     assert build_manifest(claims, concepts) == []
+
+
+def test_mcp_claim_show_never_leaks_context_from_an_unreadable_source(root):
+    """Security review 2026-11-14: the stored capsule and the selector's
+    prefix/suffix carry up to 64/32 characters around the quote. Through MCP they
+    are returned only when the source passes the read allow-list; the quote itself
+    is already on the claim page."""
+    from scripts import mcp_tools as tools
+    (root / "sources").mkdir()
+    (root / "sources" / "legal.md").write_text(
+        "PRIVATE-BEFORE the quoted words PRIVATE-AFTER\n", encoding="utf-8")
+    with kr.operation(writer="cli"):
+        cid = cl.add("cli claim", "sources/legal.md", "the quoted words", confidence="high",
+                     actor="local:t", method="human")
+    out = tools.tool_zurvan_claim_show(cid)
+    assert "the quoted words" in out
+    assert "PRIVATE" not in out, out
+    # a readable source keeps its context
+    tools.tool_zurvan_claim_add("ok", "wiki/decisions/ev.md", "the evidence line", "high", [])
+    ok_id = next(c for c in cl.current(root) if c != cid)
+    assert "more" in tools.tool_zurvan_claim_show(ok_id)
