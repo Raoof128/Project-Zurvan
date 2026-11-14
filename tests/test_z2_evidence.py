@@ -143,3 +143,21 @@ def test_unknown_reader_refused(src):
     root, ref, _ = src
     with pytest.raises(ValueError):
         ce.read_source(ref, "pdf_magic", root)
+
+
+def test_anchor_normalised_keeps_the_quote_and_anchors_the_real_span(tmp_path):
+    """Migration: a legacy quote that matches its source only after whitespace
+    normalisation is `moved_normalised` (anchored), never orphaned."""
+    (tmp_path / "s.md").write_text("Lead in. 160  holdout\nitems and 80 reserve. Tail.\n",
+                                   encoding="utf-8")
+    a = ce.anchor_normalised("s.md", "160 holdout items and 80 reserve", "utf8", tmp_path, NOW)
+    sel = a["selector"]
+    assert sel["TextQuoteSelector"]["exact"] == "160 holdout items and 80 reserve"
+    text = (tmp_path / "s.md").read_text()
+    start, end = sel["TextPositionSelector"]["start"], sel["TextPositionSelector"]["end"]
+    assert text[start:end] == "160  holdout\nitems and 80 reserve"
+    assert ce.resolve(sel, "s.md", "utf8", tmp_path)[0] == "intact"
+    (tmp_path / "s.md").write_text("New. " + text, encoding="utf-8")
+    assert ce.resolve(sel, "s.md", "utf8", tmp_path)[0] == "moved_normalised"
+    with pytest.raises(ClaimRefused):
+        ce.anchor_normalised("s.md", "not there at all", "utf8", tmp_path, NOW)

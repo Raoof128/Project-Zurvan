@@ -108,6 +108,10 @@ def register(subparsers) -> None:
     er.add_argument("--reason-class", dest="reason_class", required=True,
                     choices=("client_request", "personal_data", "legal", "owner_request"))
     er.add_argument("--actor", default=None)
+    mg = sub.add_parser("migrate", help="Import legacy claim pages into the ledger (once)")
+    mg.add_argument("--dry-run", dest="dry_run", action="store_true")
+    mg.add_argument("--legacy-dir", dest="legacy_dir")
+    mg.add_argument("--report", dest="report_path")
     sub.add_parser("doctor", help="Chain, integrity, invisible rows, dangling cids, edited pages")
     rg = sub.add_parser("regenerate", help="Rewrite pages from the ledger")
     rg.add_argument("claim_id", nargs="?")
@@ -205,6 +209,13 @@ def dispatch(args) -> int:
         elif action == "erase":
             out = cl.erase(args.claim_id, reason_class=args.reason_class, actor=actor)
             print(json.dumps(out, sort_keys=True))
+        elif action == "migrate":
+            from scripts import claim_migrate
+            out = claim_migrate.migrate(dry_run=args.dry_run, legacy_dir=args.legacy_dir,
+                                        report_path=args.report_path)
+            print(json.dumps(out, sort_keys=True, default=str))
+            if out.get("provenance_mismatches"):
+                return 1
         elif action == "doctor":
             from scripts import claim_store
             report = claim_store.doctor()
