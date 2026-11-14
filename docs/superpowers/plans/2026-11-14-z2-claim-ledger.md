@@ -21,9 +21,11 @@
 - All claim text, reasons, quotes, selectors, source paths and source fingerprints live ONLY in table `content`. `row_hash` covers non-content fields + cids + `prev_hash`, never a body.
 - Every write runs inside a `kr.operation` AND holds the claims lock until that operation ends. Record time is NEVER written into claims.sqlite.
 - Evidence outcomes, exact strings: `intact`, `moved`, `moved_normalised`, `ambiguous`, `changed`, `gone`. Capsule context ≤ 64 characters each side; `TextQuoteSelector` prefix/suffix ≤ 32 characters each.
-- Refusal codes (exception `.code`): `CLAIM_CONFLICT`, `CLAIMS_BUSY`, `REASON_REQUIRED`, `UNKNOWN_CLAIM`, `EVIDENCE_REJECTED`, `RESTORE_REFUSED`, `ExtractionConflict` (existing class).
+- Refusal codes (exception `.code`): `CLAIM_CONFLICT`, `CLAIMS_BUSY`, `MIGRATION_REQUIRED`, `REASON_REQUIRED`, `UNKNOWN_CLAIM`, `EVIDENCE_REJECTED`, `RESTORE_REFUSED`, `ExtractionConflict` (existing class).
 - Tests use a tmp store root (`root=tmp_path`, mirror `tests/test_knowledge_revision.py` fixtures); `tests/conftest.py` fails any run that writes the live `wiki/`.
 - Retrieval gate: `PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6` before/after; no previously-passing Top-3 query may fail after; changed queries named by INDEX only (never quote the instrument).
+- **Branch isolation (gauntlet 2026-11-14):** the live MCP servers of Claude Code and Codex run Python from THIS checkout (`ZURVAN_CODE_ROOT=/Users/raoof.r12/Desktop/Raouf/Zurvan` in `~/.claude.json` and `~/.codex/config.toml`; Rust bridge `bridge.rs:77`). Every Z2 commit lands on branch `z2-claim-ledger` in worktree `.worktrees/z2-claim-ledger`; `main` is touched only in Task 15, immediately before the live migration.
+- **Migration guard:** until `claim migrate` has run, every claim write refuses `MIGRATION_REQUIRED` when `wiki/claims/` holds a page without `authority: structured` and no claims.sqlite exists, so a merged-but-unmigrated store cannot half-convert.
 - Change protocol: each commit that changes behaviour adds to the session's `Raouf:` entry in AGENTS.md + CHANGELOG.md at the end (Task 15); never `git push`.
 
 ## Review Focus
@@ -73,6 +75,7 @@
   - `chain_ok(conn) -> tuple[bool, str | None]` (problem description or None)
   - `acquire_for_operation(root=None, timeout_s: float = 30.0) -> None` — flock `data/claims.lock` once per outermost operation, release via `kr.at_operation_end`; raises `ClaimRefused("CLAIMS_BUSY")` on timeout; raises `kr.KnowledgeOperationRequired` with no active operation
   - `class ClaimRefused(Exception)` with `.code`
+  - `require_migrated(root=None) -> None` — raises `ClaimRefused("MIGRATION_REQUIRED")` when claims.sqlite is absent and any `wiki/claims/*.md` lacks `authority: structured`; every ledger write calls it except `claim_migrate.migrate`
   - Tables per spec §7.1: `claims`, `revisions` (incl. `tags` JSON, `claim_type`, `extraction_key`, `observed_at_legacy`, `observed_at_legacy_source`, nullable `subject_id`/`predicate_id`/`object_json`), `evidence` (incl. `source_ref_cid`, `selector_cid`, `capsule_cid`, `location_hint`, `reader`), `relations`, `content`, `head`.
 - [ ] **Step 1: Failing tests**
   - `test_pragmas_on_every_connection`: `journal_mode == "delete"`, `secure_delete == 1`, `foreign_keys == 1`, `user_version == 1`; no `-wal` file after writes.
@@ -80,6 +83,7 @@
   - `test_chain_detects_reordered_or_edited_row`: append 3 rows; `chain_ok` True; UPDATE one non-content field → False with the offending `(claim_id, rev)` in the message.
   - `test_chain_survives_content_erasure`: blank a referenced `content.body` → `chain_ok` still True.
   - `test_row_hash_never_contains_body`: body `"SECRET-XYZ"`; no `revisions` column value contains it; `row_hash` unchanged when body edited.
+  - `test_write_refused_before_migration` (legacy page present, no db → `MIGRATION_REQUIRED`, nothing written);
   - `test_lock_requires_operation` and `test_second_writer_blocks_then_busy` (child process holds lock; parent `timeout_s=0.5` → `CLAIMS_BUSY`).
 - [ ] **Step 2: Run** `pytest tests/test_z2_store.py -q` → FAIL.
 - [ ] **Step 3: Implement.** `row_hash = sha256(json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=True))` over every `revisions` column except `row_hash` itself; `head` holds `last_rev_hash`. Never `VACUUM` here (Task 10 owns it).
@@ -125,7 +129,7 @@
   - Every write: `acquire_for_operation`; refuses `REASON_REQUIRED` for supersede/retract/revise without reason; `CLAIM_CONFLICT` when `expected_rev` ≠ latest visible rev; `UNKNOWN_CLAIM`.
 - Visibility rule: a row is visible iff its `mutation_id` is in `kr.belief_revisions()` (rows written by the CURRENT active operation are visible to that operation only). `as_of_revision(R)`: per claim, the visible row with the greatest belief revision ≤ R, ties broken by `rev`. `pre_ledger=True` when R < the smallest belief revision of any claims mutation.
 - [ ] **Step 1: Failing tests** (`test_z2_ledger.py`)
-  - `test_add_then_current`; `test_supersede_links_and_ends_old` (old status `superseded`, `valid_until == new valid_from`, relation `supersedes`); `test_retract_keeps_history`; `test_reason_required`; `test_expected_rev_conflict_writes_nothing`; `test_aborted_operation_rows_invisible` (raise inside op after `add`; `current()` lacks it; `history` lacks it; doctor-visible via store); `test_as_of_before_ledger_is_pre_ledger`; `test_valid_at_filters_by_valid_time`; `test_mcp_cannot_record_human` is Task 8's.
+  - `test_add_then_current`; `test_supersede_links_and_ends_old` (old status `superseded`, `valid_until == new valid_from`, relation `supersedes`); `test_retract_keeps_history`; `test_reason_required`; `test_expected_rev_conflict_writes_nothing`; `test_aborted_operation_rows_invisible` (raise inside op after `add`; `current()` lacks it; `history` lacks it; doctor-visible via store); `test_as_of_before_ledger_is_pre_ledger`; `test_valid_at_filters_by_valid_time`.
 - [ ] **Step 2: Failing property test** (`test_z2_belief_property.py`): seeded random sequences (≥ 200 seeds × ≤ 30 ops) of add/supersede/retract/revise, some inside operations that abort, interleaved with unrelated wiki page writes; after each committed op record `(R, current())`; at the end assert `as_of_revision(R).claims == recorded[R]` for every R. (Spec gate G3.)
 - [ ] **Step 3: Run** both → FAIL.
 - [ ] **Step 4: Implement.** Supersede is ONE operation: new claim `assert` + old claim `supersede` rev + relation row.
@@ -135,13 +139,13 @@
 
 **Files:**
 - Create: `scripts/claim_visibility.py`
-- Modify: `scripts/chunk.py` (`scan_markdown_files` ~148), `scripts/graph_build.py` (file walk ~167), `scripts/agent_workflow.py` (~164), `scripts/claim_federation.py` (~38 discovery loop), `scripts/context_export.py` (claim collection)
+- Modify: `scripts/chunk.py` (`scan_markdown_files` ~148), `scripts/graph_build.py` (file walk ~167), `scripts/agent_workflow.py` (~164), `scripts/claim_federation.py` (~38 discovery loop). Not `scripts/context_export.py`: it reads only search results (`_search_internal` ~19), so the index exclusion covers it — its test asserts that through search
 - Test: `tests/test_z2_visibility.py`
 
 **Interfaces:**
 - Produces: `NONCURRENT = ("superseded", "retracted", "orphaned", "erased")`; `is_hidden_claim_page(rel_path: str, frontmatter: dict) -> bool` — True iff `rel_path` starts with `wiki/claims/`, `frontmatter.get("authority") == "structured"` and `frontmatter.get("status") in NONCURRENT`. Legacy pages (no `authority`) are never hidden.
-- [ ] **Step 1: Failing tests:** a tmp wiki with one current and one `status: retracted, authority: structured` page → excluded from `scan_markdown_files` output, `build_graph` nodes, the recall digest, federation discovery and context export; the current page present in all five.
-- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** — each reader parses frontmatter with `graph_build.parse_frontmatter` (chunk.py reads only the first 4 KiB to decide). **Step 4: Run** → PASS plus `tests/test_chunk*.py tests/test_graph*.py tests/test_claim_federation.py tests/test_context_export*.py`.
+- [ ] **Step 1: Failing tests:** a tmp wiki with one current and one `status: retracted, authority: structured` page → excluded from `scan_markdown_files` output, `build_graph` nodes, the recall digest and federation discovery, and absent from `context_export` results after an index rebuild over the tmp root; the current page present in all five.
+- [ ] **Step 2: Run** → FAIL. **Step 3: Implement** — each reader parses frontmatter with `graph_build.parse_frontmatter` (chunk.py reads only the first 4 KiB to decide). **Step 4: Run** → PASS plus `tests/test_chunk.py tests/test_graph_build.py tests/test_claim_federation.py tests/test_context_export.py`.
 - [ ] **Step 5: Commit** `z2: non-current claim pages leave search, graph, context, federation and the recall digest`
 
 ### Task 6: Generated pages, hand-edit conflicts, adopt and regenerate
@@ -166,15 +170,15 @@
 - Test: `tests/test_z2_cli.py`
 
 **Interfaces:**
-- Consumes: Tasks 4, 6, 9–11.
-- Produces subcommands of `zurvan claim`: `add` (existing flags + `--basis`, `--valid-from`, `--valid-until`, `--project`, `--actor`, `--method {human,agent}`), `supersede`, `retract`, `revise`, `verify [--apply]`, `show [--as-of-revision|--as-of-date] [--valid-at]`, `history`, `list [--status] [--as-of-*]`, `conflicts`, `adopt`, `regenerate [--all]`, `erase --reason-class`, `doctor`, `migrate [--dry-run]`. Exit codes: 0 ok, 1 refused (prints `Error: <CODE>: <detail>` to stderr), 2 usage. `--actor` default `local:<getpass.getuser()>`; `--method` default `human`.
-- [ ] **Step 1: Failing tests** (subprocess against a tmp root via `ZURVAN_ROOT`): `test_claim_add_cli_unchanged_contract` (old flags still work, exit 0, page created); `test_supersede_cli_requires_reason` (exit 1, `REASON_REQUIRED`); `test_show_as_of_revision_cli`; `test_read_commands_open_no_operation` (registry revision unchanged after `show/history/list/verify`).
-- [ ] **Step 2–4:** FAIL → implement → PASS. **Step 5: Commit** `z2: zurvan claim CLI (supersede, retract, revise, verify, show/history/list, conflicts, erase, doctor, migrate)`
+- Consumes: Tasks 4 and 6 only (gauntlet: an earlier draft consumed Tasks 9–11, which come later).
+- Produces subcommands of `zurvan claim`: `add` (existing flags + `--basis`, `--valid-from`, `--valid-until`, `--project`, `--actor`, `--method {human,agent}`), `supersede`, `retract`, `revise`, `show [--as-of-revision|--as-of-date] [--valid-at]`, `history`, `list [--status] [--as-of-*]`, `conflicts`, `adopt`, `regenerate [--all]`. Tasks 9, 10, 11 and 13 each add their own subcommand (`doctor`, `erase --reason-class`, `verify [--apply]`, `migrate [--dry-run]`) with a CLI test in their own step 1. Exit codes: 0 ok, 1 refused (prints `Error: <CODE>: <detail>` to stderr), 2 usage. `--actor` default `local:<getpass.getuser()>`; `--method` default `human`.
+- [ ] **Step 1: Failing tests** (subprocess against a tmp root via `ZURVAN_ROOT`): `test_claim_add_cli_unchanged_contract` (old flags still work, exit 0, page created); `test_supersede_cli_requires_reason` (exit 1, `REASON_REQUIRED`); `test_show_as_of_revision_cli`; `test_read_commands_open_no_operation` (registry revision unchanged after `show/history/list`).
+- [ ] **Step 2–4:** FAIL → implement → PASS. **Step 5: Commit** `z2: zurvan claim CLI (supersede, retract, revise, show/history/list, conflicts, adopt, regenerate)`
 
 ### Task 8: Writers routed through the ledger (memory, extract, MCP Python + Rust)
 
 **Files:**
-- Modify: `scripts/memory.py:259-303` (`add_claim`), `scripts/extract.py` (`plan_claim_writes` ~38, page writes ~193+), `scripts/mcp_tools.py` (~432), `scripts/mcp_server.py` (~267), `rust/zurvan-mcp/src/bridge.rs` (`bridge_tool` ~44, `is_write` ~59, allow-list ~111/~282), `rust/zurvan-mcp/fixtures/tools_list.json`, `scripts/mcp_parity.py` (~300-340)
+- Modify: `scripts/memory.py:259-303` (`add_claim`), `scripts/extract.py` (`plan_claim_writes` ~38, page writes ~193+), `scripts/mcp_tools.py` (~432), `scripts/mcp_server.py` (~267), `rust/zurvan-mcp/src/bridge.rs` (`bridge_tool` ~44, `is_write` ~59, allow-list ~111/~282), `rust/zurvan-mcp/fixtures/tools_list.json` (the Rust server SERVES this file, `server.rs:27`, and `tests/protocol.rs:114` asserts it equals the Python server's `tools/list`: regenerate it from the Python server after adding the tools, never hand-edit), `scripts/mcp_parity.py` (~300-340)
 - Test: `tests/test_z2_writers.py`; Rust: `cargo test` in `rust/zurvan-mcp`
 
 **Interfaces:**
@@ -225,7 +229,7 @@
 ### Task 12: Snapshot adapter for claims (replaces the fail-closed guard)
 
 **Files:**
-- Modify: `scripts/measurement_snapshot.py` (`CLAIMS_STATUS` ~471, `_COMPONENTS` ~453, `assert_no_unadapted_claims_ledger` ~481, the per-component currency check used by `capture(required=...)`)
+- Modify: `scripts/measurement_snapshot.py` (`CLAIMS_STATUS` ~471, `_COMPONENTS` ~453, `assert_no_unadapted_claims_ledger` ~481) and `scripts/build_snapshot.py` (`_normalise_required` ~68 refuses `claims` today; `KNOWN_REQUIRED`; the verify step ~128 that stamps `components["claims"] = CLAIMS_STATUS`). claims.sqlite is AUTHORITATIVE, not derived: it is coherent when captured inside the same before/after manifest window as `wiki` (the manifest now covers it, Task 1), not via `derived_health` stamps.
 - Test: `tests/test_z2_snapshot.py`
 
 **Interfaces:**
@@ -243,9 +247,9 @@
 **Interfaces:**
 - Produces: `@dataclass LegacyClaim: legacy_id, text, source, quote, confidence, tags, claim_type, location, raw`; `parse_legacy_page(name: str, text: str) -> LegacyClaim | None` (both shapes: `memory.add_claim` pages and `extract.py` pages with `claim_type`/multiple `>` quotes/`Location:`); `migrate(root=None, *, dry_run: bool = False, legacy_dir: Path | None = None, report_path: Path | None = None, now: str | None = None) -> dict`. Defaults: `legacy_dir = ~/.zurvan/z2/claims-legacy-<YYYYMMDD>/`, `report_path = ~/.zurvan/z2/migration-report-<YYYYMMDD>.json`.
 - Report keys: `counts` (parsed, unparseable, per outcome), `orphaned` (legacy_id, outcome, source), `unparseable` (legacy_id), `ambiguous`, `legacy_manifest` (name → sha256), `provenance_mismatches` (must be `[]`), `observed_at_sources` (`log.md` | `mtime`).
-- Behaviour per spec §7.8: one operation holding the claims lock; freeze FIRST (0444 files, 0555 dir) and verify the manifest; each parsed page → `add(..., method="migration", actor="migration", basis=["legacy_unstated"], legacy_id=...)`; then `verify` outcomes; `gone`/`changed` → `orphan` rev with the outcome as reason; unparseable → status `unknown` with the raw page as text; pages regenerated (legacy filenames kept); after commit, rebuild search index and graph (`zurvan index search`, `zurvan graph rebuild` functions) and include their exit status in the report. `--dry-run` writes nothing (no freeze, no db) and prints the would-be counts.
+- Behaviour per spec §7.8: one operation holding the claims lock; freeze FIRST (0444 files, 0555 dir) and verify the manifest; each parsed page → `add(..., method="migration", actor="migration", basis=["legacy_unstated"], legacy_id=...)`; then `verify` outcomes; `gone`/`changed` → `orphan` rev with the outcome as reason; unparseable → status `unknown` with the raw page as text; pages regenerated with `regenerate(force=True)` (legacy pages carry no `generated_content_hash`, so they are not hand-edit conflicts at migration; legacy filenames kept); pages already carrying `authority: structured` are skipped by `parse_legacy_page`. The search index and graph are NOT rebuilt inside `migrate`: the CLI wraps every command in one operation (`cli.py:1334`) and a rebuild waits for live operations, so it would wait on itself. The report sets `derived_rebuild_required: true`; Task 15 runs the rebuilds as separate commands. `--dry-run` writes nothing (no freeze, no db) and prints the would-be counts.
 - [ ] **Step 1: Failing tests** on a tmp wiki seeded with: two normal pages, one extraction-shape page, one page whose source is missing, one whose quote was edited out, one with an empty quote and a hand-appended `**Update…**` paragraph, one unparseable page, and one decision page:
-  - `test_dry_run_writes_nothing`; `test_freeze_first_and_read_only`; `test_provenance_retained_for_every_parsed_page` (text/source/quote equal; spec G2); `test_broken_evidence_orphaned_with_reason`; `test_unparseable_imported_as_unknown_not_dropped`; `test_authored_markdown_untouched` (decision page bytes identical; spec G1); `test_rerun_is_refused_or_noop` (second `migrate` → no duplicates); `test_pre_ledger_as_of_before_migration`.
+  - `test_dry_run_writes_nothing`; `test_structured_pages_not_reimported`; `test_report_requires_rebuild`; `test_freeze_first_and_read_only`; `test_provenance_retained_for_every_parsed_page` (text/source/quote equal; spec G2); `test_broken_evidence_orphaned_with_reason`; `test_unparseable_imported_as_unknown_not_dropped`; `test_authored_markdown_untouched` (decision page bytes identical; spec G1); `test_rerun_is_refused_or_noop` (second `migrate` → no duplicates); `test_pre_ledger_as_of_before_migration`.
 - [ ] **Step 2–4:** FAIL → implement → PASS. **Step 5: Commit** `z2: claim migration with frozen legacy copy, orphaning and a provenance report`
 
 ### Task 14: Closure matrix
@@ -264,9 +268,10 @@
 
 - [ ] **Step 1:** Full suite green: `PYTHONPATH=. python -m pytest -q` → 0 failed (live seal tests may SKIP without a sudo ticket); `bash scripts/check.sh`; `public_repo_guard.py`; `git diff --check`.
 - [ ] **Step 2:** Retrieval BEFORE: `PYTHONPATH=. python scripts/eval_search.py --hybrid --min-top3 0.6 --json > ~/.zurvan/reports/z2-eval-before-<date>.json` (no index rebuild in flight; `check.sh` not running).
+- [ ] **Step 2b:** Ask Raouf to pause other agent sessions (they write claims through the live MCP). Then fast-forward `main` to `z2-claim-ledger` (no merge commit; the branch was rebased on `main` and its full suite re-run first).
 - [ ] **Step 3:** `scripts/zurvan claim migrate --dry-run` → counts must match spec §2.1 (546 parsed, 2 unparseable, 31 broken ± claims added since 14 Nov; any other difference is investigated before Step 4).
-- [ ] **Step 4:** `scripts/zurvan claim migrate` → report `provenance_mismatches == []`; `claim doctor` all ok; `knowledge status` CLEAN.
+- [ ] **Step 4:** `scripts/zurvan claim migrate` → report `provenance_mismatches == []`; `claim doctor` all ok; `knowledge status` CLEAN. Then, as separate commands: `PYTHONPATH=. python scripts/cli.py index search` and `PYTHONPATH=. python scripts/cli.py graph rebuild` (never while `check.sh` runs); `knowledge status` shows search/graph CURRENT.
 - [ ] **Step 5:** Retrieval AFTER (same command, `-after-`); PASS iff no previously-passing Top-3 query fails; name every changed query by index. A FAIL is reported as FAIL (spec G10), not re-run until it passes.
-- [ ] **Step 6:** `cd rust/zurvan-mcp && cargo build --release`, install to `~/.zurvan/bin/zurvan-mcp` per the existing install procedure in AGENTS.md; `scripts/zurvan` MCP smoke (`scripts/e2e_mcp_smoke.py`).
+- [ ] **Step 6:** `cd rust/zurvan-mcp && cargo build --release`, install to `~/.zurvan/bin/zurvan-mcp` the way CHANGELOG 2026-11-07c did (keep the old binary as a `.bak` hard link, copy then `mv` over, `codesign -v`, `initialize` answers; rollback = `mv` the `.bak` back); `scripts/zurvan` MCP smoke (`scripts/e2e_mcp_smoke.py`).
 - [ ] **Step 7:** `scripts/zurvan claim verify` → record counts and the integrity rate (spec G5 live proof).
 - [ ] **Step 8:** Log entry (scope, numbers, gate table G1–G12 with evidence, IOUs Z2-1…5 restated), Zurvan write-back (`decision add --project zurvan`), commit `z2: live migration of 548 claims; gates G1-G12`.
