@@ -39,7 +39,7 @@ class BuildSnapshotBusy(BuildSnapshotNotReady):
     """Operations stayed in flight past the wait budget; names them."""
 
 
-KNOWN_REQUIRED = ("wiki", "search", "graph")
+KNOWN_REQUIRED = ("wiki", "search", "graph", "claims")
 VERIFIED = "VERIFIED"
 UNVERIFIED = "UNVERIFIED"
 NOT_REQUIRED = "NOT_REQUIRED"
@@ -67,9 +67,6 @@ class _Moved(Exception):
 
 def _normalise_required(required) -> tuple:
     names = tuple(sorted(set(required)))
-    if "claims" in names:
-        raise ValueError("claims cannot be required: UNSUPPORTED_BY_DESIGN "
-                         "until the Z2 claim ledger (design §7.3)")
     unknown = [n for n in names if n not in KNOWN_REQUIRED]
     if unknown:
         raise ValueError(f"unknown required component(s) {unknown}; "
@@ -125,7 +122,19 @@ def _verifier(base, required, before, m_before, purpose):
             components[kind] = {"status": VERIFIED,
                                 "built_from_revision": meta["built_from_revision"],
                                 "built_from_snapshot": meta.get("built_from_snapshot")}
-        components["claims"] = dict(ms.CLAIMS_STATUS)
+        if "claims" in required:
+            # AUTHORITATIVE, not derived (Z2 §7.6): covered by the same
+            # before/after manifest window as `wiki`, which now includes
+            # claims.sqlite (knowledge_scope v2). No derived_health stamp.
+            import sqlite3 as _sq
+            conn = _sq.connect(f"file:{Path(working) / 'claims.sqlite'}?mode=ro", uri=True)
+            try:
+                head = conn.execute("SELECT last_rev_hash FROM head WHERE id = 1").fetchone()[0]
+            finally:
+                conn.close()
+            components["claims"] = {"status": VERIFIED, "head": head}
+        else:
+            components["claims"] = dict(ms.CLAIMS_STATUS)
         return {"status": VERIFIED, "purpose": purpose, "required": list(required),
                 "revision": before.revision, "atomicity": before.atomicity,
                 "manifest_digest": before.manifest_digest, "components": components}
@@ -234,7 +243,7 @@ def capture_coherent(root=None, purpose="rebuild", required=("wiki",), label=Non
     base = ks.store_root(root)
     label = label or purpose
     ttl = ms.DEFAULT_LEASE_TTL_S if lease_ttl_s is None else lease_ttl_s
-    names = ms.BUILD_INPUTS + tuple(k for k in ("search", "graph") if k in required)
+    names = ms.BUILD_INPUTS + tuple(k for k in ("search", "graph", "claims") if k in required)
     for attempt in range(attempts):
         try:
             state = kr.current(base)
