@@ -41,6 +41,7 @@ class ClaimState:
     legacy_id: str | None = None
     scope_project: str | None = None
     claim_type: str | None = None
+    mutation_id: str | None = None
 
 
 @dataclass
@@ -176,6 +177,22 @@ def _next(s, claim_id, *, event, status, actor, method, reason, expected_rev, **
     return cs.append_revision(s.conn, row)
 
 
+# ----------------------------------------------------------------- pages
+
+def _refuse_if_edited(claim_id, root):
+    from scripts import claim_pages
+    if claim_pages.has_unadopted_edit(claim_id, root):
+        raise cs.ClaimRefused("CLAIM_CONFLICT",
+                              f"{claim_id}: its page has unadopted edits "
+                              "(`zurvan claim adopt` or `claim regenerate --force`)")
+
+
+def _write_pages(root, *claim_ids):
+    from scripts import claim_pages
+    for cid in claim_ids:
+        claim_pages.write_page(cid, root, force=True)
+
+
 # ----------------------------------------------------------------- writes
 
 def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=None,
@@ -185,13 +202,15 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         root=None, _migrating=False) -> str:
     _check_vocab(confidence, basis, method)
     with _Session(root, _migrating) as s:
-        return _add_in(s, text, source, evidence, confidence=confidence, basis=basis,
+        claim_id = _add_in(s, text, source, evidence, confidence=confidence, basis=basis,
                        tags=tags, valid_from=valid_from, valid_until=valid_until,
                        project=project, actor=actor, method=method, reader=reader,
                        claim_type=claim_type, extraction_key=extraction_key,
                        legacy_id=legacy_id, observed_at_legacy=observed_at_legacy,
                        observed_at_legacy_source=observed_at_legacy_source,
                        location_hint=location_hint, status=status)
+    _write_pages(root, claim_id)
+    return claim_id
 
 
 def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, valid_until,
@@ -223,6 +242,7 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
               root=None) -> str:
     _require_reason(reason)
     _check_vocab(confidence, basis, method)
+    _refuse_if_edited(old_id, root)
     with _Session(root) as s:
         s.conn.row_factory = cs.sqlite3.Row
         try:
@@ -247,23 +267,29 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
         _next(s, old_id, event="supersede", status="superseded", actor=actor, method=method,
               reason=reason, expected_rev=None, valid_until=valid_from,
               relations=[{"from_claim": new_id, "to_claim": old_id, "kind": "supersedes"}])
-        return new_id
+    _write_pages(root, new_id, old_id)
+    return new_id
 
 
 def retract(claim_id, *, reason, basis, actor, method, expected_rev=None, root=None) -> int:
     _require_reason(reason)
     _check_vocab(None, basis, method)
+    _refuse_if_edited(claim_id, root)
     with _Session(root) as s:
-        return _next(s, claim_id, event="retract", status="retracted", actor=actor,
-                     method=method, reason=reason, expected_rev=expected_rev,
-                     confidence_basis=json.dumps(list(basis)) if basis else None)["rev"]
+        rev = _next(s, claim_id, event="retract", status="retracted", actor=actor,
+                    method=method, reason=reason, expected_rev=expected_rev,
+                    confidence_basis=json.dumps(list(basis)) if basis else None)["rev"]
+    _write_pages(root, claim_id)
+    return rev
 
 
 def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, confidence=None,
            basis=None, tags=None, valid_from=None, valid_until=None, source=None,
-           evidence=None, reader="utf8", root=None) -> int:
+           evidence=None, reader="utf8", root=None, _adopting=False) -> int:
     _require_reason(reason)
     _check_vocab(confidence, basis, method)
+    if not _adopting:
+        _refuse_if_edited(claim_id, root)
     with _Session(root) as s:
         changes = {"confidence": confidence, "valid_from": valid_from,
                    "valid_until": valid_until, "text": text, "tags": tags,
@@ -277,9 +303,11 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
             s.conn.row_factory = None
         if status is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
-        return _next(s, claim_id, event="revise", status=status["status"], actor=actor,
-                     method=method, reason=reason, expected_rev=expected_rev,
-                     **changes)["rev"]
+        rev = _next(s, claim_id, event="revise", status=status["status"], actor=actor,
+                    method=method, reason=reason, expected_rev=expected_rev,
+                    **changes)["rev"]
+    _write_pages(root, claim_id)
+    return rev
 
 
 # ----------------------------------------------------------------- views
@@ -319,7 +347,8 @@ def _state(conn, row, rows_by_claim) -> ClaimState:
                       tags=json.loads(tags) if tags else [],
                       valid_from=row["valid_from"], valid_until=row["valid_until"],
                       evidence=evidence, legacy_id=claim["legacy_id"],
-                      scope_project=claim["scope_project"], claim_type=row["claim_type"])
+                      scope_project=claim["scope_project"], claim_type=row["claim_type"],
+                      mutation_id=row["mutation_id"])
 
 
 def _belief(root, vis, upto) -> dict:
