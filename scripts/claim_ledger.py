@@ -53,6 +53,24 @@ class BeliefState:
 
 # ----------------------------------------------------------------- validation
 
+def _check_time(name, value):
+    if value is None:
+        return
+    from datetime import datetime
+    try:
+        datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{name} must be an ISO-8601 date or date-time, got {value!r}") from None
+
+
+def _check_project(project):
+    if project is None:
+        return
+    from scripts.project_registry import is_safe_slug
+    if not is_safe_slug(project):
+        raise ValueError(f"project {project!r} is not a valid slug (lowercase letters, digits, - _)")
+
+
 def _check_vocab(confidence=None, basis=None, method=None):
     if confidence is not None and confidence not in cs.CONFIDENCE:
         raise ValueError(f"confidence must be one of {cs.CONFIDENCE}, got {confidence!r}")
@@ -77,6 +95,16 @@ class _Session:
         root = kr.ks.store_root(root)        # None -> ZURVAN_ROOT / repo root, once
         self.root = root
         kr.require_active_operation("a claim write", root)
+        try:
+            suspect = kr.current(root).state == kr.SUSPECT
+        except kr.LedgerError:
+            suspect = False
+        if suspect:
+            # Final review 2026-11-14 (I4): a write between a crash and its
+            # reconcile could be ordered before the crashed write once that is
+            # accepted, silently reverting it. Reconcile first.
+            raise cs.ClaimRefused("CLAIMS_STORE_SUSPECT",
+                                  "the store is SUSPECT; run `zurvan knowledge reconcile` first")
         if not migrating:
             cs.require_migrated(root)
         cs.acquire_for_operation(root)
@@ -174,6 +202,7 @@ def _next(s, claim_id, *, event, status, actor, method, reason, expected_rev, **
     prev = s.latest(claim_id)
     if prev is None:
         raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
+    _refuse_if_erased(prev, claim_id)
     if expected_rev is not None and int(expected_rev) != prev["rev"]:
         raise cs.ClaimRefused("CLAIM_CONFLICT",
                               f"{claim_id} is at rev {prev['rev']}, expected {expected_rev}")
@@ -193,6 +222,12 @@ def _next(s, claim_id, *, event, status, actor, method, reason, expected_rev, **
     if row.get("valid_from") and changes.get("valid_from"):
         row["valid_time_basis"] = "stated"
     return cs.append_revision(s.conn, row)
+
+
+def _refuse_if_erased(row, claim_id):
+    """Erasure is terminal (final review 2026-11-14): no event may follow it."""
+    if row["status"] == "erased":
+        raise cs.ClaimRefused("CLAIM_ERASED", f"{claim_id} was erased; erasure is final")
 
 
 # ----------------------------------------------------------------- pages
@@ -220,6 +255,9 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         extra_evidence=(), root=None, _migrating=False, _unanchored=False,
         _normalised=False) -> str:
     _check_vocab(confidence, basis, method)
+    _check_time("valid_from", valid_from)
+    _check_time("valid_until", valid_until)
+    _check_project(project)
     with _Session(root, _migrating) as s:
         claim_id = _add_in(s, text, source, evidence, confidence=confidence, basis=basis,
                        tags=tags, valid_from=valid_from, valid_until=valid_until,
@@ -276,11 +314,13 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
               root=None) -> str:
     _require_reason(reason)
     _check_vocab(confidence, basis, method)
+    _check_time("valid_from", valid_from)
     _refuse_if_edited(old_id, root)
     with _Session(root) as s:
         prev = s.latest(old_id)
         if prev is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", old_id)
+        _refuse_if_erased(prev, old_id)
         if expected_rev is not None and int(expected_rev) != prev["rev"]:
             raise cs.ClaimRefused("CLAIM_CONFLICT",
                                   f"{old_id} is at rev {prev['rev']}, expected {expected_rev}")
@@ -318,6 +358,8 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
            evidence=None, reader="utf8", root=None, _adopting=False) -> int:
     _require_reason(reason)
     _check_vocab(confidence, basis, method)
+    _check_time("valid_from", valid_from)
+    _check_time("valid_until", valid_until)
     if not _adopting:
         _refuse_if_edited(claim_id, root)
     with _Session(root) as s:
@@ -329,6 +371,7 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
         status = s.latest(claim_id)
         if status is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
+        _refuse_if_erased(status, claim_id)
         new_status = status["status"]
         if new_status == "orphaned":
             # Anti-goal (spec §4): an orphaned claim returns only on evidence that
@@ -421,7 +464,9 @@ def _belief_conn(conn, vis, upto) -> dict:
             by_claim.setdefault(r["claim_id"], []).append(r)
     out = {}
     for claim_id, rows in by_claim.items():
-        best = max(rows, key=lambda r: (vis[r["mutation_id"]], r["rev"]))
+        # Spec §7.1: a claim's current state is its highest VISIBLE rev. Writes
+        # are serialised and refused while SUSPECT, so rev order is commit order.
+        best = max(rows, key=lambda r: r["rev"])
         out[claim_id] = _state(conn, best, rows)
     return out
 
@@ -642,7 +687,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     now = current(base)
     targets = sorted(claim_ids) if claim_ids else sorted(now)
     counts = {o: 0 for o in ce.OUTCOMES}
-    per_claim, written, skipped = {}, [], []
+    per_claim, written, skipped, details = {}, [], [], {}
     for cid in targets:
         state = now.get(cid)
         if state is None or state.status == "erased":
@@ -651,8 +696,11 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
         for ev in state.evidence:
             if not ev.get("selector") or not ev.get("source"):
                 continue
-            outcome, _ = ce.resolve(ev["selector"], ev["source"], ev.get("reader", "utf8"), base)
+            outcome, detail = ce.resolve(ev["selector"], ev["source"], ev.get("reader", "utf8"),
+                                         base)
             outcomes.append(outcome)
+            details.setdefault(cid, []).append(
+                {"outcome": outcome, "source": ev["source"], "detail": detail})
             counts[outcome] += 1
         if not outcomes:
             continue
@@ -667,8 +715,10 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
                 continue
         if cls == "broken" and state.status in CURRENT_STATUSES:
             with _Session(base) as s:
+                why = "; ".join(f"{d['outcome']} ({d['source']}: {d['detail']})"
+                                if d["detail"] else d["outcome"] for d in details[cid])
                 r = _next(s, cid, event="orphan", status="orphaned", actor="verifier",
-                          method="verifier", reason="evidence " + ", ".join(outcomes),
+                          method="verifier", reason="evidence " + why,
                           expected_rev=None)["rev"]
             _write_pages(base, cid)
             written.append((cid, r, "orphan"))
@@ -683,7 +733,8 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     total = sum(counts.values())
     anchored = sum(counts[o] for o in _ANCHORED)
     return {"counts": counts, "integrity_rate": (anchored / total) if total else None,
-            "claims": per_claim, "written": written, "skipped_edited": skipped,
+            "claims": per_claim, "details": details, "written": written,
+            "skipped_edited": skipped,
             "disclaimer": VERIFY_DISCLAIMER}
 
 

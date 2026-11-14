@@ -114,6 +114,8 @@ def resolve(selector: dict, source_ref: str, reader: str, root) -> tuple:
         return "gone", str(exc)
     except SourceUndecodable as exc:
         return "changed", str(exc)
+    except Exception as exc:  # noqa: BLE001 - a reader failure must not abort a verify run
+        return "changed", f"reader failed: {type(exc).__name__}: {exc}"
     quote = selector["TextQuoteSelector"]
     exact, prefix, suffix = quote["exact"], quote["prefix"], quote["suffix"]
     if hashlib.sha256(raw).hexdigest() == selector["state"]["sha256"]:

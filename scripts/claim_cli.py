@@ -15,6 +15,12 @@ from dataclasses import asdict
 
 WRITE_METHODS = ("human", "agent")
 
+#: Final review 2026-11-14 (I3): derived views drop a non-current claim only when
+#: they are rebuilt; until then search, context and the graph still serve the old page.
+STALE_HINT = ("note: search, context and the graph show this change after "
+              "`zurvan index search` and `zurvan graph rebuild`")
+_WRITES = ("add", "supersede", "retract", "revise", "erase", "adopt", "regenerate", "migrate")
+
 
 def _default_actor() -> str:
     try:
@@ -199,7 +205,13 @@ def dispatch(args) -> int:
             out = cl.verify(args.claim_ids or None, apply=args.apply)
             print(json.dumps({k: out[k] for k in ("counts", "integrity_rate", "written")},
                              sort_keys=True, default=str))
+            for cid in sorted(out["details"]):
+                for d in out["details"][cid]:
+                    if d["outcome"] != "intact":
+                        print(f"{cid}\t{d['outcome']}\t{d['source']}\t{d['detail'] or ''}")
             print(out["disclaimer"])
+            if out["written"]:
+                print(STALE_HINT, file=sys.stderr)
         elif action == "conflicts":
             for cid in cp.conflicts():
                 print(cid)
@@ -239,4 +251,6 @@ def dispatch(args) -> int:
     except ValueError as exc:
         print(f"Error: INVALID: {exc}", file=sys.stderr)
         return 1
+    if action in _WRITES and not getattr(args, "dry_run", False):
+        print(STALE_HINT, file=sys.stderr)
     return 0
