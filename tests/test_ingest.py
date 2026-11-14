@@ -6,9 +6,23 @@ from scripts.ingest import extract_text, calculate_hash
 
 
 def _patch_roots(monkeypatch, tmp_path):
-    """Redirect PROJECT_ROOT in wiki_merge and ingest to tmp_path."""
+    """Redirect PROJECT_ROOT in wiki_merge, ingest and wiki_index to tmp_path.
+    wiki_index was missing: ingest's update_index wrote the LIVE wiki/index.md."""
+    import scripts.wiki_index as _wiki_index
     monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(_ingest, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(_wiki_index, "PROJECT_ROOT", tmp_path)
+
+def test_patch_roots_redirects_the_wiki_index_too(tmp_path, monkeypatch):
+    """Found 2026-11-14 (Z2 full-suite run in a fresh worktree): three ingest tests
+    rewrote the LIVE wiki/index.md and wiki/index/ shards, because
+    scripts.wiki_index binds PROJECT_ROOT at import and _patch_roots did not
+    redirect it. On a store that already has index.md the page count never
+    moved, so the conftest guard could not see it."""
+    import scripts.wiki_index as _wiki_index
+    _patch_roots(monkeypatch, tmp_path)
+    assert _wiki_index._index_dir() == tmp_path / "wiki" / "index"
+
 
 def test_calculate_hash(tmp_path):
     f = tmp_path / "test.txt"
