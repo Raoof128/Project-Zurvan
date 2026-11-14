@@ -3,6 +3,7 @@
 Zurvan Agent Workflow Management
 """
 
+from scripts.claim_visibility import page_is_hidden
 import datetime
 from pathlib import Path
 
@@ -162,6 +163,8 @@ def project_digest(project: str, root: Path | None = None) -> str:
                 decisions.append(f"- {title[:120]} ({rel})")
 
     for path in sorted((root / "wiki" / "claims").glob("*.md")):
+        if page_is_hidden(root, path.relative_to(root).as_posix()):   # Z2 §7.5a
+            continue
         _, tags = _frontmatter_title_tags(path)
         text = _claim_text(path)
         if _matches(name, tokens, text, tags):

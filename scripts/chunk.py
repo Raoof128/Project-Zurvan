@@ -1,4 +1,5 @@
 import os
+from scripts.claim_visibility import page_is_hidden
 import glob
 import hashlib
 from datetime import datetime
@@ -169,6 +170,8 @@ def scan_markdown_files(root: Path | str | None = None):
                 posix = rel.replace(os.sep, "/")
                 if any(posix == p or posix.startswith(p + "/")
                        for p in EXCLUDED_PATH_PREFIXES):
+                    continue
+                if page_is_hidden(base, posix):      # Z2 §7.5a: non-current claim
                     continue
                 files.append(rel)
     for name in ROOT_INDEX_FILES:

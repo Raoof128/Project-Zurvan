@@ -1,4 +1,5 @@
 import os
+from scripts.claim_visibility import page_is_hidden
 import re
 import hashlib
 from pathlib import Path
@@ -63,6 +64,8 @@ def discover_claims_and_policies_in_project(project_name: str, project_path: Pat
             # Filter what we scan
             in_allowed_dir = any(rel_path.startswith(d + "/") for d in allowed_dirs)
             if not in_allowed_dir and file not in allowed_files:
+                continue
+            if page_is_hidden(project_path, rel_path):     # Z2 §7.5a: non-current claim
                 continue
                 
             try:

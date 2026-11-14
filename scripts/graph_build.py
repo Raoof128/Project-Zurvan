@@ -1,4 +1,5 @@
 import os
+from scripts.claim_visibility import page_is_hidden
 import re
 import uuid
 import hashlib
@@ -179,6 +180,8 @@ def _collect_graph(source_root=None):
                 filepath = os.path.normpath(os.path.join(rel_root, file)) if rel_root != "." else file
                 # Skip if it's in root and not in target_files
                 if os.path.dirname(filepath) == "" and file not in target_files:
+                    continue
+                if page_is_hidden(base, filepath):   # Z2 §7.5a: non-current claim
                     continue
                 paths_to_process.append(filepath)
 
