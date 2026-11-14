@@ -29,7 +29,7 @@ import subprocess
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -206,6 +206,35 @@ def _migrate_implicit_reason(conn) -> None:
         raise
 
 
+def _migrate_z2_columns(conn) -> None:
+    """Z2: `mutations.committed_revision` and `knowledge_state.scope_version`.
+
+    Historical rows keep NULL `committed_revision`: the revision a past mutation
+    committed was never stored, and reconstructing it from timestamps would be a
+    guess. A pre-Z2 store's digest was computed under scope 1, so the new column
+    defaults to 1 and is rewritten at the next commit.
+    """
+    def _cols(table):
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    mut, ks_cols = _cols("mutations"), _cols("knowledge_state")
+    need_mut = bool(mut) and "committed_revision" not in mut
+    need_ks = bool(ks_cols) and "scope_version" not in ks_cols
+    if not (need_mut or need_ks):
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if "committed_revision" not in _cols("mutations") and _cols("mutations"):
+            conn.execute("ALTER TABLE mutations ADD COLUMN committed_revision INTEGER")
+        if "scope_version" not in _cols("knowledge_state") and _cols("knowledge_state"):
+            conn.execute("ALTER TABLE knowledge_state ADD COLUMN"
+                         " scope_version INTEGER NOT NULL DEFAULT 1")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def ensure_schema(root=None) -> None:
     """Create the three tables if absent, and migrate an older shape in place.
 
@@ -215,6 +244,7 @@ def ensure_schema(root=None) -> None:
     try:
         _migrate_attribution(conn)
         _migrate_implicit_reason(conn)
+        _migrate_z2_columns(conn)
         conn.executescript(
             f"""
             CREATE TABLE IF NOT EXISTS knowledge_state (
@@ -224,7 +254,8 @@ def ensure_schema(root=None) -> None:
                                  CHECK (state IN ('{CLEAN}','{SUSPECT}')),
                 atomicity        TEXT NOT NULL
                                  CHECK (atomicity IN ('{MANAGED}','{EXTERNAL_OBSERVED}')),
-                manifest_digest  TEXT NOT NULL
+                manifest_digest  TEXT NOT NULL,
+                scope_version    INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS mutations (
                 mutation_id      TEXT PRIMARY KEY,
@@ -252,7 +283,8 @@ def ensure_schema(root=None) -> None:
                 resolution_actor    TEXT,
                 resolution_reason TEXT,
                 resolution_revision INTEGER,
-                implicit_reason     TEXT
+                implicit_reason     TEXT,
+                committed_revision  INTEGER
             );
             CREATE INDEX IF NOT EXISTS mutations_state ON mutations(state);
             CREATE TABLE IF NOT EXISTS reconciliations (
@@ -310,6 +342,53 @@ def current(root=None) -> Revision:
             f"no ledger row in {db_path(root)}; run ensure_schema first")
     return Revision(revision=row[0], state=row[1],
                     atomicity=row[2], manifest_digest=row[3])
+
+
+def _stored_scope_version(root=None) -> int:
+    conn = _connect_ro(root)
+    try:
+        try:
+            row = conn.execute(
+                "SELECT scope_version FROM knowledge_state WHERE id = 1").fetchone()
+        except sqlite3.OperationalError:
+            return 1                     # pre-Z2 ledger: its digests are scope 1
+    finally:
+        conn.close()
+    return int(row[0]) if row and row[0] is not None else 1
+
+
+def belief_revisions(root=None) -> dict:
+    """mutation_id -> the revision at which its writes became knowledge (Z2 §7.2).
+
+    COMMITTED -> `committed_revision`; RESOLVED (reconciled) -> its
+    `resolution_revision`, never the crashed operation's base. ACTIVE, ABORTED and
+    ORPHANED mutations are absent: their rows are not part of any belief state.
+    A COMMITTED row from before Z2 has no recorded revision and is absent too.
+    """
+    conn = _connect_ro(root)
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT mutation_id, state, committed_revision, resolution_revision"
+                " FROM mutations WHERE state IN (?, ?)", (COMMITTED, RESOLVED)).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+    finally:
+        conn.close()
+    out = {}
+    for mutation_id, state, committed, resolved in rows:
+        rev = committed if state == COMMITTED else resolved
+        if rev is not None:
+            out[mutation_id] = int(rev)
+    return out
+
+
+def at_operation_end(fn) -> None:
+    """Run `fn` once after the outermost active operation commits or is abandoned."""
+    op = _CTX.get()
+    if op is None:
+        raise KnowledgeOperationRequired(operation_required_message("at_operation_end()"))
+    op.end_callbacks.append(fn)
 
 
 def ledger_fingerprint(root=None) -> str:
@@ -547,6 +626,9 @@ class Operation:
     #: when it planned nothing (or was abandoned). Callers that report a
     #: revision report THIS, not `current()` read later (another session's).
     minted_revision: int | None = None
+    #: Run once after the OUTERMOST operation commits or is abandoned (Z2: the
+    #: claims lock must be held until the revision covering the claim rows exists).
+    end_callbacks: list = field(default_factory=list)
 
 
 @dataclass
@@ -869,11 +951,11 @@ def commit_mutation(mutation_id, manifest_digest=None, root=None) -> int:
             ).fetchone()[0]
             new_revision = rev + 1
             _transition(conn, mutation_id, want=ACTIVE, new=COMMITTED,
-                        committed_at=_now())
+                        committed_at=_now(), committed_revision=new_revision)
             conn.execute(
                 "UPDATE knowledge_state SET current_revision = ?, atomicity = ?,"
-                " manifest_digest = ? WHERE id = 1",
-                (new_revision, MANAGED, manifest_digest))
+                " manifest_digest = ?, scope_version = ? WHERE id = 1",
+                (new_revision, MANAGED, manifest_digest, ks.SCOPE_VERSION))
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -1004,6 +1086,11 @@ def operation(writer=None, caller=None, root=None, store_project=None,
             _finish(op, ok=True)
     finally:
         _CTX.reset(token)
+        for fn in op.end_callbacks:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 - a release must not mask the operation's outcome
+                pass
 
 
 def implicit_mutations(root=None, unresolved_only=True) -> list:
@@ -1067,8 +1154,8 @@ def resolve_implicit(caller, actor, root=None,
 def _set_revision(conn, new_revision, atomicity, digest) -> None:
     conn.execute(
         "UPDATE knowledge_state SET current_revision = ?, atomicity = ?,"
-        " manifest_digest = ? WHERE id = 1",
-        (new_revision, atomicity, digest))
+        " manifest_digest = ?, scope_version = ? WHERE id = 1",
+        (new_revision, atomicity, digest, ks.SCOPE_VERSION))
 
 
 def bootstrap(root=None, actor="bootstrap") -> int:
@@ -1138,6 +1225,13 @@ def observe_external_drift(root=None, trigger="manual"):
     if state.state != CLEAN:
         raise LedgerError(
             f"store is {state.state}; reconcile before observing drift")
+    if _stored_scope_version(base) != ks.SCOPE_VERSION:
+        # Z2 (spec §7.5): a digest computed under another scope version cannot
+        # be compared - every byte would look changed. A scope change is not an
+        # edit; the next managed commit records the new scope's digest.
+        # Stated bound: an external edit made in that same window is absorbed
+        # into the next managed revision, once, at the scope switch.
+        return None
 
     first = authoritative_manifest(base)
     if first == state.manifest_digest:
@@ -1281,8 +1375,8 @@ def reconcile_revision(mutation_ids, actor, reason=None, root=None) -> dict:
                             resolution_revision=new_revision)
             conn.execute(
                 "UPDATE knowledge_state SET current_revision = ?, state = ?,"
-                " atomicity = ?, manifest_digest = ? WHERE id = 1",
-                (new_revision, CLEAN, EXTERNAL_OBSERVED, second))
+                " atomicity = ?, manifest_digest = ?, scope_version = ? WHERE id = 1",
+                (new_revision, CLEAN, EXTERNAL_OBSERVED, second, ks.SCOPE_VERSION))
             conn.execute(
                 "INSERT INTO reconciliations (reconciliation_id, at, actor,"
                 " reason, mutation_ids, manifest_before, manifest_after,"

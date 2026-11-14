@@ -19,7 +19,12 @@ DERIVED_SUBDIRS = ("traces",)
 
 #: Bump when the scope changes. Every manifest digest is a property of it, so a
 #: silent change would reinterpret every stored revision.
-SCOPE_VERSION = 1
+SCOPE_VERSION = 2
+
+#: Z2 (2026-11-14): the claim ledger is authoritative knowledge. Its pages in
+#: `wiki/claims/` are generated from it inside the same operation, so both sit
+#: in the manifest. The ONE authoritative path outside `wiki/`.
+CLAIMS_DB_REL = ("data", "claims.sqlite")
 
 
 def store_root(root=None) -> Path:
@@ -58,6 +63,8 @@ def is_authoritative(target, root=None) -> bool:
         rel = path.resolve().relative_to(base)
     except (ValueError, OSError):
         return False
+    if tuple(rel.parts) == CLAIMS_DB_REL:
+        return True
     if len(rel.parts) < 1 or rel.parts[0] != "wiki":
         return False
     return len(rel.parts) < 2 or rel.parts[1] not in DERIVED_SUBDIRS
@@ -81,13 +88,14 @@ def authoritative_files(root=None) -> list:
     """
     base = store_root(root)
     wiki = base / "wiki"
-    if not wiki.is_dir():
-        return []
     out = []
-    for dirpath, dirnames, filenames in os.walk(wiki):
+    for dirpath, dirnames, filenames in (os.walk(wiki) if wiki.is_dir() else ()):
         if Path(dirpath) == wiki:
             dirnames[:] = [d for d in dirnames if d not in DERIVED_SUBDIRS]
         dirnames.sort()
         for name in sorted(filenames):
             out.append(Path(dirpath) / name)
+    claims = base.joinpath(*CLAIMS_DB_REL)
+    if claims.is_file():
+        out.append(claims)
     return out
