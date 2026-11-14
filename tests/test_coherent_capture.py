@@ -72,7 +72,8 @@ def test_a_measurement_capture_of_a_current_store_is_verified(store):
         assert c["revision"] == kr.current(store).revision
         assert c["components"]["search"]["status"] == "VERIFIED"
         assert c["components"]["graph"]["status"] == "VERIFIED"
-        assert c["components"]["claims"]["status"] == "UNSUPPORTED_BY_DESIGN"
+        # Z2: claims are captured when required; not required here
+        assert c["components"]["claims"]["status"] == "NOT_REQUIRED"
         assert (bs.path / "search.sqlite").is_file()
         assert (bs.path / "graph.sqlite").is_file()
         lease = json.loads((bs.path / ms.LEASE_NAME).read_text())
@@ -223,7 +224,6 @@ def test_gate_13_a_snapshot_of_an_external_revision_says_so(store):
 @pytest.mark.parametrize("required, match", [
     (("search",), "must include 'wiki'"),
     (("wiki", "vectors"), "unknown required"),
-    (("wiki", "claims"), "UNSUPPORTED_BY_DESIGN"),
 ])
 def test_required_is_validated_at_the_call_site(store, required, match):
     with pytest.raises(ValueError, match=match):

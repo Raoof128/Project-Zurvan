@@ -429,6 +429,50 @@ def capture_docs(root, into) -> Component:
                      authoritative_scope=WHOLE_COMPONENT)
 
 
+def capture_claims(root, into) -> Component:
+    """Z2 (spec §7.6): the claim ledger, copied with SQLite's online-backup API,
+    plus `claims-mutations.json`: the registry state of every mutation its rows
+    reference. Snapshots do not copy `registry.sqlite`, and without the sidecar a
+    snapshot could not tell committed rows from aborted ones."""
+    from scripts import knowledge_revision as kr
+    from scripts import knowledge_scope as ks
+    source = Path(root).joinpath(*ks.CLAIMS_DB_REL)
+    if not source.is_file():
+        raise MissingComponentError(f"no claim ledger to capture at {source}")
+    destination = Path(into) / "claims.sqlite"
+    try:
+        assert_self_contained(source)
+        src = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        dst = sqlite3.connect(str(destination))
+        try:
+            src.backup(dst)
+            mids = [r[0] for r in dst.execute("SELECT DISTINCT mutation_id FROM revisions")]
+            if dst.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise SnapshotComponentError("captured claim ledger fails integrity_check")
+            dst.execute("PRAGMA journal_mode = DELETE")
+        finally:
+            dst.close()
+            src.close()
+    except sqlite3.Error as exc:
+        raise SnapshotComponentError(f"claim ledger capture failed: {exc}") from exc
+    sidecar = {}
+    reg = sqlite3.connect(f"file:{kr.db_path(root)}?mode=ro", uri=True)
+    try:
+        for mid in mids:
+            row = reg.execute("SELECT state, committed_revision, resolution_revision"
+                              " FROM mutations WHERE mutation_id = ?", (mid,)).fetchone()
+            sidecar[mid] = ({"state": row[0], "committed_revision": row[1],
+                             "resolution_revision": row[2]} if row else
+                            {"state": "UNKNOWN", "committed_revision": None,
+                             "resolution_revision": None})
+    finally:
+        reg.close()
+    _write_json_atomic(Path(into) / "claims-mutations.json", sidecar)
+    return Component(name="claims", path=destination, backend="sqlite-backup",
+                     logical_bytes=destination.stat().st_size,
+                     captured_scope=SINGLE_FILE, authoritative_scope=WHOLE_COMPONENT)
+
+
 def capture_roots(root, into) -> Component:
     """The root Markdown files the rebuilders read: the union of search's
     ROOT_INDEX_FILES and the graph's target_files."""
@@ -456,6 +500,7 @@ _COMPONENTS = {
     "graph": capture_graph,
     "docs": capture_docs,
     "roots": capture_roots,
+    "claims": capture_claims,
 }
 
 DEFAULT_COMPONENTS = ("search",)
@@ -468,8 +513,10 @@ DEFAULT_LEASE_TTL_S = 3600
 
 CLAIMS_LEDGER = ("data", "claims.sqlite")
 
-CLAIMS_STATUS = {"status": "UNSUPPORTED_BY_DESIGN",
-                 "reason": "structured claim ledger introduced in Z2"}
+#: Z2: claims are captured when a caller requires them; otherwise this is what
+#: the coherence block says (it replaced UNSUPPORTED_BY_DESIGN).
+CLAIMS_STATUS = {"status": "NOT_REQUIRED",
+                 "reason": "the claim ledger is captured only when required (Z2)"}
 
 LEGACY_COHERENCE = {
     "status": "UNVERIFIED",

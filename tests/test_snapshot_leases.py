@@ -68,16 +68,24 @@ def test_a_legacy_capture_says_it_is_unverified(store):
     with _capture(store) as s:
         coherence = s.identity["coherence"]
         assert coherence["status"] == "UNVERIFIED"
-        assert coherence["components"]["claims"]["status"] == "UNSUPPORTED_BY_DESIGN"
+        assert coherence["components"]["claims"]["status"] == "NOT_REQUIRED"   # Z2
         on_disk = json.loads((s.path / "manifest.json").read_text())
         assert on_disk["coherence"]["status"] == "UNVERIFIED"
 
 
-def test_gate_19_an_unadapted_claims_ledger_fails_capture_closed(store):
-    (store / "data" / "claims.sqlite").write_bytes(b"")
+def test_gate_19_an_unadapted_claims_ledger_fails_capture_closed(store, monkeypatch):
+    """Gate 19 after Z2: the claim ledger HAS an adapter (`capture_claims`), so
+    the guarantee is now (a) a damaged ledger fails a capture that requires it,
+    leaving no snapshot, and (b) the original guard still fires if the adapter
+    is ever unregistered - a snapshot is never silently blind to claims."""
+    (store / "data" / "claims.sqlite").write_bytes(b"not a database")
+    with pytest.raises(ms.SnapshotComponentError, match="claim"):
+        ms.capture(root=store, components=("wiki", "claims"))
+    snapshots = ms.snapshots_dir(store)
+    assert not snapshots.exists() or list(snapshots.iterdir()) == []
+    monkeypatch.delitem(ms._COMPONENTS, "claims")
     with pytest.raises(ms.SnapshotComponentError, match="claims"):
         _capture(store)
-    snapshots = ms.snapshots_dir(store)
     assert not snapshots.exists() or list(snapshots.iterdir()) == []
 
 

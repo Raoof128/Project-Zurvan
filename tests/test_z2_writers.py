@@ -172,6 +172,8 @@ REVIEWED = {
     "claim_store.py": "reads pages for the MIGRATION_REQUIRED guard",
     "claim_visibility.py": "reads frontmatter to hide non-current pages",
     "claim_migrate.py": "reads legacy pages; writes only through claim_pages",
+    "claim_ledger.py": "writes pages only through claim_pages; erase lists snapshot residue",
+    "knowledge_reconcile.py": "reads a crashed mutation's planned claim pages",
     "agent_workflow.py": "reads pages for the recall digest",
     "claim_federation.py": "reads pages for federation discovery",
     "build_snapshot.py": "snapshot component names, no page I/O",

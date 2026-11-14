@@ -391,18 +391,22 @@ def _belief(root, vis, upto) -> dict:
     if conn is None:
         return {}
     try:
-        by_claim = {}
-        for r in conn.execute("SELECT * FROM revisions ORDER BY claim_id, rev"):
-            b = vis.get(r["mutation_id"])
-            if b is not None and b <= upto:
-                by_claim.setdefault(r["claim_id"], []).append(r)
-        out = {}
-        for claim_id, rows in by_claim.items():
-            best = max(rows, key=lambda r: (vis[r["mutation_id"]], r["rev"]))
-            out[claim_id] = _state(conn, best, rows)
-        return out
+        return _belief_conn(conn, vis, upto)
     finally:
         conn.close()
+
+
+def _belief_conn(conn, vis, upto) -> dict:
+    by_claim = {}
+    for r in conn.execute("SELECT * FROM revisions ORDER BY claim_id, rev"):
+        b = vis.get(r["mutation_id"])
+        if b is not None and b <= upto:
+            by_claim.setdefault(r["claim_id"], []).append(r)
+    out = {}
+    for claim_id, rows in by_claim.items():
+        best = max(rows, key=lambda r: (vis[r["mutation_id"]], r["rev"]))
+        out[claim_id] = _state(conn, best, rows)
+    return out
 
 
 def current(root=None) -> dict:
@@ -655,3 +659,25 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     return {"counts": counts, "integrity_rate": (anchored / total) if total else None,
             "claims": per_claim, "written": written, "skipped_edited": skipped,
             "disclaimer": VERIFY_DISCLAIMER}
+
+
+# ----------------------------------------------------------------- snapshots (spec §7.6)
+
+def snapshot_belief(snapshot_dir) -> dict:
+    """The current claim view of a frozen snapshot, computed from its
+    `claims.sqlite` copy and `claims-mutations.json` sidecar only."""
+    from pathlib import Path
+    d = Path(snapshot_dir)
+    side = json.loads((d / "claims-mutations.json").read_text(encoding="utf-8"))
+    vis = {}
+    for mid, row in side.items():
+        if row["state"] == "COMMITTED" and row.get("committed_revision") is not None:
+            vis[mid] = int(row["committed_revision"])
+        elif row["state"] == "RESOLVED" and row.get("resolution_revision") is not None:
+            vis[mid] = int(row["resolution_revision"])
+    conn = cs.sqlite3.connect(f"file:{d / 'claims.sqlite'}?mode=ro", uri=True)
+    conn.row_factory = cs.sqlite3.Row
+    try:
+        return _belief_conn(conn, vis, float("inf"))
+    finally:
+        conn.close()
