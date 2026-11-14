@@ -89,6 +89,17 @@ def _snapshot() -> dict:
         if log.is_file() else 0
     )
     counts["knowledge ledger"] = _ledger_fingerprint()
+    # Z2: the claim ledger and its lock. A refused claim write against the live
+    # root leaves only the lock (no revision, no page), so both are watched
+    # (found 2026-11-14: a smoke test's stale spy let a real `claim add` run
+    # against the repository root).
+    claims = LIVE_ROOT / "data" / "claims.sqlite"
+    try:
+        st = claims.stat()
+        counts["claims ledger"] = f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        counts["claims ledger"] = "absent"
+    counts["claims lock"] = (LIVE_ROOT / "data" / "claims.lock").exists()
     return counts
 
 

@@ -20,6 +20,8 @@ raw/
 
 # Local databases may expose private knowledge
 data/*.sqlite
+# Z2 claim-ledger write lock (fcntl), never content
+data/claims.lock
 data/*.db
 # Derived float32 vector sidecar for the search index (see scripts/vector_cache.py)
 data/*.vectors.npy
