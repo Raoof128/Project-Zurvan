@@ -383,6 +383,38 @@ def belief_revisions(root=None) -> dict:
     return out
 
 
+def revision_at(when, root=None) -> int | None:
+    """The newest knowledge revision that existed at wall-clock `when`.
+
+    Counts COMMITTED mutations by `committed_at` and RESOLVED ones by
+    `resolved_at` - the moment their writes became knowledge (Z2 §7.2 `as_of_date`).
+    `when` is a datetime or an ISO-8601 string; a naive value is taken as UTC.
+    """
+    if isinstance(when, str):
+        when = datetime.fromisoformat(when.replace("Z", "+00:00"))
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    conn = _connect_ro(root)
+    try:
+        try:
+            rows = conn.execute(
+                "SELECT state, committed_at, committed_revision, resolved_at,"
+                " resolution_revision FROM mutations WHERE state IN (?, ?)",
+                (COMMITTED, RESOLVED)).fetchall()
+        except sqlite3.OperationalError:
+            return None
+    finally:
+        conn.close()
+    best = None
+    for state, c_at, c_rev, r_at, r_rev in rows:
+        at, rev = (c_at, c_rev) if state == COMMITTED else (r_at, r_rev)
+        if at is None or rev is None:
+            continue
+        if datetime.fromisoformat(at) <= when and (best is None or rev > best):
+            best = int(rev)
+    return best
+
+
 def at_operation_end(fn) -> None:
     """Run `fn` once after the outermost active operation commits or is abandoned."""
     op = _CTX.get()
