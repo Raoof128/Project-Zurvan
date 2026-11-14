@@ -71,7 +71,8 @@ def test_mcp_claim_add_rejects_empty_evidence(tmp_path, monkeypatch):
         # Control: the same path admits a verbatim quote.
         ok = tool_zurvan_claim_add("c", "wiki/src.md", "line one", "high", [])
         assert not ok.startswith("Error"), ok
-    assert len(list((tmp_path / "wiki" / "claims").glob("claim-*.md"))) == 1
+    # Z2: generated pages are named by ledger id (clm_...)
+    assert len(list((tmp_path / "wiki" / "claims").glob("*.md"))) == 1
 
 
 def test_extraction_validator_rejects_empty_quote():

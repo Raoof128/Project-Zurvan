@@ -730,6 +730,273 @@
    }
   },
   {
+   "name": "zurvan_claim_supersede",
+   "title": "Supersede a claim",
+   "description": "Replace a claim with a newer one. The old claim keeps its history, ends\n    its validity at `valid_from`, and leaves search and context. Requires write mode.\n    ",
+   "inputSchema": {
+    "properties": {
+     "old_claim_id": {
+      "description": "The claim being replaced (clm_...).",
+      "title": "Old Claim Id",
+      "type": "string"
+     },
+     "text": {
+      "description": "The newer claim.",
+      "title": "Text",
+      "type": "string"
+     },
+     "source": {
+      "description": "Repo-relative path to the supporting file (same rules as zurvan_claim_add).",
+      "title": "Source",
+      "type": "string"
+     },
+     "evidence": {
+      "description": "An exact quote from the source that supports the newer claim.",
+      "title": "Evidence",
+      "type": "string"
+     },
+     "reason": {
+      "description": "Why the old claim is replaced (required).",
+      "title": "Reason",
+      "type": "string"
+     },
+     "valid_from": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "When the newer claim became true (ISO date), if known.",
+      "title": "Valid From"
+     },
+     "expected_rev": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The old claim's revision you read; refused CLAIM_CONFLICT if it moved.",
+      "title": "Expected Rev"
+     }
+    },
+    "required": [
+     "old_claim_id",
+     "text",
+     "source",
+     "evidence",
+     "reason"
+    ],
+    "title": "zurvan_claim_supersedeArguments",
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "zurvan_claim_supersedeOutput",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_claim_retract",
+   "title": "Retract a claim",
+   "description": "Withdraw a claim. It stays in history and leaves search and context.\n    Requires write mode.\n    ",
+   "inputSchema": {
+    "properties": {
+     "claim_id": {
+      "description": "The claim being withdrawn (clm_...).",
+      "title": "Claim Id",
+      "type": "string"
+     },
+     "reason": {
+      "description": "Why it is withdrawn (required).",
+      "title": "Reason",
+      "type": "string"
+     },
+     "basis": {
+      "description": "Basis vocabulary: primary_source, independent_confirmation, direct_measurement, agent_inference, user_assertion.",
+      "items": {
+       "type": "string"
+      },
+      "title": "Basis",
+      "type": "array"
+     },
+     "expected_rev": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "The revision you read; refused CLAIM_CONFLICT if it moved.",
+      "title": "Expected Rev"
+     }
+    },
+    "required": [
+     "claim_id",
+     "reason",
+     "basis"
+    ],
+    "title": "zurvan_claim_retractArguments",
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "zurvan_claim_retractOutput",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_claim_show",
+   "title": "Show a claim (optionally as of a past revision or date)",
+   "description": "A claim's state as JSON: now, or as Zurvan believed it at a revision/date.",
+   "inputSchema": {
+    "properties": {
+     "claim_id": {
+      "description": "The claim id (clm_...).",
+      "title": "Claim Id",
+      "type": "string"
+     },
+     "as_of_revision": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "What Zurvan believed at this knowledge revision.",
+      "title": "As Of Revision"
+     },
+     "as_of_date": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "What Zurvan believed at this ISO date-time.",
+      "title": "As Of Date"
+     },
+     "valid_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "description": "Keep the claim only if true in the world at this ISO date.",
+      "title": "Valid At"
+     }
+    },
+    "required": [
+     "claim_id"
+    ],
+    "title": "zurvan_claim_showArguments",
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "zurvan_claim_showOutput",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_claim_history",
+   "title": "Claim history",
+   "description": "Every revision of a claim as JSON: event, status, actor, method, reason.",
+   "inputSchema": {
+    "properties": {
+     "claim_id": {
+      "description": "The claim id (clm_...).",
+      "title": "Claim Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "claim_id"
+    ],
+    "title": "zurvan_claim_historyArguments",
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "zurvan_claim_historyOutput",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "idempotentHint": true,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "zurvan_question_add",
    "title": "Record an open question",
    "description": "Record an open question / unknown for later investigation.\n\n    Use to capture gaps surfaced during research or editing. Requires write\n    mode (ZURVAN_MCP_READONLY=0).\n    ",

@@ -364,8 +364,12 @@ def belief_revisions(root=None) -> dict:
     `resolution_revision`, never the crashed operation's base. ACTIVE, ABORTED and
     ORPHANED mutations are absent: their rows are not part of any belief state.
     A COMMITTED row from before Z2 has no recorded revision and is absent too.
+    A store with no ledger yet has no beliefs: {}.
     """
-    conn = _connect_ro(root)
+    try:
+        conn = _connect_ro(root)
+    except LedgerError:
+        return {}
     try:
         try:
             rows = conn.execute(
@@ -394,7 +398,10 @@ def revision_at(when, root=None) -> int | None:
         when = datetime.fromisoformat(when.replace("Z", "+00:00"))
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    conn = _connect_ro(root)
+    try:
+        conn = _connect_ro(root)
+    except LedgerError:
+        return None
     try:
         try:
             rows = conn.execute(

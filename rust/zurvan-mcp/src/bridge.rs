@@ -48,6 +48,10 @@ pub fn bridge_tool(mcp_name: &str) -> Option<(&'static str, bool)> {
         "zurvan_decision_add" => ("decision_add", true),
         "zurvan_decision_set_project" => ("decision_set_project", true),
         "zurvan_claim_add" => ("claim_add", true),
+        "zurvan_claim_supersede" => ("claim_supersede", true),
+        "zurvan_claim_retract" => ("claim_retract", true),
+        "zurvan_claim_show" => ("claim_show", false),
+        "zurvan_claim_history" => ("claim_history", false),
         "zurvan_question_add" => ("question_add", true),
         "zurvan_eval_search" => ("eval_search", false),
         "zurvan_validate_gold" => ("validate_gold", false),
@@ -56,7 +60,10 @@ pub fn bridge_tool(mcp_name: &str) -> Option<(&'static str, bool)> {
 }
 
 fn is_write(tool: &str) -> bool {
-    matches!(tool, "remember" | "decision_add" | "decision_set_project" | "claim_add" | "question_add")
+    matches!(
+        tool,
+        "remember" | "decision_add" | "decision_set_project" | "claim_add" | "claim_supersede" | "claim_retract" | "question_add"
+    )
 }
 
 /// Where and how the bridge runs. `code_root` holds `scripts/` (the build's
@@ -108,7 +115,8 @@ pub fn call(
     // source is held to the same allow-list as `zurvan_read_page`. Python
     // checks only `is_safe_path`, which let a claim copy `.git/config` or a
     // `sources/` document into a readable claim page (final review I1).
-    if tool == "claim_add" {
+    // Z2: `claim_supersede` reads its `source` exactly like `claim_add`.
+    if tool == "claim_add" || tool == "claim_supersede" {
         let source = args.get("source").and_then(Value::as_str).unwrap_or("");
         if !crate::security::is_readable_path(&env.store_root, source, crate::config::allow_raw()) {
             return Ok((CLAIM_SOURCE_ERROR.to_string(), None));
@@ -299,6 +307,33 @@ mod tests {
         let a = args(json!({"text": "leak", "source": "wiki/a.md", "evidence": "ok"}));
         let (text, _) = call(&env, "claim_add", &a, Duration::from_secs(10), &|_, _| {}).unwrap();
         assert_eq!(text, "Claim added successfully: leak", "an allowed source still reaches Python");
+    }
+
+    /// Z2: the claim ledger tools are bridged to Python; supersede and retract
+    /// write (read-only gate), show and history read.
+    #[test]
+    fn z2_claim_tools_are_bridged() {
+        assert_eq!(bridge_tool("zurvan_claim_supersede"), Some(("claim_supersede", true)));
+        assert_eq!(bridge_tool("zurvan_claim_retract"), Some(("claim_retract", true)));
+        assert_eq!(bridge_tool("zurvan_claim_show"), Some(("claim_show", false)));
+        assert_eq!(bridge_tool("zurvan_claim_history"), Some(("claim_history", false)));
+        assert!(is_write("claim_supersede") && is_write("claim_retract"));
+        assert!(!is_write("claim_show") && !is_write("claim_history"));
+    }
+
+    /// Z2: `zurvan_claim_supersede`'s `source` is held to the same allow-list.
+    #[test]
+    fn claim_supersede_source_is_allow_listed() {
+        let (dir, env) = fake("cat >/dev/null; echo '{\"ok\": true, \"text\": \"Claim superseded: a -> b\", \"revision\": 1}'");
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::write(dir.path().join(".git/config"), "SECRET").unwrap();
+        for refused in [".git/config", "../x", "/etc/passwd", "wiki/traces/x.md"] {
+            let a = args(json!({"old_claim_id": "clm_0000000000000000", "text": "t", "source": refused,
+                                "evidence": "SECRET", "reason": "r"}));
+            let (text, rev) = call(&env, "claim_supersede", &a, Duration::from_secs(10), &|_, _| {}).unwrap();
+            assert_eq!(text, CLAIM_SOURCE_ERROR, "{refused}");
+            assert_eq!(rev, None, "{refused}");
+        }
     }
 
     #[test]

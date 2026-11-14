@@ -84,7 +84,11 @@ class _Session:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ticket = None
         self.mutation_id = None
-        self.conn = cs.connect(root)
+        # Never CREATE the store before the write is planned: a file that appears
+        # outside a planned write is an unmanaged edit, and the next operation
+        # would mint an EXTERNAL_OBSERVED revision for it (found by
+        # tests/test_mcp_bridge.py on a fresh store).
+        self.conn = cs.connect(root) if self.path.exists() else None
 
     def plan(self) -> str:
         """Record the intent to write - only after every refusal check has passed,
@@ -92,13 +96,29 @@ class _Session:
         if self.ticket is None:
             self.ticket = kr.plan_write(self.path, self.root)
             self.mutation_id = kr.active_operation().mutation_id
+            if self.conn is None:
+                self.conn = cs.connect(self.root)
+                self.conn.execute("BEGIN IMMEDIATE")
         return self.mutation_id
 
+    def latest(self, claim_id):
+        """The claim's latest visible revision row, or None (also on a fresh store)."""
+        if self.conn is None:
+            return None
+        self.conn.row_factory = cs.sqlite3.Row
+        try:
+            return _latest_row(self.conn, claim_id, _visible_map(self.root))
+        finally:
+            self.conn.row_factory = None
+
     def __enter__(self):
-        self.conn.execute("BEGIN IMMEDIATE")
+        if self.conn is not None:
+            self.conn.execute("BEGIN IMMEDIATE")
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self.conn is None:
+            return False
         try:
             if exc_type is None:
                 self.conn.execute("COMMIT")
@@ -150,11 +170,7 @@ def _carry(prev) -> dict:
 
 
 def _next(s, claim_id, *, event, status, actor, method, reason, expected_rev, **changes):
-    s.conn.row_factory = cs.sqlite3.Row
-    try:
-        prev = _latest_row(s.conn, claim_id, _visible_map(s.root))
-    finally:
-        s.conn.row_factory = None
+    prev = s.latest(claim_id)
     if prev is None:
         raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
     if expected_rev is not None and int(expected_rev) != prev["rev"]:
@@ -200,7 +216,7 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         valid_until=None, project=None, actor, method, reader="utf8", claim_type=None,
         extraction_key=None, legacy_id=None, observed_at_legacy=None,
         observed_at_legacy_source=None, location_hint=None, status="asserted",
-        root=None, _migrating=False) -> str:
+        extra_evidence=(), root=None, _migrating=False) -> str:
     _check_vocab(confidence, basis, method)
     with _Session(root, _migrating) as s:
         claim_id = _add_in(s, text, source, evidence, confidence=confidence, basis=basis,
@@ -209,7 +225,8 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
                        claim_type=claim_type, extraction_key=extraction_key,
                        legacy_id=legacy_id, observed_at_legacy=observed_at_legacy,
                        observed_at_legacy_source=observed_at_legacy_source,
-                       location_hint=location_hint, status=status)
+                       location_hint=location_hint, status=status,
+                       extra_evidence=extra_evidence)
     _write_pages(root, claim_id)
     return claim_id
 
@@ -217,12 +234,11 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
 def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, valid_until,
             project, actor, method, reader, claim_type, extraction_key, legacy_id,
             observed_at_legacy, observed_at_legacy_source, location_hint, status,
-            relations=None) -> str:
-    anchored = _anchor(s.root, source, evidence, reader) if evidence is not None else None
+            relations=None, extra_evidence=()) -> str:
+    quotes = ([(evidence, location_hint)] if evidence is not None else []) + list(extra_evidence)
+    anchored = [(_anchor(s.root, source, q, reader), loc) for q, loc in quotes]
     s.plan()
-    ev_rows = []
-    if anchored is not None:
-        ev_rows.append(_store_evidence(s.conn, source, anchored, reader, location_hint))
+    ev_rows = [_store_evidence(s.conn, source, a, reader, loc) for a, loc in anchored]
     claim_id = cs.new_claim_id()
     cs.insert_claim(s.conn, claim_id, s.mutation_id, legacy_id=legacy_id, scope_project=project)
     cs.append_revision(s.conn, {
@@ -245,11 +261,7 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
     _check_vocab(confidence, basis, method)
     _refuse_if_edited(old_id, root)
     with _Session(root) as s:
-        s.conn.row_factory = cs.sqlite3.Row
-        try:
-            prev = _latest_row(s.conn, old_id, _visible_map(s.root))
-        finally:
-            s.conn.row_factory = None
+        prev = s.latest(old_id)
         if prev is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", old_id)
         if expected_rev is not None and int(expected_rev) != prev["rev"]:
@@ -297,11 +309,7 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
                    "confidence_basis": json.dumps(list(basis)) if basis is not None else None}
         if evidence is not None:
             changes["anchored"] = (source, _anchor(s.root, source, evidence, reader), reader)
-        s.conn.row_factory = cs.sqlite3.Row
-        try:
-            status = _latest_row(s.conn, claim_id, _visible_map(s.root))
-        finally:
-            s.conn.row_factory = None
+        status = s.latest(claim_id)
         if status is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
         rev = _next(s, claim_id, event="revise", status=status["status"], actor=actor,
@@ -312,6 +320,22 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
 
 
 # ----------------------------------------------------------------- views
+
+def find_by_extraction_key(key: str, root=None):
+    """The current state of the claim an extraction created under `key`, or None."""
+    conn = _connect_ro(root)
+    if conn is None:
+        return None
+    try:
+        ids = {r[0] for r in conn.execute(
+            "SELECT DISTINCT r.claim_id FROM revisions r JOIN content c"
+            " ON c.cid = r.extraction_key_cid WHERE c.body = ?", (key,))}
+    finally:
+        conn.close()
+    now = current(root)
+    found = [now[i] for i in sorted(ids) if i in now]
+    return found[0] if found else None
+
 
 def _connect_ro(root):
     try:
