@@ -220,7 +220,9 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
         elif outcome == "no_evidence":
             cid = cl.add(lc.text, lc.source, None, status="unknown", **kw)
         else:
-            cid = cl.add(lc.text, lc.source, lc.quote, extra_evidence=lc.extra,
+            # A page may carry a quote and no source at all: the evidence is kept
+            # with an empty source reference, never an invented one.
+            cid = cl.add(lc.text, lc.source or "", lc.quote, extra_evidence=lc.extra,
                          _unanchored=True, **kw)
             cl._orphan(cid, reason=f"evidence {outcome} at migration", actor="migration",
                        method="migration", root=base)
@@ -239,7 +241,7 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
         quote = ((s.evidence[0].get("selector") or {}).get("TextQuoteSelector", {}).get("exact")
                  if s and s.evidence else "")
         source = s.evidence[0].get("source") if s and s.evidence else lc.source
-        if s is None or s.text != lc.text or (lc.quote and (quote != lc.quote or source != lc.source)):
+        if s is None or s.text != lc.text or (lc.quote and (quote != lc.quote or (source or None) != lc.source)):
             mismatches.append(lc.legacy_id)
     report.update(provenance_mismatches=mismatches, legacy_manifest=manifest["files"],
                   legacy_dir=str(legacy_dir), observed_at_sources=observed,

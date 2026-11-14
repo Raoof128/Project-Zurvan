@@ -246,3 +246,21 @@ def test_whitespace_only_quote_is_moved_normalised_not_orphaned(root, tmp_path_f
     assert s6.status == "asserted"
     assert s6.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == "totals  52\ndays"
     assert out["provenance_mismatches"] == []
+
+
+# Live migration, 2026-11-15: one legacy extraction page had a quote but no
+# `source_file`; the ledger refused a None source and the run crashed mid-way.
+NO_SOURCE = EXTRACTED.replace("source_file: s2.md\n", "").replace(
+    "Zurvan keeps a wiki", "A claim whose page names no source file")
+
+
+def test_quote_without_a_source_is_imported_and_orphaned_not_a_crash(root, tmp_path_factory):
+    (root / "wiki" / "claims" / "claim-00000009.md").write_text(NO_SOURCE, encoding="utf-8")
+    out, _, _ = _migrate(root, tmp_path_factory)
+    state = {s.legacy_id: s for s in cl.current(root).values()}["claim-00000009"]
+    assert state.status == "orphaned"
+    assert state.text == "A claim whose page names no source file"
+    assert state.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == "keeps a persistent wiki"
+    assert not state.evidence[0]["source"]                     # nothing invented
+    assert out["provenance_mismatches"] == []
+    assert {"legacy_id": "claim-00000009", "outcome": "gone", "source": None} in out["orphaned"]
