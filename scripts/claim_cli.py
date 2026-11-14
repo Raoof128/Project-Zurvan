@@ -99,6 +99,7 @@ def register(subparsers) -> None:
     ad.add_argument("claim_id")
     ad.add_argument("--reason", required=True)
     ad.add_argument("--actor", default=None)
+    sub.add_parser("doctor", help="Chain, integrity, invisible rows, dangling cids, edited pages")
     rg = sub.add_parser("regenerate", help="Rewrite pages from the ledger")
     rg.add_argument("claim_id", nargs="?")
     rg.add_argument("--all", action="store_true")
@@ -187,6 +188,13 @@ def dispatch(args) -> int:
         elif action == "adopt":
             rev = cp.adopt(args.claim_id, actor=actor, reason=args.reason)
             print(json.dumps({"claim_id": args.claim_id, "rev": rev}))
+        elif action == "doctor":
+            from scripts import claim_store
+            report = claim_store.doctor()
+            print(json.dumps(report, sort_keys=True, default=str))
+            healthy = (report["chain_ok"] and report["integrity"] in ("ok", "absent")
+                       and not report["dangling_cids"])
+            return 0 if healthy else 1
         elif action == "regenerate":
             if not args.claim_id and not args.all:
                 print("Error: USAGE: give a claim id or --all", file=sys.stderr)

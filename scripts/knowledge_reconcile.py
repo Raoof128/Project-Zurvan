@@ -68,12 +68,22 @@ def _parses(path: Path) -> bool:
     return True
 
 
+def _completed_ok(path: Path, planned) -> bool:
+    """Z2: the claim store is SQLite; the text parser would raise
+    UnicodeDecodeError on it (found by the builder check, 2026-11-14)."""
+    if path.name == "claims.sqlite":
+        from scripts.claim_store import reconcile_ok
+        pages = [p for p in planned if "/wiki/claims/" in str(p).replace("\\", "/")]
+        return reconcile_ok(path, pages)
+    return _parses(path)
+
+
 def inspect(root=None) -> list:
     kr.detect_orphans(root)
     reports = []
     for m in kr.mutations_in(kr.ORPHANED, root):
         missing = [p for p in m.planned_paths if p not in m.completed_paths]
-        failures = [p for p in m.completed_paths if not _parses(Path(p))]
+        failures = [p for p in m.completed_paths if not _completed_ok(Path(p), m.planned_paths)]
         reports.append(OrphanReport(mutation=m, missing_paths=missing,
                                     parse_failures=failures))
     return reports
