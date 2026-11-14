@@ -318,8 +318,9 @@ def _ledger_rows(store: Path) -> list[tuple]:
         rows = con.execute("SELECT state, writer, caller, implicit, store_project, completed_paths FROM mutations ORDER BY rowid").fetchall()
     finally:
         con.close()
-    # Claim pages carry a fresh random id per write (claim-<hex>.md): mask it.
-    name = lambda x: re.sub(r"^claim-[0-9a-f]+\.md$", "claim-<id>.md", Path(x).name)  # noqa: E731
+    # Claim pages carry a fresh random id per write (legacy claim-<hex>.md, Z2
+    # clm_<hex>.md): mask it.
+    name = lambda x: re.sub(r"^(claim-|clm_)[0-9a-f]+\.md$", r"\1<id>.md", Path(x).name)  # noqa: E731
     return [(s, w, c, i, p, sorted(name(x) for x in json.loads(cp or "[]"))) for s, w, c, i, p, cp in rows]
 
 
@@ -385,6 +386,48 @@ def run_writes(args, env: dict) -> list[dict]:
             verdict = "FAIL"  # the success path is the one under test
         rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
                      "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        # Z2 claim lifecycle on the claim `claim_add` created. Ids, mutation ids
+        # and timestamps differ per store by construction: masked, nothing else.
+        import sqlite3 as _sq
+
+        def _first_claim(store):
+            con = _sq.connect(f"file:{store / 'data' / 'claims.sqlite'}?mode=ro", uri=True)
+            try:
+                return con.execute("SELECT claim_id FROM claims ORDER BY rowid LIMIT 1").fetchone()[0]
+            finally:
+                con.close()
+
+        def _mask(t):
+            t = re.sub(r"clm_[0-9a-f]{16}", "clm_<id>", t)
+            t = re.sub(r"\bm[0-9a-f]{12}\b", "m<mut>", t)
+            return re.sub(r"\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:\d{2})?", "<ts>", t)
+
+        ids = {side: _first_claim(stores[side]) for side in ("a", "b")}
+        lifecycle = [
+            ("claim_supersede", "zurvan_claim_supersede",
+             lambda c: {"old_claim_id": c, "text": "a newer parity claim",
+                        "source": "wiki/decisions/evidence.md", "evidence": "the evidence line",
+                        "reason": "parity", "expected_rev": 1}),
+            ("claim_show", "zurvan_claim_show", lambda c: {"claim_id": c}),
+            ("claim_history", "zurvan_claim_history", lambda c: {"claim_id": c}),
+            ("claim_retract_stale", "zurvan_claim_retract",
+             lambda c: {"claim_id": c, "reason": "stale", "basis": [], "expected_rev": 1}),
+            ("claim_supersede_source_refused", "zurvan_claim_supersede",
+             lambda c: {"old_claim_id": c, "text": "leak", "source": "sources/legal.md",
+                        "evidence": "PARITY SECRET LEGAL TEXT", "reason": "r"}),
+        ]
+        for label, name, mk in lifecycle:
+            texts = {}
+            for side in ("a", "b"):
+                case = tool(f"writes:{label}", "writes", name, mk(ids[side]))
+                text, flag, _ = observe(peers[side], case)
+                texts[side] = (_mask(text), flag)
+            (ta, _), (tb, b_flag) = texts["a"], texts["b"]
+            verdict, diff = compare(case, ta, tb, b_flag)
+            if "SECRET" in ta or "SECRET" in tb:
+                verdict = "FAIL"
+            rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                         "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
         for p in peers.values():
             p.close()
         la, lb = _ledger_rows(stores["a"]), _ledger_rows(stores["b"])

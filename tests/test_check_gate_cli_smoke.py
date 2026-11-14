@@ -519,19 +519,28 @@ def test_decision_add_forwards_title_reason_status_and_tags(monkeypatch):
 
 
 def test_claim_add_forwards_the_evidence_quote(monkeypatch):
-    """The evidence quote is what the claim writer validates verbatim."""
-    spy = Spy("wiki/claims/claim-1.md")
-    monkeypatch.setattr(cli, "add_claim", spy)
+    """The evidence quote is what the claim writer validates verbatim.
+    Z2: `claim add` writes through the claim ledger (scripts/claim_cli.py)."""
+    from scripts import claim_ledger
+    spy = Spy("clm_0000000000000000")
+    monkeypatch.setattr(claim_ledger, "add", spy)
 
     run_cli(monkeypatch, "claim", "add", "--text", "T", "--source", "s.md",
             "--evidence", "a verbatim quote", "--confidence", "high")
 
-    assert spy.args[:4] == ("T", "s.md", "a verbatim quote", "high")
+    assert spy.args[:3] == ("T", "s.md", "a verbatim quote")
+    assert spy.calls[0][1]["confidence"] == "high"
 
 
 def test_claim_add_exits_nonzero_when_evidence_does_not_match(monkeypatch):
     """A rejected citation must fail the command, not pass silently."""
-    monkeypatch.setattr(cli, "add_claim", Spy(False))
+    from scripts import claim_ledger
+    from scripts.claim_store import ClaimRefused
+
+    def refuse(*a, **k):
+        raise ClaimRefused("EVIDENCE_REJECTED", "evidence quote not found verbatim in source")
+
+    monkeypatch.setattr(claim_ledger, "add", refuse)
 
     assert run_cli_expecting_exit(
         monkeypatch, "claim", "add", "--text", "T", "--source", "s.md",

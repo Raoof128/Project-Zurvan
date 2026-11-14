@@ -138,7 +138,8 @@ def dispatch(args) -> int:
                          basis=args.basis, tags=args.tags, valid_from=args.valid_from,
                          valid_until=args.valid_until, project=args.project, actor=actor,
                          method=args.method)
-            print(f"Created {cp.page_path(cl.current()[cid])}")
+            state = cl.current().get(cid)
+            print(f"Created {cp.page_path(state) if state else cid}")
             print(json.dumps({"claim_id": cid}))
         elif action == "supersede":
             new = cl.supersede(args.claim_id, text=args.text, source=args.source,

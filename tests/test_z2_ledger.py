@@ -201,3 +201,24 @@ def test_vocabularies_enforced(root):
         with pytest.raises(ValueError):
             cl.add("x", SRC, Q9, confidence="high", basis=["vibes"], actor="a",
                    method="human", root=root)
+
+
+def test_refused_write_on_a_fresh_store_creates_nothing(root):
+    """Found by tests/test_mcp_bridge.py: a refused first claim created
+    data/claims.sqlite outside any planned write, and the next operation minted
+    an EXTERNAL_OBSERVED revision for it."""
+    from scripts.safe_write import write_file_safely
+    with kr.operation(writer="test", root=root):
+        write_file_safely(str(root / "wiki" / "d.md"), "x\n")
+    before = kr.current(root).revision
+    with kr.operation(writer="test", root=root):
+        with pytest.raises(cs.ClaimRefused):
+            cl.add("x", SRC, "not in the source", confidence="high", actor="a",
+                   method="human", root=root)
+        with pytest.raises(cs.ClaimRefused):
+            cl.retract("clm_0000000000000000", reason="r", basis=[], actor="a",
+                       method="human", root=root)
+    assert not cs.db_path(root).exists()
+    with kr.operation(writer="test", root=root) as op:
+        write_file_safely(str(root / "wiki" / "e.md"), "y\n")
+    assert op.minted_revision == before + 1

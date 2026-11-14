@@ -32,61 +32,45 @@ def claim_page_name(source_id: str, claim_id: str) -> str:
     return f"{source_id}--{sanitize_filename(claim_id)}.md"
 
 
-_SOURCE_HASH_LINE = re.compile(r"^source_hash:\s*(\S+)\s*$", re.MULTILINE)
 
 
-def plan_claim_writes(data: dict, source_id: str, content_hash: str, claims_dir: str,
-                      source_file: str) -> list[tuple[str, str]]:
-    """Every claim page this extraction will write, as `(path, content)`, with
-    nothing written yet. Raises `ExtractionConflict` if any target page exists
-    and either carries a different `source_hash` (another source's evidence) or
-    carries this one's but says something else: accepted evidence is never
-    silently replaced (roadmap F1 gate: "either preserve prior evidence or
-    return an explicit conflict"; reconcile/supersession is a separate act).
-    A page whose planned body is byte-identical to the one on disk is a retry
-    of the same extraction and is left out of the plan: no write at all."""
-    plan = []
+def _source_ref(filepath: str) -> str:
+    """The path the ledger records: store-relative when the file is inside the
+    store, absolute otherwise (the same rule `claim add` accepts)."""
+    from scripts import knowledge_scope as ks
+    absolute = os.path.abspath(filepath)
+    base = str(ks.store_root())
+    if absolute == base or absolute.startswith(base + os.sep):
+        return os.path.relpath(absolute, base).replace(os.sep, "/")
+    return absolute
+
+
+def plan_claim_records(data: dict, file_sha: str) -> list[dict]:
+    """The claims this extraction will add, with nothing written yet (spec §7.9).
+
+    Claim identity comes from the ledger, never from the model: the model's id
+    only forms `extraction_key = sha256(source file bytes) + ":" + model id`.
+    A key already in the ledger with the same text and quotes is a retry and is
+    left out; the same key with different text raises `ExtractionConflict`
+    (accepted evidence is never silently replaced - supersede it by hand with
+    `zurvan claim supersede`). Raises before anything is written."""
+    from scripts import claim_ledger
+    records = []
     for claim in data.get("claims", []):
-        cid = sanitize_filename(claim["claim_id"])
-        name = claim_page_name(source_id, claim["claim_id"])
-        if not is_safe_filename(name):
-            continue
-        claim_file = os.path.join(claims_dir, name)
-        existing = None
-        if os.path.exists(claim_file):
-            with open(claim_file, "r", encoding="utf-8") as f:
-                existing = f.read()
-            m = _SOURCE_HASH_LINE.search(existing)
-            owner = m.group(1) if m else None
-            if owner != content_hash:
-                raise ExtractionConflict(
-                    f"claim page {os.path.basename(claim_file)} (claim '{claim['claim_id']}') "
-                    f"already exists for a different source (source_hash {owner!r}); "
-                    "nothing was written"
-                )
-        # The heading is the claim id as the model wrote it (plan Task 2); only
-        # line breaks are folded so it stays one Markdown heading line.
-        heading = " ".join(str(claim["claim_id"]).split())
-        tags_yaml = "\n  - ".join([""] + claim.get("tags", [])) if claim.get("tags") else ""
-        body = (
-            f"---\ntype: claim\nclaim_id: {cid}\nsource_id: {source_id}\n"
-            f"source_file: {source_file}\nsource_hash: {content_hash}\n"
-            f"claim_type: {claim['claim_type']}\nconfidence: {claim['confidence']}\n"
-            f"tags:{tags_yaml}\n---\n\n# {heading}\n\n## Claim\n\n{claim['text']}\n\n## Evidence\n\n"
-        )
-        for ev in claim["evidence"]:
-            body += (f"> \"{ev['quote']}\"\n\nLocation: {ev.get('location', 'Unknown')}\n"
-                     f"Source: [[sources/{source_file}]]\n\n")
+        key = f"{file_sha}:{claim['claim_id']}"
+        quotes = [ev["quote"] for ev in claim["evidence"]]
+        existing = claim_ledger.find_by_extraction_key(key)
         if existing is not None:
-            if existing == body:
-                continue  # identical retry: nothing to write
+            have = sorted((e.get("selector") or {}).get("TextQuoteSelector", {}).get("exact", "")
+                          for e in existing.evidence)
+            if existing.text == claim["text"] and have == sorted(quotes):
+                continue
             raise ExtractionConflict(
-                f"claim page {os.path.basename(claim_file)} (claim '{claim['claim_id']}') "
-                "already exists for this source with different content; accepted "
-                "evidence is not replaced. Nothing was written"
-            )
-        plan.append((claim_file, body))
-    return plan
+                f"claim '{claim['claim_id']}' of this source is already in the ledger as "
+                f"{existing.claim_id} with different content; accepted evidence is not "
+                "replaced. Nothing was written")
+        records.append({"key": key, "claim": claim})
+    return records
 
 
 def summary_page(source_id: str, source_file: str, summary: dict) -> str:
@@ -188,12 +172,13 @@ def extract_source(filepath):
     # Override source_id from LLM with our deterministic one for safety
     data["source_id"] = source_id
 
-    # Plan every claim page BEFORE anything is written: a cross-owner
-    # collision aborts the whole extraction with nothing on disk.
-    claims_dir = os.path.join("wiki", "claims")
-    # The conflict propagates: a caller (and the CLI's exit status) must be
-    # able to tell "refused" from "done".
-    claim_writes = plan_claim_writes(data, source_id, content_hash, claims_dir, basename)
+    # Plan every claim BEFORE anything is written: a conflicting re-extraction
+    # aborts the whole extraction with nothing on disk. The conflict propagates:
+    # a caller (and the CLI's exit status) must tell "refused" from "done".
+    with open(filepath, "rb") as f:
+        file_sha = hashlib.sha256(f.read()).hexdigest()
+    claim_records = plan_claim_records(data, file_sha)
+    source_ref = _source_ref(filepath)
 
     # 7. Save raw JSON
     os.makedirs(os.path.join("data", "extractions"), exist_ok=True)
@@ -212,11 +197,18 @@ def extract_source(filepath):
             with open(summary_file, "w", encoding="utf-8") as f:
                 f.write(summary_page(source_id, basename, data["summary"]))
     
-    # Claims (planned and conflict-checked above)
-    os.makedirs(claims_dir, exist_ok=True)
-    for claim_file, body in claim_writes:
-        with open(claim_file, "w", encoding="utf-8") as f:
-            f.write(body)
+    # Claims (planned and conflict-checked above), through the Z2 ledger
+    from scripts import claim_ledger
+    for rec in claim_records:
+        claim = rec["claim"]
+        evs = claim["evidence"]
+        claim_ledger.add(
+            claim["text"], source_ref, evs[0]["quote"],
+            confidence=str(claim["confidence"]).strip().lower(),
+            tags=list(claim.get("tags") or []), actor="extract", method="model_extraction",
+            reader="extract_text@1", claim_type=claim.get("claim_type"),
+            extraction_key=rec["key"], location_hint=evs[0].get("location"),
+            extra_evidence=[(e["quote"], e.get("location")) for e in evs[1:]])
 
     # Concepts and Entities: canonical writer is wiki_merge (compounding wiki)
     from scripts.wiki_merge import merge_extraction

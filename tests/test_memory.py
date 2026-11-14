@@ -69,7 +69,7 @@ def test_add_claim_resolves_source_against_project_root(tmp_path, monkeypatch):
         )
 
     assert ok is True
-    claims = list((tmp_path / "wiki" / "claims").glob("claim-*.md"))
+    claims = list((tmp_path / "wiki" / "claims").glob("*.md"))   # Z2: clm_<id>.md
     assert len(claims) == 1
 
 

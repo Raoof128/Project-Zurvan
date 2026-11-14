@@ -99,15 +99,19 @@ def _source_node(filepath):
 
 
 def test_an_extracted_claim_derives_from_its_ingested_source_page(tmp_path):
-    from scripts.extract import plan_claim_writes, source_identity
+    # Z2: claim pages are rendered from the ledger; an extracted claim (reader
+    # extract_text@1) keeps `source_file` so the derived_from edge still resolves.
+    from scripts.claim_ledger import ClaimState
+    from scripts.claim_pages import render
     filepath = "raw/papers/My Paper.pdf"
-    source_id, content_hash = source_identity(filepath, "the extracted text")
-    data = {"claims": [{"claim_id": "claim-1", "claim_type": "fact", "confidence": "high",
-                        "text": "t", "evidence": [{"quote": "the extracted text"}]}]}
-    [(_, body)] = plan_claim_writes(data, source_id, content_hash, str(tmp_path), "My Paper.pdf")
+    state = ClaimState(claim_id="clm_0123456789abcdef", rev=1, status="asserted", text="t",
+                       confidence="high",
+                       evidence=[{"source": filepath, "reader": "extract_text@1",
+                                  "selector": {"TextQuoteSelector": {"exact": "the extracted text"}}}])
+    body = render(state, [], [])
     node_id, nodes = _source_node(filepath)
 
-    edges = extract_edges(f"wiki/claims/{source_id}--claim-1.md", body, nodes)
+    edges = extract_edges(f"wiki/claims/{state.claim_id}.md", body, nodes)
 
     assert [e["edge_type"] for e in edges if e["to_node_id"] == node_id] == ["derived_from"]
 

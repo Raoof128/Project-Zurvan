@@ -38,6 +38,13 @@ def workspace(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _run(extract, rel="source.md"):
+    """One extraction is one operation (as `scripts/extract.py __main__` opens it)."""
+    from scripts import knowledge_revision as kr
+    with kr.operation(writer="extract", eager=True):
+        extract.extract_source(rel)
+
+
 def _llm(claim_text="A claim.", open_questions=()):
     return json.dumps({
         "source_id": "x",
@@ -55,49 +62,52 @@ def _claim_pages(ws):
     return sorted((ws / "wiki" / "claims").glob("*.md"))
 
 
-# 1. same-hash re-extraction compares before it writes -----------------------
+def _claims(ws):
+    from scripts import claim_ledger
+    return claim_ledger.current(ws)
+
+
+# 1. same-key re-extraction compares before it writes (Z2: through the ledger) --
 
 def test_re_extracting_identical_content_skips_the_claim_write(workspace, monkeypatch):
     from scripts import extract
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm())
-    extract.extract_source("source.md")
+    _run(extract)
     (page,) = _claim_pages(workspace)
     os.utime(page, ns=(1_000_000_000, 1_000_000_000))
-    extract.extract_source("source.md")
-    assert page.stat().st_mtime_ns == 1_000_000_000, "identical body was rewritten"
+    _run(extract)
+    assert page.stat().st_mtime_ns == 1_000_000_000, "identical claim was rewritten"
+    (state,) = _claims(workspace).values()
+    assert state.rev == 1
 
 
-def test_plan_omits_a_page_whose_body_is_already_on_disk(workspace):
-    from scripts.extract import plan_claim_writes
-    claims_dir = workspace / "wiki" / "claims"
-    claims_dir.mkdir(parents=True)
-    data = {"claims": [{"claim_id": "claim-1", "claim_type": "fact", "confidence": "high",
-                        "text": "t", "evidence": [{"quote": "q"}], "tags": []}]}
-    [(path, body)] = plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(body)
-    assert plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md") == []
+def test_plan_omits_a_claim_already_in_the_ledger(workspace, monkeypatch):
+    import hashlib
+    from scripts import extract
+    monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm())
+    _run(extract)
+    sha = hashlib.sha256((workspace / "source.md").read_bytes()).hexdigest()
+    assert extract.plan_claim_records(json.loads(_llm()), sha) == []
 
 
-def test_same_hash_with_different_text_is_a_conflict_and_preserves_the_page(workspace):
-    from scripts.extract import ExtractionConflict, plan_claim_writes
-    claims_dir = workspace / "wiki" / "claims"
-    claims_dir.mkdir(parents=True)
-    page = claims_dir / "src-aaaaaaaaaaaa--claim-1.md"
-    page.write_text("---\ntype: claim\nsource_hash: cccccccc\n---\naccepted evidence\n")
-    data = {"claims": [{"claim_id": "claim-1", "claim_type": "fact", "confidence": "high",
-                        "text": "a different reading", "evidence": [{"quote": "q"}], "tags": []}]}
-    with pytest.raises(ExtractionConflict, match="claim-1"):
-        plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc", str(claims_dir), "src.md")
-    assert page.read_text().endswith("accepted evidence\n")
+def test_same_key_with_different_text_is_a_conflict_and_preserves_the_claim(workspace, monkeypatch):
+    import hashlib
+    from scripts import extract
+    monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm("accepted evidence"))
+    _run(extract)
+    sha = hashlib.sha256((workspace / "source.md").read_bytes()).hexdigest()
+    with pytest.raises(extract.ExtractionConflict, match="claim-1"):
+        extract.plan_claim_records(json.loads(_llm("a different reading")), sha)
+    (state,) = _claims(workspace).values()
+    assert state.text == "accepted evidence"
 
 
 def test_a_changed_re_extraction_writes_nothing_at_all(workspace, monkeypatch):
     """Plan-before-write: the conflicting run adds no JSON, summary or question
-    either, and leaves the accepted page byte-identical."""
+    either, and leaves the accepted claim and its page byte-identical."""
     from scripts import extract
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm("first reading"))
-    extract.extract_source("source.md")
+    _run(extract)
     (page,) = _claim_pages(workspace)
     before = page.read_bytes()
     extraction = next((workspace / "data" / "extractions").glob("*.json"))
@@ -105,10 +115,12 @@ def test_a_changed_re_extraction_writes_nothing_at_all(workspace, monkeypatch):
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm(
         "second reading", open_questions=[("New?", "because")]))
     with pytest.raises(extract.ExtractionConflict):
-        extract.extract_source("source.md")
+        _run(extract)
     assert page.read_bytes() == before
     assert extraction.read_bytes() == extraction_before
     assert not (workspace / "wiki" / "open-questions.md").exists()
+    (state,) = _claims(workspace).values()
+    assert state.text == "first reading" and state.rev == 1
 
 
 # 2. open questions are idempotent per (source_id, question) -----------------
@@ -117,8 +129,8 @@ def test_re_extracting_the_same_source_does_not_duplicate_open_questions(workspa
     from scripts import extract
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm(
         open_questions=[("Who owns it?", "unclear"), ("When?", "undated")]))
-    extract.extract_source("source.md")
-    extract.extract_source("source.md")
+    _run(extract)
+    _run(extract)
     text = (workspace / "wiki" / "open-questions.md").read_text()
     assert text.count("**Who owns it?**") == 1
     assert text.count("**When?**") == 1
@@ -128,9 +140,9 @@ def test_the_same_question_from_another_source_is_still_recorded(workspace, monk
     from scripts import extract
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm(
         open_questions=[("Who owns it?", "unclear")]))
-    extract.extract_source("source.md")
+    _run(extract)
     (workspace / "other.md").write_text(f"{QUOTE}\nOther body.\n")
-    extract.extract_source("other.md")
+    _run(extract, "other.md")
     text = (workspace / "wiki" / "open-questions.md").read_text()
     assert text.count("**Who owns it?**") == 2
 
@@ -139,7 +151,7 @@ def test_a_question_repeated_within_one_response_is_written_once(workspace, monk
     from scripts import extract
     monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm(
         open_questions=[("Who owns it?", "a"), ("Who owns it?", "b")]))
-    extract.extract_source("source.md")
+    _run(extract)
     assert (workspace / "wiki" / "open-questions.md").read_text().count("**Who owns it?**") == 1
 
 
@@ -155,16 +167,20 @@ def _run_cli(ws, source="source.md"):
 
 
 def test_the_cli_exits_non_zero_on_a_conflict_and_writes_nothing(workspace):
-    from scripts.extract import source_identity
-    sid, _ = source_identity("source.md", (workspace / "source.md").read_text())
-    claims_dir = workspace / "wiki" / "claims"
-    claims_dir.mkdir(parents=True)
-    page = claims_dir / f"{sid}--claim-dummy-001.md"
-    page.write_text("---\ntype: claim\nsource_hash: someoneelse\n---\nother source\n")
+    """The ledger already holds this source's `claim-dummy-001` with other text."""
+    import hashlib
+    from scripts import claim_ledger
+    from scripts import knowledge_revision as kr
+    sha = hashlib.sha256((workspace / "source.md").read_bytes()).hexdigest()
+    with kr.operation(writer="test"):
+        claim_ledger.add("other text", "source.md", QUOTE, confidence="high", actor="t",
+                         method="model_extraction", reader="extract_text@1",
+                         extraction_key=f"{sha}:claim-dummy-001")
     result = _run_cli(workspace)
     assert result.returncode != 0, result.stdout + result.stderr
     assert "claim-dummy-001" in (result.stdout + result.stderr)
-    assert page.read_text().endswith("other source\n")
+    (state,) = _claims(workspace).values()
+    assert state.text == "other text"
     assert not (workspace / "data" / "extractions").exists()
     assert not (workspace / "wiki" / "summaries").exists()
 
@@ -175,14 +191,15 @@ def test_the_cli_still_exits_zero_on_a_clean_extraction(workspace):
     assert len(_claim_pages(workspace)) == 1
 
 
-# 4. the heading is the raw claim id -----------------------------------------
+# 4. the model's claim id never names anything durable (Z2) ------------------
 
-def test_heading_is_the_raw_claim_id_while_filename_and_frontmatter_stay_sanitised(workspace):
-    from scripts.extract import plan_claim_writes
-    data = {"claims": [{"claim_id": "claim 1", "claim_type": "fact", "confidence": "high",
-                        "text": "t", "evidence": [{"quote": "q"}], "tags": []}]}
-    [(path, body)] = plan_claim_writes(data, "src-aaaaaaaaaaaa", "cccccccc",
-                                       str(workspace / "wiki" / "claims"), "src.md")
-    assert os.path.basename(path) == "src-aaaaaaaaaaaa--claim_1.md"
-    assert "\nclaim_id: claim_1\n" in body
-    assert "\n# claim 1\n" in body
+def test_model_claim_id_is_only_part_of_the_extraction_key(workspace, monkeypatch):
+    """Superseded the old 'heading is the raw claim id' rule: since Z2 the page is
+    generated from the ledger and named by ledger id; the model id survives only
+    inside `extraction_key`."""
+    from scripts import extract
+    monkeypatch.setattr(extract, "run_llm", lambda *a, **k: _llm())
+    _run(extract)
+    (page,) = _claim_pages(workspace)
+    assert page.name.startswith("clm_") and "claim-1" not in page.name
+    assert "claim-1" not in page.read_text()

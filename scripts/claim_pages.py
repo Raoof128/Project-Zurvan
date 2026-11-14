@@ -58,6 +58,11 @@ def render(state, history: list, superseded_texts: list, generated_from_mutation
         fm.append(f"valid_until: {_s(state.valid_until)}")
     if state.evidence and state.evidence[0].get("source"):
         fm.append(f"source: {_s(state.evidence[0]['source'])}")
+        if state.evidence[0].get("reader", "").startswith("extract_text"):
+            # graph_build links an extracted claim to its ingested source page by
+            # `source_file` (the basename ingest named the page after)
+            import os.path
+            fm.append(f"source_file: {_s(os.path.basename(state.evidence[0]['source']))}")
     if state.scope_project:
         fm.append(f"project: {_s(state.scope_project)}")
     if generated_from_mutation:

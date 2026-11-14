@@ -444,6 +444,89 @@ def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str
     # it, so a refused claim is reported as a refusal, not a success.
     return "Error: failed to add claim. Ensure evidence is non-empty and exists verbatim in the source file."
 
+def _mcp_actor() -> str:
+    from scripts import knowledge_revision as kr
+    op = kr.active_operation()
+    return op.caller if op is not None and op.caller else "mcp:unknown"
+
+
+def _claim_refusal(exc) -> str:
+    return f"Error: {exc.code}: {exc.detail}".rstrip(": ")
+
+
+@_protocol_safe
+@enforce_read_only
+@mcp_operation
+def tool_zurvan_claim_supersede(old_claim_id: str, text: str, source: str, evidence: str,
+                                reason: str, valid_from: str | None = None,
+                                expected_rev: int | None = None) -> str:
+    """Replace a claim with a newer one (Z2). The old claim stays in history."""
+    allow_raw = os.environ.get("ZURVAN_MCP_ALLOW_RAW_READ", "0") == "1"
+    if not is_readable_path(source, allow_raw=allow_raw):
+        return CLAIM_SOURCE_ERROR
+    from scripts import claim_ledger
+    from scripts.claim_store import ClaimRefused
+    try:
+        new = claim_ledger.supersede(old_claim_id, text=text, source=source, evidence=evidence,
+                                     reason=reason, actor=_mcp_actor(), method="agent",
+                                     valid_from=valid_from, expected_rev=expected_rev)
+    except ClaimRefused as exc:
+        return _claim_refusal(exc)
+    except ValueError as exc:
+        return f"Error: INVALID: {exc}"
+    return f"Claim superseded: {old_claim_id} -> {new}"
+
+
+@_protocol_safe
+@enforce_read_only
+@mcp_operation
+def tool_zurvan_claim_retract(claim_id: str, reason: str, basis: List[str],
+                              expected_rev: int | None = None) -> str:
+    """Withdraw a claim (Z2). It stays in history; it leaves search and context."""
+    from scripts import claim_ledger
+    from scripts.claim_store import ClaimRefused
+    try:
+        rev = claim_ledger.retract(claim_id, reason=reason, basis=list(basis or []),
+                                   actor=_mcp_actor(), method="agent", expected_rev=expected_rev)
+    except ClaimRefused as exc:
+        return _claim_refusal(exc)
+    except ValueError as exc:
+        return f"Error: INVALID: {exc}"
+    return f"Claim retracted: {claim_id} (rev {rev})"
+
+
+@_protocol_safe
+def tool_zurvan_claim_show(claim_id: str, as_of_revision: int | None = None,
+                           as_of_date: str | None = None, valid_at: str | None = None) -> str:
+    """One claim as JSON, now or as Zurvan believed it at a revision/date (Z2)."""
+    import json as _json
+    from dataclasses import asdict
+    from scripts import claim_ledger
+    if as_of_revision is not None:
+        state = claim_ledger.as_of_revision(int(as_of_revision)).claims
+    elif as_of_date:
+        state = claim_ledger.as_of_date(as_of_date).claims
+    else:
+        state = claim_ledger.current()
+    if valid_at:
+        state = claim_ledger.valid_at(state, valid_at)
+    s = state.get(claim_id)
+    if s is None:
+        return f"Error: UNKNOWN_CLAIM: {claim_id}"
+    return _json.dumps(asdict(s), sort_keys=True, default=str)
+
+
+@_protocol_safe
+def tool_zurvan_claim_history(claim_id: str) -> str:
+    """Every visible revision of a claim as JSON (Z2)."""
+    import json as _json
+    from scripts import claim_ledger
+    hist = claim_ledger.history(claim_id)
+    if not hist:
+        return f"Error: UNKNOWN_CLAIM: {claim_id}"
+    return _json.dumps(hist, sort_keys=True, default=str)
+
+
 @_protocol_safe
 @enforce_read_only
 @mcp_operation

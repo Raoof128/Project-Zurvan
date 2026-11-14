@@ -133,3 +133,12 @@ def test_at_operation_end_joins_the_outermost_operation(root):
 def test_at_operation_end_requires_an_operation(root):
     with pytest.raises(kr.KnowledgeOperationRequired):
         kr.at_operation_end(lambda: None)
+
+
+def test_views_on_a_store_without_a_ledger_are_empty(tmp_path):
+    """A store with no registry yet has no beliefs; reading it must not raise
+    (found by the CLI smoke test: `claim add` printed via `current()`)."""
+    from scripts import claim_ledger
+    assert kr.belief_revisions(tmp_path) == {}
+    assert kr.revision_at("2030-01-01T00:00:00+00:00", tmp_path) is None
+    assert claim_ledger.current(tmp_path) == {}

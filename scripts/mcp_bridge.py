@@ -30,6 +30,13 @@ WRITES = {
     "decision_set_project": "tool_zurvan_decision_set_project",
     "claim_add": "tool_zurvan_claim_add",
     "question_add": "tool_zurvan_question_add",
+    "claim_supersede": "tool_zurvan_claim_supersede",
+    "claim_retract": "tool_zurvan_claim_retract",
+}
+#: Z2 claim reads served by Python for both servers (no write, no eval prefix).
+CLAIM_READS = {
+    "claim_show": "tool_zurvan_claim_show",
+    "claim_history": "tool_zurvan_claim_history",
 }
 EVALS = {
     "eval_search": "tool_zurvan_eval_search",
@@ -51,7 +58,7 @@ def main() -> int:
     except json.JSONDecodeError as exc:
         return reply(ok=False, error=f"bad request: {exc}")
     tool, args = request.get("tool"), request.get("args") or {}
-    name = WRITES.get(tool) or EVALS.get(tool)
+    name = WRITES.get(tool) or EVALS.get(tool) or CLAIM_READS.get(tool)
     if name is None:
         return reply(ok=False, error=f"unknown bridge tool {tool!r}")
 

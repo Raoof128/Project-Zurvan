@@ -279,6 +279,51 @@ def zurvan_claim_add(
     """
     return tools.tool_zurvan_claim_add(text, source, evidence, confidence, tags)
 
+@mcp.tool(title="Supersede a claim", annotations=ADDITIVE_WRITE)
+def zurvan_claim_supersede(
+    old_claim_id: Annotated[str, Field(description="The claim being replaced (clm_...).")],
+    text: Annotated[str, Field(description="The newer claim.")],
+    source: Annotated[str, Field(description='Repo-relative path to the supporting file (same rules as zurvan_claim_add).')],
+    evidence: Annotated[str, Field(description="An exact quote from the source that supports the newer claim.")],
+    reason: Annotated[str, Field(description="Why the old claim is replaced (required).")],
+    valid_from: Annotated[str | None, Field(description="When the newer claim became true (ISO date), if known.")] = None,
+    expected_rev: Annotated[int | None, Field(description="The old claim's revision you read; refused CLAIM_CONFLICT if it moved.")] = None,
+) -> str:
+    """Replace a claim with a newer one. The old claim keeps its history, ends
+    its validity at `valid_from`, and leaves search and context. Requires write mode.
+    """
+    return tools.tool_zurvan_claim_supersede(old_claim_id, text, source, evidence, reason,
+                                             valid_from, expected_rev)
+
+@mcp.tool(title="Retract a claim", annotations=ADDITIVE_WRITE)
+def zurvan_claim_retract(
+    claim_id: Annotated[str, Field(description="The claim being withdrawn (clm_...).")],
+    reason: Annotated[str, Field(description="Why it is withdrawn (required).")],
+    basis: Annotated[list[str], Field(description="Basis vocabulary: primary_source, independent_confirmation, direct_measurement, agent_inference, user_assertion.")],
+    expected_rev: Annotated[int | None, Field(description="The revision you read; refused CLAIM_CONFLICT if it moved.")] = None,
+) -> str:
+    """Withdraw a claim. It stays in history and leaves search and context.
+    Requires write mode.
+    """
+    return tools.tool_zurvan_claim_retract(claim_id, reason, basis, expected_rev)
+
+@mcp.tool(title="Show a claim (optionally as of a past revision or date)", annotations=READ_ONLY)
+def zurvan_claim_show(
+    claim_id: Annotated[str, Field(description="The claim id (clm_...).")],
+    as_of_revision: Annotated[int | None, Field(description="What Zurvan believed at this knowledge revision.")] = None,
+    as_of_date: Annotated[str | None, Field(description="What Zurvan believed at this ISO date-time.")] = None,
+    valid_at: Annotated[str | None, Field(description="Keep the claim only if true in the world at this ISO date.")] = None,
+) -> str:
+    """A claim's state as JSON: now, or as Zurvan believed it at a revision/date."""
+    return tools.tool_zurvan_claim_show(claim_id, as_of_revision, as_of_date, valid_at)
+
+@mcp.tool(title="Claim history", annotations=READ_ONLY)
+def zurvan_claim_history(
+    claim_id: Annotated[str, Field(description="The claim id (clm_...).")],
+) -> str:
+    """Every revision of a claim as JSON: event, status, actor, method, reason."""
+    return tools.tool_zurvan_claim_history(claim_id)
+
 @mcp.tool(title="Record an open question", annotations=ADDITIVE_WRITE)
 def zurvan_question_add(
     question: Annotated[str, Field(description="The open question.")],
