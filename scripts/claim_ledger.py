@@ -74,6 +74,7 @@ class _Session:
     """One claims transaction inside the active knowledge operation."""
 
     def __init__(self, root, migrating=False):
+        root = kr.ks.store_root(root)        # None -> ZURVAN_ROOT / repo root, once
         self.root = root
         kr.require_active_operation("a claim write", root)
         if not migrating:

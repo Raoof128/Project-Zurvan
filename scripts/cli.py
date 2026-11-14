@@ -379,15 +379,9 @@ def _main():
     b_rel.add_argument("--sink", nargs="+", required=True)
     b_rel.add_argument("--reason", required=True)
 
-    # zurvan claim add
-    claim_parser = subparsers.add_parser("claim", help="Manage claims")
-    claim_sub = claim_parser.add_subparsers(dest="action")
-    clm_add = claim_sub.add_parser("add")
-    clm_add.add_argument("--text", required=True)
-    clm_add.add_argument("--source", required=True)
-    clm_add.add_argument("--evidence", required=True)
-    clm_add.add_argument("--confidence", required=True)
-    clm_add.add_argument("--tags", nargs="+", default=[])
+    # zurvan claim ... (Z2 claim ledger: scripts/claim_cli.py)
+    from scripts import claim_cli
+    claim_cli.register(subparsers)
     
     # zurvan question add
     question_parser = subparsers.add_parser("question", help="Manage open questions")
@@ -1031,9 +1025,11 @@ def _main():
             sys.exit(2)
         if ok is False:
             sys.exit(1)
-    elif args.command == "claim" and args.action == "add":
-        if add_claim(args.text, args.source, args.evidence, args.confidence, args.tags) is False:
-            sys.exit(1)
+    elif args.command == "claim":
+        from scripts import claim_cli
+        code = claim_cli.dispatch(args)
+        if code:
+            sys.exit(code)
     elif args.command == "question" and args.action == "add":
         if add_question(args.question, args.reason, args.tags) is False:
             sys.exit(1)
