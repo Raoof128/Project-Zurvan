@@ -1,0 +1,177 @@
+"""Z2 final-review fix pass (whole-branch review, 2026-11-14). Each test failed
+before its fix."""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from scripts import claim_evidence as ce
+from scripts import claim_ledger as cl
+from scripts import claim_store as cs
+from scripts import knowledge_reconcile as krec
+from scripts import knowledge_revision as kr
+
+REPO = Path(__file__).resolve().parents[1]
+SRC = "wiki/sources/s.md"
+Q = "fact number one is recorded here"
+Q2 = "fact number two is recorded here"
+
+
+@pytest.fixture
+def root(tmp_path, monkeypatch):
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    (tmp_path / "data").mkdir()
+    (tmp_path / "wiki" / "sources").mkdir(parents=True)
+    (tmp_path / "wiki" / "claims").mkdir(parents=True)
+    (tmp_path / SRC).write_text(f"{Q}\n{Q2}\n", encoding="utf-8")
+    kr.ensure_schema(tmp_path)
+    return tmp_path
+
+
+def _add(root, text="a claim", quote=Q, **kw):
+    with kr.operation(writer="test", root=root):
+        return cl.add(text, SRC, quote, confidence="high", actor="a", method="human",
+                      root=root, **kw)
+
+
+def _cli(root, *args):
+    env = dict(os.environ, ZURVAN_ROOT=str(root), PYTHONPATH=str(REPO))
+    return subprocess.run([sys.executable, str(REPO / "scripts" / "cli.py"), "claim", *args],
+                          capture_output=True, text=True, env=env, cwd=str(REPO))
+
+
+# I1 ---------------------------------------------------------------------------
+
+def test_i1_a_reader_exception_is_changed_not_a_crash(root, monkeypatch):
+    import scripts.ingest as ingest
+    (root / "wiki" / "sources" / "p.pdf").write_bytes(b"%PDF-broken")
+
+    def boom(path):
+        raise RuntimeError("pymupdf FileDataError")
+
+    monkeypatch.setattr(ingest, "extract_text", boom)
+    sel = {"TextQuoteSelector": {"exact": "x", "prefix": "", "suffix": ""},
+           "state": {"sha256": "0" * 64}}
+    outcome, detail = ce.resolve(sel, "wiki/sources/p.pdf", "extract_text@1", root)
+    assert outcome == "changed" and "RuntimeError" in detail
+
+
+def test_i1_verify_continues_past_a_failing_reader(root, monkeypatch):
+    a = _add(root)
+    b = _add(root, text="second", quote=Q2)
+    real = ce.read_source
+
+    def flaky(source_ref, reader, base):
+        if b:  # every read fails for an unexpected reason
+            raise RuntimeError("reader exploded")
+        return real(source_ref, reader, base)
+
+    monkeypatch.setattr(ce, "read_source", flaky)
+    with kr.operation(writer="test", root=root):
+        out = cl.verify(root=root)
+    assert set(out["claims"]) == {a, b}
+
+
+# I2 ---------------------------------------------------------------------------
+
+def test_i2_verify_names_broken_claims_with_reason(root):
+    cid = _add(root)
+    (root / SRC).unlink()
+    res = _cli(root, "verify")
+    assert res.returncode == 0, res.stderr
+    assert cid in res.stdout and "gone" in res.stdout
+    assert "No such file" in res.stdout or "FileNotFoundError" in res.stdout
+    with kr.operation(writer="test", root=root):
+        cl.verify(apply=True, root=root)
+    reason = cl.history(cid, root)[-1]["reason"]
+    assert "FileNotFoundError" in reason or "No such file" in reason
+
+
+# I3 ---------------------------------------------------------------------------
+
+def test_i3_write_commands_warn_the_index_is_stale(root):
+    cid = _add(root)
+    res = _cli(root, "retract", cid, "--reason", "wrong")
+    assert res.returncode == 0, res.stderr
+    assert "zurvan index search" in res.stderr
+
+
+# I4 ---------------------------------------------------------------------------
+
+def test_i4_claim_writes_refused_while_store_is_suspect(root):
+    cid = _add(root)
+    with pytest.raises(RuntimeError):
+        with kr.operation(writer="test", root=root):
+            cl.retract(cid, reason="crashing retract", basis=[], actor="a", method="human",
+                       root=root)
+            raise RuntimeError("crash after the claim write")
+    assert kr.current(root).state == kr.SUSPECT
+    with kr.operation(writer="test", root=root):
+        with pytest.raises(cs.ClaimRefused) as ei:
+            cl.revise(cid, reason="later edit", confidence="low", actor="a", method="human",
+                      root=root)
+    assert ei.value.code == "CLAIMS_STORE_SUSPECT"
+    assert krec.reconcile(root, actor="test")["status"] == "CLEAN"
+    state = cl.current(root)[cid]
+    assert state.status == "retracted" and state.rev == 2       # the reconciled write wins
+    with kr.operation(writer="test", root=root):
+        cl.revise(cid, reason="now allowed", confidence="low", actor="a", method="human",
+                  root=root)
+    assert cl.current(root)[cid].rev == 3 and cl.current(root)[cid].status == "retracted"
+
+
+# I5 ---------------------------------------------------------------------------
+
+def test_i5_doctor_reports_a_page_that_disagrees_with_the_ledger(root):
+    cid = _add(root)
+    other = _add(root, text="other", quote=Q2)
+    page = root / "wiki" / "claims" / f"{cid}.md"
+    # a page regenerated from an OLD state: valid hash, wrong status
+    from scripts import claim_pages as cp
+    state = cl.current(root)[cid]
+    state.status = "superseded"
+    page.write_text(cp.render(state, cl.history(cid, root), [], state.mutation_id),
+                    encoding="utf-8")
+    (root / "wiki" / "claims" / f"{other}.md").unlink()
+    report = cs.doctor(root)
+    assert sorted(report["page_mismatches"]) == sorted([cid, other])
+
+
+# erase is terminal (Minor 1, re-graded Important) ------------------------------
+
+def test_erase_is_terminal(root):
+    cid = _add(root)
+    with kr.operation(writer="test", root=root):
+        cl.erase(cid, reason_class="client_request", actor="a", root=root)
+    for call in (
+        lambda: cl.revise(cid, reason="r", text="resurrected", actor="a", method="human",
+                          root=root),
+        lambda: cl.retract(cid, reason="r", basis=[], actor="a", method="agent", root=root),
+        lambda: cl.supersede(cid, text="t", source=SRC, evidence=Q2, reason="r", actor="a",
+                             method="human", root=root),
+    ):
+        with kr.operation(writer="test", root=root):
+            with pytest.raises(cs.ClaimRefused) as ei:
+                call()
+        assert ei.value.code == "CLAIM_ERASED"
+    assert cl.current(root)[cid].status == "erased" and cl.current(root)[cid].text is None
+
+
+# validated inputs (Minor 3, re-graded Important) --------------------------------
+
+@pytest.mark.parametrize("kw", [{"valid_from": "next tuesday"}, {"valid_until": "soon"},
+                                {"project": "Client X"}])
+def test_valid_time_and_project_are_validated(root, kw):
+    with kr.operation(writer="test", root=root):
+        with pytest.raises(ValueError):
+            cl.add("x", SRC, Q, confidence="high", actor="a", method="human", root=root, **kw)
+    assert cl.current(root) == {}
+
+
+def test_valid_dates_and_slug_accepted(root):
+    cid = _add(root, valid_from="2026-11-09", valid_until="2026-11-16T00:00:00+11:00",
+               project="acme")
+    assert cl.current(root)[cid].valid_from == "2026-11-09"

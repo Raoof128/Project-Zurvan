@@ -444,6 +444,19 @@ def doctor(root=None) -> dict:
                     out["dangling_cids"].append(cid)
     finally:
         conn.close()
-    from scripts import claim_pages
-    out["page_mismatches"] = claim_pages.conflicts(root)
+    from scripts import claim_ledger, claim_pages
+    from scripts.claim_visibility import _front
+    mismatches = set(claim_pages.conflicts(root))
+    # Final review 2026-11-14 (I5): page/ledger agreement, not only self-consistency.
+    # Derived views trust the page's `status`, so a stale or missing page matters.
+    for cid, state in claim_ledger.current(root).items():
+        page = claim_pages.page_path(state, root)
+        if not page.exists():
+            mismatches.add(cid)
+            continue
+        fm = _front(page)
+        if (fm.get("status") != state.status
+                or fm.get("generated_from_mutation") != state.mutation_id):
+            mismatches.add(cid)
+    out["page_mismatches"] = sorted(mismatches)
     return out
