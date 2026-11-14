@@ -152,10 +152,11 @@ def _anchor(root, source, quote, reader):
 
 
 def _store_evidence(conn, source, a, reader, location_hint=None):
+    capsule = a.get("capsule")
     return {"source_ref_cid": cs.put_content(conn, "source_ref", source),
             "selector_cid": cs.put_content(conn, "selector",
                                            json.dumps(a["selector"], sort_keys=True)),
-            "capsule_cid": cs.put_content(conn, "capsule", a["capsule"]),
+            "capsule_cid": cs.put_content(conn, "capsule", capsule) if capsule is not None else None,
             "location_hint_cid": (cs.put_content(conn, "location_hint", location_hint)
                                   if location_hint else None),
             "reader": reader}
@@ -216,7 +217,8 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         valid_until=None, project=None, actor, method, reader="utf8", claim_type=None,
         extraction_key=None, legacy_id=None, observed_at_legacy=None,
         observed_at_legacy_source=None, location_hint=None, status="asserted",
-        extra_evidence=(), root=None, _migrating=False) -> str:
+        extra_evidence=(), root=None, _migrating=False, _unanchored=False,
+        _normalised=False) -> str:
     _check_vocab(confidence, basis, method)
     with _Session(root, _migrating) as s:
         claim_id = _add_in(s, text, source, evidence, confidence=confidence, basis=basis,
@@ -226,7 +228,8 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
                        legacy_id=legacy_id, observed_at_legacy=observed_at_legacy,
                        observed_at_legacy_source=observed_at_legacy_source,
                        location_hint=location_hint, status=status,
-                       extra_evidence=extra_evidence)
+                       extra_evidence=extra_evidence, unanchored=_unanchored,
+                       normalised=_normalised)
     _write_pages(root, claim_id)
     return claim_id
 
@@ -234,9 +237,23 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
 def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, valid_until,
             project, actor, method, reader, claim_type, extraction_key, legacy_id,
             observed_at_legacy, observed_at_legacy_source, location_hint, status,
-            relations=None, extra_evidence=()) -> str:
+            relations=None, extra_evidence=(), unanchored=False, normalised=False) -> str:
     quotes = ([(evidence, location_hint)] if evidence is not None else []) + list(extra_evidence)
-    anchored = [(_anchor(s.root, source, q, reader), loc) for q, loc in quotes]
+    if unanchored:
+        # Migration only: a legacy quote whose source is gone or changed keeps its
+        # provenance (source + quote) without a fingerprint it never had.
+        anchored = [({"selector": {"TextQuoteSelector": {"exact": q, "prefix": "", "suffix": ""},
+                                   "TextPositionSelector": {"start": None, "end": None},
+                                   "state": {"sha256": None, "bytes": None,
+                                             "captured_at": cs._now()}},
+                      "capsule": None}, loc) for q, loc in quotes]
+    elif normalised:
+        # Migration only: a legacy quote that matches its source only after
+        # whitespace normalisation (spec §7.4 `moved_normalised`).
+        anchored = [(ce.anchor_normalised(source, q, reader, s.root, cs._now()), loc)
+                    for q, loc in quotes]
+    else:
+        anchored = [(_anchor(s.root, source, q, reader), loc) for q, loc in quotes]
     s.plan()
     ev_rows = [_store_evidence(s.conn, source, a, reader, loc) for a, loc in anchored]
     claim_id = cs.new_claim_id()
@@ -521,6 +538,15 @@ def _stub_legacy(legacy_dir, legacy_id, reason_class, now) -> dict | None:
     finally:
         os.chmod(d, dir_mode)
     return {"kind": "legacy_copy", "where": str(target), "action": "stubbed"}
+
+
+def _orphan(claim_id, *, reason, actor, method, root=None) -> int:
+    """Internal (migration): mark a claim orphaned with a reason."""
+    with _Session(root, migrating=True) as s:
+        rev = _next(s, claim_id, event="orphan", status="orphaned", actor=actor,
+                    method=method, reason=reason, expected_rev=None)["rev"]
+    _write_pages(kr.ks.store_root(root), claim_id)
+    return rev
 
 
 def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,

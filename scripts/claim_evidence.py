@@ -134,3 +134,56 @@ def resolve(selector: dict, source_ref: str, reader: str, root) -> tuple:
     if len(norm_hits) > 1:
         return "ambiguous", f"{len(norm_hits)} matches after whitespace normalisation"
     return "changed", "quote not found"
+
+
+def _norm_map(text: str) -> tuple:
+    """(normalised text, index map) - every whitespace run becomes one space;
+    map[i] is the original index of normalised char i."""
+    out, idx, i = [], [], 0
+    while i < len(text):
+        if text[i].isspace():
+            j = i
+            while j < len(text) and text[j].isspace():
+                j += 1
+            out.append(" ")
+            idx.append(i)
+            i = j
+        else:
+            out.append(text[i])
+            idx.append(i)
+            i += 1
+    return "".join(out), idx
+
+
+def anchor_normalised(source_ref: str, quote: str, reader: str, root, now: str) -> dict:
+    """Migration only (spec §7.8): a legacy quote that matches its source only after
+    whitespace normalisation. `exact` keeps the legacy quote verbatim (provenance);
+    the position, context and fingerprint describe the real span in the source, so
+    `resolve` reports `intact` while the file is unchanged and `moved_normalised`
+    after it moves. Refuses unless the normalised quote occurs exactly once."""
+    try:
+        raw, text = read_source(source_ref, reader, root)
+    except (SourceUnavailable, SourceUndecodable) as exc:
+        raise ClaimRefused("EVIDENCE_REJECTED", f"source unreadable: {exc}") from None
+    if quote is None or not quote.strip():
+        raise ClaimRefused("EVIDENCE_REJECTED", "evidence quote is empty")
+    norm_text, idx = _norm_map(text)
+    needle = _norm(quote).strip()
+    hits = _occurrences(norm_text, needle)
+    if len(hits) != 1:
+        raise ClaimRefused("EVIDENCE_REJECTED",
+                           f"normalised quote found {len(hits)} times (need exactly 1)")
+    start = idx[hits[0]]
+    last = idx[hits[0] + len(needle) - 1]
+    end = last + 1
+    return {
+        "selector": {
+            "TextQuoteSelector": {"exact": quote,
+                                  "prefix": text[max(0, start - CONTEXT):start],
+                                  "suffix": text[end:end + CONTEXT]},
+            "TextPositionSelector": {"start": start, "end": end},
+            "state": {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                      "captured_at": now},
+        },
+        "capsule": text[max(0, start - CAPSULE):end + CAPSULE],
+    }
