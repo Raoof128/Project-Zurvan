@@ -289,8 +289,11 @@ nothing; `memory.add_claim` reads with `open().read()`, `extract.py` with `extra
   Every manifest digest is prefixed `scope=<version>` (`knowledge_manifest.py:43`), so a bump alone would make the next
   operation mint an `EXTERNAL_OBSERVED` revision for an edit nobody made. Instead `knowledge_state` records
   `scope_version`; a stored digest of an older scope version is never compared as drift. The migration operation is the
-  one that switches the store to v2 and commits the first v2 digest; it then rebuilds the search index and graph (their
-  `built_from_manifest` stamps go INVALID by design, `derived_health.py:57`) before reporting success.
+  one that switches the store to v2 and commits the first v2 digest. The search index and graph (whose
+  `built_from_manifest` stamps go INVALID by design, `derived_health.py:57`) are rebuilt by separate commands right
+  after it: a rebuild waits for live operations, and the CLI wraps `migrate` in one (`cli.py:1334`), so an in-command
+  rebuild would wait on itself (found by the plan gauntlet). Until migration has run, every claim write refuses
+  `MIGRATION_REQUIRED`, so a store with the new code but legacy pages is never half-converted.
 - `wiki/claims/` stays inside
   the manifest (pages are written inside the same operation through `safe_write`, so a revision covers ledger and pages
   together).
