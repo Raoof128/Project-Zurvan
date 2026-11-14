@@ -460,3 +460,113 @@ def history(claim_id, root=None) -> list:
         return out
     finally:
         conn.close()
+
+
+# ----------------------------------------------------------------- erasure (spec §7.7)
+
+ERASE_REASONS = ("client_request", "personal_data", "legal", "owner_request")
+ERASE_BOUND = ("erasure removes the claim from the live store and its derived views; copies "
+               "outside the live store are listed, not guaranteed removed; deleted "
+               "rollback-journal and freed filesystem blocks are not overwritten.")
+
+
+def _claim_cids(conn, claim_id) -> list:
+    cids = []
+    for row in conn.execute("SELECT text_cid, reason_cid, tags_cid, extraction_key_cid"
+                            " FROM revisions WHERE claim_id = ?", (claim_id,)):
+        cids += [c for c in row if c]
+    for row in conn.execute("SELECT source_ref_cid, selector_cid, capsule_cid,"
+                            " location_hint_cid FROM evidence WHERE claim_id = ?", (claim_id,)):
+        cids += [c for c in row if c]
+    return sorted(set(cids))
+
+
+def _stub_legacy(legacy_dir, legacy_id, reason_class, now) -> dict | None:
+    import os
+    import stat as _stat
+    from pathlib import Path
+    d = Path(legacy_dir)
+    target = d / f"{legacy_id}.md"
+    if not target.exists():
+        return None
+    dir_mode = _stat.S_IMODE(d.stat().st_mode)
+    os.chmod(d, dir_mode | 0o200)
+    try:
+        for p in (target, d / "MANIFEST.json"):
+            if p.exists():
+                os.chmod(p, 0o644)
+        target.write_text(f"# Claim\n(erased {now[:10]}: {reason_class})\n", encoding="utf-8")
+        os.chmod(target, 0o444)
+        manifest_path = d / "MANIFEST.json"
+        manifest = (json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if manifest_path.exists() else {"files": {}})
+        manifest.setdefault("erased", {})[target.name] = {"at": now, "reason_class": reason_class}
+        manifest_path.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n",
+                                 encoding="utf-8")
+        os.chmod(manifest_path, 0o444)
+    finally:
+        os.chmod(d, dir_mode)
+    return {"kind": "legacy_copy", "where": str(target), "action": "stubbed"}
+
+
+def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
+          method="human") -> dict:
+    """Blank every body the claim references, append an `erase` revision, rewrite
+    its page (and pages that quote it) as stubs, VACUUM, and REPORT the copies
+    this cannot reach. The hash chain stays valid: it never covered bodies."""
+    import glob as _glob
+    from pathlib import Path
+    if reason_class not in ERASE_REASONS:
+        raise ValueError(f"reason_class must be one of {ERASE_REASONS}")
+    base = kr.ks.store_root(root)
+    now = cs._now()
+    with _Session(base) as s:
+        prev = s.latest(claim_id)
+        if prev is None:
+            raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
+        s.plan()
+        text_before = cs.get_content(s.conn, prev["text_cid"]) or ""
+        legacy_id = s.conn.execute("SELECT legacy_id FROM claims WHERE claim_id = ?",
+                                   (claim_id,)).fetchone()[0]
+        related = sorted({r for pair in s.conn.execute(
+            "SELECT from_claim, to_claim FROM relations WHERE from_claim = ? OR to_claim = ?",
+            (claim_id, claim_id)) for r in pair} - {claim_id})
+        cids = _claim_cids(s.conn, claim_id)
+        s.conn.execute(f"UPDATE content SET body = NULL, erased_at = ?, erase_reason_class = ?"
+                       f" WHERE cid IN ({','.join('?' * len(cids))})", [now, reason_class, *cids])
+        rev = _next(s, claim_id, event="erase", status="erased", actor=actor, method=method,
+                    reason=f"erased: {reason_class}", expected_rev=None)["rev"]
+    conn = cs.connect(base)
+    try:
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+    _write_pages(base, claim_id, *[r for r in related if r in current(base)])
+
+    residue = []
+    search = base / "data" / "search.sqlite"
+    if search.exists():
+        residue.append({"kind": "search_index", "where": str(search),
+                        "action": "rebuild with `zurvan index search` to drop the old page"})
+    for snap in sorted((base / "data" / "snapshots").glob("*")) if (base / "data" / "snapshots").is_dir() else []:
+        if (snap / "claims.sqlite").exists() or any(snap.rglob("wiki/claims/*.md")):
+            residue.append({"kind": "snapshot", "where": str(snap),
+                            "action": "held until its lease expires; `zurvan knowledge gc`"})
+    if legacy_id:
+        dirs = [legacy_dir] if legacy_dir else sorted(
+            _glob.glob(str(Path.home() / ".zurvan" / "z2" / "claims-legacy-*")))
+        for d in dirs:
+            stub = _stub_legacy(d, legacy_id, reason_class, now)
+            if stub:
+                residue.append(stub)
+    if text_before:
+        for f in sorted((base / "data" / "extractions").glob("*.json")) if (base / "data" / "extractions").is_dir() else []:
+            try:
+                if text_before in f.read_text(encoding="utf-8", errors="replace"):
+                    residue.append({"kind": "extraction_json", "where": str(f),
+                                    "action": "raw model output; delete by hand if required"})
+            except OSError:
+                pass
+    residue.append({"kind": "time_machine", "where": "backups",
+                    "action": "out of Zurvan's reach"})
+    return {"rev": rev, "residue": residue, "bound": ERASE_BOUND}

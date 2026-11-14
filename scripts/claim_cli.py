@@ -99,6 +99,11 @@ def register(subparsers) -> None:
     ad.add_argument("claim_id")
     ad.add_argument("--reason", required=True)
     ad.add_argument("--actor", default=None)
+    er = sub.add_parser("erase", help="Erase a claim's content (client/personal data); history stays")
+    er.add_argument("claim_id")
+    er.add_argument("--reason-class", dest="reason_class", required=True,
+                    choices=("client_request", "personal_data", "legal", "owner_request"))
+    er.add_argument("--actor", default=None)
     sub.add_parser("doctor", help="Chain, integrity, invisible rows, dangling cids, edited pages")
     rg = sub.add_parser("regenerate", help="Rewrite pages from the ledger")
     rg.add_argument("claim_id", nargs="?")
@@ -188,6 +193,9 @@ def dispatch(args) -> int:
         elif action == "adopt":
             rev = cp.adopt(args.claim_id, actor=actor, reason=args.reason)
             print(json.dumps({"claim_id": args.claim_id, "rev": rev}))
+        elif action == "erase":
+            out = cl.erase(args.claim_id, reason_class=args.reason_class, actor=actor)
+            print(json.dumps(out, sort_keys=True))
         elif action == "doctor":
             from scripts import claim_store
             report = claim_store.doctor()
