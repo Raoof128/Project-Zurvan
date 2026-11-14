@@ -386,3 +386,64 @@ def acquire_for_operation(root=None, timeout_s: float = 30.0) -> None:
             op._claims_lock_fd = None
 
     kr.at_operation_end(_release)
+
+
+def reconcile_ok(path, planned_pages=()) -> bool:
+    """Is a claims.sqlite written by a crashed operation coherent? (spec §7.2)
+
+    Integrity check, the hash chain, and every claim page the mutation planned
+    exists. Used by `knowledge_reconcile`, whose text parser cannot read SQLite.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None)
+    except sqlite3.Error:
+        return False
+    try:
+        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            return False
+        ok, _ = chain_ok(conn)
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return ok and all(Path(p).exists() for p in planned_pages)
+
+
+def doctor(root=None) -> dict:
+    """Health of the claim store: chain, integrity, invisible rows, dangling cids,
+    hand-edited pages. Read-only."""
+    from scripts import knowledge_revision as _kr
+    out = {"chain_ok": True, "chain_problem": None, "integrity": "absent",
+           "invisible_rows": [], "dangling_cids": [], "page_mismatches": []}
+    if not db_path(root).exists():
+        return out
+    conn = connect(root, readonly=True)
+    try:
+        out["integrity"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        out["chain_ok"], out["chain_problem"] = chain_ok(conn)
+        visible = _kr.belief_revisions(root)
+        states = {}
+        try:
+            reg = sqlite3.connect(f"file:{_kr.db_path(root)}?mode=ro", uri=True)
+            states = dict(reg.execute("SELECT mutation_id, state FROM mutations"))
+            reg.close()
+        except sqlite3.Error:
+            pass
+        for claim_id, rev, mutation_id in conn.execute(
+                "SELECT claim_id, rev, mutation_id FROM revisions ORDER BY seq"):
+            if mutation_id not in visible:
+                out["invisible_rows"].append((claim_id, rev, states.get(mutation_id, "UNKNOWN")))
+        cols = (("revisions", ("text_cid", "reason_cid", "tags_cid", "extraction_key_cid")),
+                ("evidence", ("source_ref_cid", "selector_cid", "capsule_cid",
+                              "location_hint_cid")))
+        for table, names in cols:
+            for name in names:
+                for (cid,) in conn.execute(
+                        f"SELECT {name} FROM {table} WHERE {name} IS NOT NULL AND {name} NOT IN"
+                        " (SELECT cid FROM content)"):
+                    out["dangling_cids"].append(cid)
+    finally:
+        conn.close()
+    from scripts import claim_pages
+    out["page_mismatches"] = claim_pages.conflicts(root)
+    return out
