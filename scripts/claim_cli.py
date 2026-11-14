@@ -94,6 +94,10 @@ def register(subparsers) -> None:
     li.add_argument("--status")
     when(li)
 
+    ve = sub.add_parser("verify", help="Re-check every claim's evidence (intact/moved/.../gone)")
+    ve.add_argument("claim_ids", nargs="*")
+    ve.add_argument("--apply", action="store_true",
+                    help="write orphan/restore revisions when the outcome class changed")
     sub.add_parser("conflicts", help="Claims whose page has unadopted hand edits")
     ad = sub.add_parser("adopt", help="Turn a hand-edited page into a revision")
     ad.add_argument("claim_id")
@@ -187,6 +191,11 @@ def dispatch(args) -> int:
             else:
                 for s in items:
                     _print_state(s, False)
+        elif action == "verify":
+            out = cl.verify(args.claim_ids or None, apply=args.apply)
+            print(json.dumps({k: out[k] for k in ("counts", "integrity_rate", "written")},
+                             sort_keys=True, default=str))
+            print(out["disclaimer"])
         elif action == "conflicts":
             for cid in cp.conflicts():
                 print(cid)

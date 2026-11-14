@@ -312,7 +312,17 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
         status = s.latest(claim_id)
         if status is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", claim_id)
-        rev = _next(s, claim_id, event="revise", status=status["status"], actor=actor,
+        new_status = status["status"]
+        if new_status == "orphaned":
+            # Anti-goal (spec §4): an orphaned claim returns only on evidence that
+            # re-resolves, never by assertion.
+            if evidence is None:
+                raise cs.ClaimRefused("RESTORE_REFUSED",
+                                      f"{claim_id} is orphaned; attach new evidence "
+                                      "(--source/--evidence) or let `claim verify --apply` "
+                                      "restore it when its evidence resolves again")
+            new_status = "asserted"
+        rev = _next(s, claim_id, event="revise", status=new_status, actor=actor,
                     method=method, reason=reason, expected_rev=expected_rev,
                     **changes)["rev"]
     _write_pages(root, claim_id)
@@ -570,3 +580,78 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
     residue.append({"kind": "time_machine", "where": "backups",
                     "action": "out of Zurvan's reach"})
     return {"rev": rev, "residue": residue, "bound": ERASE_BOUND}
+
+
+# ----------------------------------------------------------------- verify (spec §7.4)
+
+VERIFY_DISCLAIMER = "evidence integrity measures anchoring, not truth"
+_ANCHORED = ("intact", "moved", "moved_normalised")
+
+
+def _outcome_class(outcomes) -> str:
+    if any(o in _ANCHORED for o in outcomes):
+        return "anchored"
+    if outcomes and all(o in ("gone", "changed") for o in outcomes):
+        return "broken"
+    return "ambiguous"
+
+
+def _status_before_orphan(claim_id, root) -> str:
+    for h in reversed(history(claim_id, root)):
+        if h["status"] not in ("orphaned",):
+            return h["status"]
+    return "asserted"
+
+
+def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
+    """Re-resolve every claim's evidence. Read-only unless `apply`: then an
+    `orphan` revision when ALL evidence is gone/changed, a `restore` when an
+    orphaned claim's evidence is anchored again - each only when the outcome
+    class changed, never for `ambiguous`. Manual only; nothing schedules it."""
+    base = kr.ks.store_root(root)
+    now = current(base)
+    targets = sorted(claim_ids) if claim_ids else sorted(now)
+    counts = {o: 0 for o in ce.OUTCOMES}
+    per_claim, written, skipped = {}, [], []
+    for cid in targets:
+        state = now.get(cid)
+        if state is None or state.status == "erased":
+            continue
+        outcomes = []
+        for ev in state.evidence:
+            if not ev.get("selector") or not ev.get("source"):
+                continue
+            outcome, _ = ce.resolve(ev["selector"], ev["source"], ev.get("reader", "utf8"), base)
+            outcomes.append(outcome)
+            counts[outcome] += 1
+        if not outcomes:
+            continue
+        per_claim[cid] = outcomes
+        if not apply:
+            continue
+        cls = _outcome_class(outcomes)
+        if cls in ("broken", "anchored"):
+            from scripts import claim_pages
+            if claim_pages.has_unadopted_edit(cid, base):
+                skipped.append(cid)          # never regenerate over a hand edit
+                continue
+        if cls == "broken" and state.status in CURRENT_STATUSES:
+            with _Session(base) as s:
+                r = _next(s, cid, event="orphan", status="orphaned", actor="verifier",
+                          method="verifier", reason="evidence " + ", ".join(outcomes),
+                          expected_rev=None)["rev"]
+            _write_pages(base, cid)
+            written.append((cid, r, "orphan"))
+        elif cls == "anchored" and state.status == "orphaned":
+            restored = _status_before_orphan(cid, base)
+            with _Session(base) as s:
+                r = _next(s, cid, event="restore", status=restored, actor="verifier",
+                          method="verifier", reason="evidence " + ", ".join(outcomes),
+                          expected_rev=None)["rev"]
+            _write_pages(base, cid)
+            written.append((cid, r, "restore"))
+    total = sum(counts.values())
+    anchored = sum(counts[o] for o in _ANCHORED)
+    return {"counts": counts, "integrity_rate": (anchored / total) if total else None,
+            "claims": per_claim, "written": written, "skipped_edited": skipped,
+            "disclaimer": VERIFY_DISCLAIMER}
