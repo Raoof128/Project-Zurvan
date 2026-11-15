@@ -291,3 +291,26 @@ def test_a_quote_matching_twice_after_normalising_is_ambiguous_not_orphaned(root
         v = cl.verify(apply=True, root=root)
     assert v["claims"][s7.claim_id] == ["ambiguous"]
     assert cl.current(root)[s7.claim_id].status == "asserted"      # verify agrees: never orphan
+
+
+# Test gap from the final review, closed 2026-11-15: no end-to-end run of the
+# real (non-dry) `claim migrate` command. It became safe to write once a test
+# store's migration files stopped defaulting to the real ~/.zurvan/z2.
+def test_migrate_cli_real_run_reports_and_keeps_files_beside_the_store(root, monkeypatch,
+                                                                       tmp_path_factory):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    home = tmp_path_factory.mktemp("home")
+    repo = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, ZURVAN_ROOT=str(root), PYTHONPATH=str(repo), HOME=str(home))
+    res = subprocess.run([sys.executable, str(repo / "scripts" / "cli.py"), "claim", "migrate"],
+                         capture_output=True, text=True, env=env, cwd=str(repo))
+    assert res.returncode == 0, res.stderr
+    out = json.loads(res.stdout)
+    assert out["provenance_mismatches"] == [] and out["imported"] == 6
+    assert out["legacy_dir"].startswith(str(root / ".zurvan-z2"))
+    assert out["derived_rebuild_required"] is True
+    assert not (home / ".zurvan" / "z2").exists()
+    assert "zurvan index search" in res.stderr
