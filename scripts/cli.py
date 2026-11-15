@@ -382,6 +382,10 @@ def _main():
     # zurvan claim ... (Z2 claim ledger: scripts/claim_cli.py)
     from scripts import claim_cli
     claim_cli.register(subparsers)
+
+    # zurvan bench rtbench ... (IOU-Z2-5 record-time benchmark: scripts/rtbench/cli.py)
+    from scripts.rtbench import cli as rtbench_cli
+    rtbench_cli.register(subparsers)
     
     # zurvan question add
     question_parser = subparsers.add_parser("question", help="Manage open questions")
@@ -1028,6 +1032,11 @@ def _main():
     elif args.command == "claim":
         from scripts import claim_cli
         code = claim_cli.dispatch(args)
+        if code:
+            sys.exit(code)
+    elif args.command == "bench":
+        from scripts.rtbench import cli as rtbench_cli
+        code = rtbench_cli.dispatch(args)
         if code:
             sys.exit(code)
     elif args.command == "question" and args.action == "add":
