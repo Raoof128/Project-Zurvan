@@ -113,6 +113,7 @@ historical/current views reconstruct correctly); every claim writer goes through
   quoted a retracted claim is not rewritten. Owner: Z6.
 - **IOU-Z2-4 PDF/image/media locators.** Z2 supports text-quote locators only. For a PDF source (`extract.py --source x.pdf`)
   the quote is anchored in the text `extract_text` produced, not in a page region. Owner: whichever phase first cites a non-text region.
+  **Closed:** PDF pages 2026-11-15f (`pdf_pages@1`), image regions 2026-11-16 (`image_region@1`, schema v2).
 - **IOU-Z2-5 a public record-time benchmark** built from §8's oracle. Owner: Z2 follow-up, after the gate passes.
 - Contradiction detection (Z7), calibrated probabilities (never without a calibration set, canonical §6.3).
 
