@@ -347,9 +347,11 @@ def retract(claim_id, *, reason, basis, actor, method, expected_rev=None, root=N
     _check_vocab(None, basis, method)
     _refuse_if_edited(claim_id, root)
     with _Session(root) as s:
+        # The basis says why it was WITHDRAWN; confidence_basis says why it was
+        # believed, so it stays, and the retraction basis goes in the reason.
+        why = f"{reason} (retraction basis: {', '.join(basis)})" if basis else reason
         rev = _next(s, claim_id, event="retract", status="retracted", actor=actor,
-                    method=method, reason=reason, expected_rev=expected_rev,
-                    confidence_basis=json.dumps(list(basis)) if basis else None)["rev"]
+                    method=method, reason=why, expected_rev=expected_rev)["rev"]
     _write_pages(root, claim_id)
     return rev
 
@@ -548,8 +550,10 @@ ERASE_BOUND = ("erasure removes the claim from the live store and its derived vi
 
 
 def _claim_cids(conn, claim_id) -> list:
+    # The extraction key (sha256 of the source bytes + the model's claim id) holds
+    # no content and is KEPT: blanking it let re-extraction recreate the claim.
     cids = []
-    for row in conn.execute("SELECT text_cid, reason_cid, tags_cid, extraction_key_cid"
+    for row in conn.execute("SELECT text_cid, reason_cid, tags_cid"
                             " FROM revisions WHERE claim_id = ?", (claim_id,)):
         cids += [c for c in row if c]
     for row in conn.execute("SELECT source_ref_cid, selector_cid, capsule_cid,"

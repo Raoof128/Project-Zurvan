@@ -262,3 +262,18 @@ def test_mcp_claim_add_still_explains_a_non_verbatim_quote(root):
                                       "high", [])
     assert out.startswith("Error: failed to add claim"), out
     assert "EVIDENCE_REJECTED" in out and "verbatim" in out
+
+
+# Deferred minor, fixed 2026-11-15: erase blanked the extraction key, so
+# re-extracting the same source RECREATED the erased client claim. The key is
+# sha256(file bytes):model claim id - no content - so it is kept, and an
+# erased claim is never re-asserted by re-extraction.
+def test_reextraction_never_recreates_an_erased_claim(root):
+    rel = _src(root, "client.md", "Client.")
+    _extract(rel)
+    (cid,) = cl.current(root)
+    with kr.operation(writer="cli"):
+        cl.erase(cid, reason_class="client_request", actor="local:t", root=root)
+    _extract(rel)
+    assert list(cl.current(root)) == [cid]
+    assert cl.current(root)[cid].status == "erased"

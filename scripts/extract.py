@@ -60,6 +60,8 @@ def plan_claim_records(data: dict, file_sha: str) -> list[dict]:
         key = f"{file_sha}:{claim['claim_id']}"
         quotes = [ev["quote"] for ev in claim["evidence"]]
         existing = claim_ledger.find_by_extraction_key(key)
+        if existing is not None and existing.status == "erased":
+            continue          # erasure is final: never re-assert it from the source
         if existing is not None:
             have = sorted((e.get("selector") or {}).get("TextQuoteSelector", {}).get("exact", "")
                           for e in existing.evidence)
