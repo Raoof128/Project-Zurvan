@@ -146,3 +146,26 @@ def test_legacy_id_keeps_its_filename(root):
                      actor="migration", method="migration", legacy_id="claim-0015d220",
                      root=root, _migrating=True)
     assert cp.page_path(cl.current(root)[cid], root).name == "claim-0015d220.md"
+
+
+# Deferred minor from the final review, fixed 2026-11-15: conflicts, regenerate
+# and verify --apply re-read the whole ledger once PER CLAIM (has_unadopted_edit
+# and write_page each called cl.current). On the live store (556 claims)
+# `claim conflicts` took 18 s. The ledger is now read once per command.
+@pytest.mark.parametrize("call", ["conflicts", "regenerate", "verify_apply"])
+def test_whole_store_commands_read_the_ledger_a_bounded_number_of_times(root, monkeypatch,
+                                                                         call):
+    for i in range(6):
+        _add(root, text=f"claim {i}")
+    reads = []
+    real = cl.current
+    monkeypatch.setattr(cl, "current", lambda r=None: reads.append(1) or real(r))
+    if call == "conflicts":
+        cp.conflicts(root)
+    elif call == "regenerate":
+        with kr.operation(writer="test", root=root):
+            cp.regenerate(root=root)
+    else:
+        with kr.operation(writer="test", root=root):
+            cl.verify(apply=True, root=root)
+    assert len(reads) <= 2, f"{call} read the ledger {len(reads)} times for 6 claims"

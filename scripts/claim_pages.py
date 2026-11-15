@@ -110,8 +110,10 @@ def _page_text_ok(text: str) -> bool:
     return _digest(_HASH_LINE.sub("", text, count=1)) == m.group(1)
 
 
-def has_unadopted_edit(claim_id, root=None) -> bool:
-    state = cl.current(root).get(claim_id)
+def has_unadopted_edit(claim_id, root=None, now=None) -> bool:
+    """`now`: the caller's `cl.current` map, so a whole-store command reads the
+    ledger once instead of once per claim (18 s for 556 claims before)."""
+    state = (now if now is not None else cl.current(root)).get(claim_id)
     if state is None:
         return False
     path = page_path(state, root)
@@ -137,11 +139,11 @@ def _superseded_texts(claim_id, root, now) -> list:
     return [now[o].text for o in olds if o in now and now[o].text is not None]
 
 
-def write_page(claim_id, root=None, *, force: bool = False) -> Path:
-    now = cl.current(root)
+def write_page(claim_id, root=None, *, force: bool = False, now=None) -> Path:
+    now = now if now is not None else cl.current(root)
     state = now[claim_id]
     path = page_path(state, root)
-    if not force and path.exists() and has_unadopted_edit(claim_id, root):
+    if not force and path.exists() and has_unadopted_edit(claim_id, root, now):
         raise cs.ClaimRefused("CLAIM_CONFLICT", f"{path.name} has unadopted edits")
     text = render(state, cl.history(claim_id, root), _superseded_texts(claim_id, root, now),
                   generated_from_mutation=state.mutation_id)
@@ -151,7 +153,8 @@ def write_page(claim_id, root=None, *, force: bool = False) -> Path:
 
 
 def conflicts(root=None) -> list:
-    return sorted(cid for cid in cl.current(root) if has_unadopted_edit(cid, root))
+    now = cl.current(root)
+    return sorted(cid for cid in now if has_unadopted_edit(cid, root, now))
 
 
 _CLAIM_TEXT = re.compile(r"^# Claim\n(.*?)(?:\n\n## Evidence|\Z)", re.S | re.M)
@@ -178,10 +181,11 @@ def adopt(claim_id, *, actor, reason, root=None) -> int:
 
 def regenerate(claim_id=None, *, force: bool = False, root=None) -> list:
     """Rewrite pages from the ledger. An edited page is skipped unless `force`."""
-    targets = [claim_id] if claim_id else sorted(cl.current(root))
+    now = cl.current(root)
+    targets = [claim_id] if claim_id else sorted(now)
     written = []
     for cid in targets:
-        if not force and has_unadopted_edit(cid, root):
+        if not force and has_unadopted_edit(cid, root, now):
             continue
-        written.append(write_page(cid, root, force=True))
+        written.append(write_page(cid, root, force=True, now=now))
     return written

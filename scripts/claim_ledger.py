@@ -242,8 +242,9 @@ def _refuse_if_edited(claim_id, root):
 
 def _write_pages(root, *claim_ids):
     from scripts import claim_pages
+    now = current(root) if claim_ids else {}
     for cid in claim_ids:
-        claim_pages.write_page(cid, root, force=True)
+        claim_pages.write_page(cid, root, force=True, now=now)
 
 
 # ----------------------------------------------------------------- writes
@@ -710,7 +711,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
         cls = _outcome_class(outcomes)
         if cls in ("broken", "anchored"):
             from scripts import claim_pages
-            if claim_pages.has_unadopted_edit(cid, base):
+            if claim_pages.has_unadopted_edit(cid, base, now):
                 skipped.append(cid)          # never regenerate over a hand edit
                 continue
         if cls == "broken" and state.status in CURRENT_STATUSES:
