@@ -15,6 +15,11 @@ class ExtractionConflict(RuntimeError):
     """A claim page this extraction would write belongs to a different source."""
 
 
+class ExtractionRefused(RuntimeError):
+    """This exact source file had a claim erased; extracting it again would write
+    the erased fact back into the raw JSON, summary and concepts."""
+
+
 def source_identity(filepath: str, source_text: str) -> tuple[str, str]:
     """`(source_id, content_hash)`: the id names the content, not the path.
 
@@ -115,6 +120,14 @@ def extract_source(filepath):
         return
 
     basename = os.path.basename(filepath)
+    from scripts import claim_ledger
+    with open(filepath, "rb") as f:
+        if claim_ledger.source_has_erased_claim(hashlib.sha256(f.read()).hexdigest()):
+            # Checked before the model call: the file is not sent to a model again.
+            raise ExtractionRefused(
+                f"{basename}: a claim extracted from this exact file was erased; extracting "
+                "it again would write the erased fact back into the raw JSON, summary and "
+                "concepts. Nothing was written")
 
     # 1. Read the source Markdown/text
     source_text = extract_text(filepath)

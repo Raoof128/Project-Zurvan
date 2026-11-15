@@ -265,15 +265,40 @@ def test_mcp_claim_add_still_explains_a_non_verbatim_quote(root):
 
 
 # Deferred minor, fixed 2026-11-15: erase blanked the extraction key, so
-# re-extracting the same source RECREATED the erased client claim. The key is
-# sha256(file bytes):model claim id - no content - so it is kept, and an
-# erased claim is never re-asserted by re-extraction.
-def test_reextraction_never_recreates_an_erased_claim(root):
+# re-extracting the same source RECREATED the erased client claim. Security
+# review the same day: the raw key ends with the model's own claim id (which a
+# model may make descriptive), and a re-extraction also rewrites the raw JSON,
+# summary and concepts, which can restate the erased fact. Erase now leaves a
+# tombstone holding only the source file's hash, and extraction REFUSES that
+# exact file before writing anything.
+def test_reextraction_of_a_source_with_an_erased_claim_is_refused(root):
+    from scripts import claim_store as cs
+    from scripts import extract
     rel = _src(root, "client.md", "Client.")
     _extract(rel)
     (cid,) = cl.current(root)
     with kr.operation(writer="cli"):
         cl.erase(cid, reason_class="client_request", actor="local:t", root=root)
-    _extract(rel)
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()
+              and "claims.sqlite" not in p.name and p.name != "registry.sqlite"}
+    revision = kr.current(root).revision
+    called = []
+    real = extract.run_llm
+    extract.run_llm = lambda *a, **k: called.append(1) or real(*a, **k)
+    try:
+        with pytest.raises(extract.ExtractionRefused):
+            _extract(rel)
+    finally:
+        extract.run_llm = real
+    assert called == []                       # the file was not sent to a model again
+    after = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()
+             and "claims.sqlite" not in p.name and p.name != "registry.sqlite"}
+    assert after == before and kr.current(root).revision == revision
     assert list(cl.current(root)) == [cid]
-    assert cl.current(root)[cid].status == "erased"
+    conn = cs.connect(root, readonly=True)
+    try:
+        bodies = [r[0] for r in conn.execute(
+            "SELECT body FROM content WHERE kind = 'extraction_key'")]
+    finally:
+        conn.close()
+    assert len(bodies) == 1 and bodies[0].startswith("erased:") and ":claim" not in bodies[0]
