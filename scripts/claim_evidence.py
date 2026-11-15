@@ -21,7 +21,10 @@ from pathlib import Path
 from scripts.claim_store import ClaimRefused
 from scripts.evidence_admission import EvidenceRejected, admit_quote
 
-READERS = ("utf8", "extract_text@1")
+READERS = ("utf8", "extract_text@1", "pdf_pages@1")
+PDF_READER = "pdf_pages@1"   # IOU-Z2-4: pypdf, one text per page, never merged or normalised
+PAGE_BREAK = "\f"           # joins the pages; a quote can never contain it
+RFC3778 = "http://tools.ietf.org/rfc/rfc3778"
 OUTCOMES = ("intact", "moved", "moved_normalised", "ambiguous", "changed", "gone")
 CONTEXT = 32          # TextQuoteSelector prefix/suffix length
 CAPSULE = 64          # capsule context each side
@@ -61,6 +64,8 @@ def read_source(source_ref: str, reader: str, root) -> tuple:
         if reader == "utf8":
             with open(path, "r", encoding="utf-8", errors="strict") as f:
                 text = f.read()
+        elif reader == PDF_READER:
+            text = PAGE_BREAK.join(_pdf_pages(path))
         else:
             from scripts.ingest import extract_text
             text = extract_text(str(path))
@@ -69,6 +74,27 @@ def read_source(source_ref: str, reader: str, root) -> tuple:
     except OSError as exc:
         raise SourceUnavailable(f"{type(exc).__name__}: {exc.strerror or exc}") from None
     return raw, text
+
+
+def _pdf_pages(path) -> list:
+    """Per-page text of a PDF, exactly as pypdf extracts it."""
+    try:
+        import pypdf
+        return [page.extract_text() or "" for page in pypdf.PdfReader(str(path)).pages]
+    except OSError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - pypdf raises many types on a bad file
+        raise SourceUndecodable(f"not a readable PDF: {type(exc).__name__}: {exc}") from None
+
+
+def _extractor() -> str:
+    import pypdf
+    return f"pypdf {pypdf.__version__}"
+
+
+def page_of(text: str, pos: int) -> int:
+    """1-based page number of character `pos` in a `pdf_pages@1` text."""
+    return text.count(PAGE_BREAK, 0, pos) + 1
 
 
 def anchor(source_ref: str, quote: str, reader: str, root, now: str) -> dict:
@@ -84,7 +110,7 @@ def anchor(source_ref: str, quote: str, reader: str, root, now: str) -> dict:
         raise ClaimRefused("EVIDENCE_REJECTED", str(exc)) from None
     start = text.index(quote)
     end = start + len(quote)
-    return {
+    out = {
         "selector": {
             "TextQuoteSelector": {"exact": quote,
                                   "prefix": text[max(0, start - CONTEXT):start],
@@ -95,6 +121,12 @@ def anchor(source_ref: str, quote: str, reader: str, root, now: str) -> dict:
         },
         "capsule": text[max(0, start - CAPSULE):end + CAPSULE],
     }
+    if reader == PDF_READER:
+        # W3C FragmentSelector conforming to RFC 3778 (PDF fragment identifiers).
+        out["selector"]["FragmentSelector"] = {"conformsTo": RFC3778,
+                                               "value": f"page={page_of(text, start)}"}
+        out["selector"]["state"]["extractor"] = _extractor()
+    return out
 
 
 def _occurrences(text: str, needle: str) -> list:
@@ -161,15 +193,24 @@ def resolve(selector: dict, source_ref: str, reader: str, root, cache=None) -> t
     exact, prefix, suffix = quote["exact"], quote["prefix"], quote["suffix"]
     if hashlib.sha256(raw).hexdigest() == selector["state"]["sha256"]:
         return "intact", None
+    frag = (selector.get("FragmentSelector") or {}).get("value", "")
+    was = int(frag[len("page="):]) if reader == PDF_READER and frag.startswith("page=") else None
+
+    def where(pos, how=""):
+        if was is None:
+            return f"at {pos}{how}"
+        now = page_of(text, pos)
+        return f"page {was}" + (f" -> page {now}" if now != was else "") + how
+
     hits = _occurrences(text, exact)
     if len(hits) == 1:
-        return "moved", f"at {hits[0]}"
+        return "moved", where(hits[0])
     if len(hits) > 1:
         ctx = [h for h in hits
                if text[max(0, h - len(prefix)):h] == prefix
                and text[h + len(exact):h + len(exact) + len(suffix)] == suffix]
         if len(ctx) == 1:
-            return "moved", f"at {ctx[0]} (by context)"
+            return "moved", where(ctx[0], " (by context)")
         return "ambiguous", f"{len(hits)} matches, {len(ctx)} with the recorded context"
     norm_hits = _occurrences(_norm(text), _norm(exact))
     if len(norm_hits) == 1:
