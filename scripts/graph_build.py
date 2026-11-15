@@ -34,6 +34,8 @@ def parse_frontmatter(content: str) -> Tuple[Dict[str, str], str]:
             fm_text = parts[1]
             body = parts[2]
             for line in fm_text.splitlines():
+                if line.lstrip().startswith('- '):
+                    continue      # a list item ("client: haji" tag), never a key
                 if ':' in line:
                     k, v = line.split(':', 1)
                     frontmatter[k.strip()] = v.strip().strip('"').strip("'")
