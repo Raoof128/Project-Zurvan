@@ -122,8 +122,11 @@ interval is not evidence it was false). This is the benchmark's own stated rule,
 `revise` changes no answer: it is a distractor that a system must not mistake for a new value (Q3 after a revise
 returns the same token). `noise` is a distractor that advances `t`.
 
-Questions are sampled to stress transitions. At least half of Q1–Q4 sit at a `t` immediately before or after a
-change to the asked slot, because a system that only knows "now" passes questions far from change points.
+Questions are sampled to stress transitions. At least half of Q1–Q4 sit at a change point: the tick at which a
+statement of the asked slot ended (retract and erase endings weighted twice), or a tick while a later-erased
+statement was believed. A system that only knows "now", or that keeps every value without corrections, passes
+questions far from those points. (Revised prospectively after the plan's gauntlet, 15 Nov 2026: sampling at
+"before or after any change" let the append-only baseline reach 0.667.)
 
 ### 6.2 Reference oracle
 
@@ -202,7 +205,8 @@ remember history. The Zurvan adapter maps each tick to the knowledge revision it
 through `as_of_revision`, `valid_at` and `history`. It writes one source file per case holding each statement's text
 on its own line (the verbatim evidence quote), stores the statement as claim text, and records the slot in a tag
 (`rtslot:<id>`). The baselines read the same structured slot field from the Track S event, so no adapter gets
-information another lacks. A miss caused by the adapter's mapping is an adapter defect and is named as one. Aborts raise inside `kr.operation`; `noise` uses
+information another lacks. A miss caused by the adapter's mapping is an adapter defect and is named as one. Aborts raise inside `kr.operation` before the claim write by default; a second adapter raises after it, because
+Zurvan's reconcile adopts a failed operation's landed claim (Z2 §7.2) and that cost is measured, not hidden; `noise` uses
 `write_file_safely`; each case gets its own temporary `ZURVAN_ROOT`.
 
 ## 9. CLI and outputs
