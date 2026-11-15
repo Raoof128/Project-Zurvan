@@ -79,9 +79,27 @@ def apply(path, *, actor, root=None) -> list:
     rows = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
     approved = [r for r in rows if r.get("approved") is True]
     current = cl.current(root)
+    # Every check `revise` would make, for every entry, before the first write
+    # (final review I1): a refusal halfway left pages rewritten and the store SUSPECT.
+    from scripts import claim_pages as cp
+    seen = set()
     for r in approved:
-        if r.get("claim_id") not in current:
-            raise ValueError(f"unknown claim {r.get('claim_id')!r}")
+        cid = r.get("claim_id")
+        if cid not in current:
+            raise ValueError(f"unknown claim {cid!r}")
+        if cid in seen:
+            raise ValueError(f"{cid} is approved twice")
+        seen.add(cid)
+        st = current[cid]
+        if r.get("rev") is None:
+            raise ValueError(f"{cid}: the proposal has no rev; re-run --propose")
+        if int(r["rev"]) != st.rev:
+            raise ValueError(f"{cid} is at rev {st.rev}, the proposal was made at rev {r['rev']}; "
+                             "re-run --propose")
+        if st.status not in cl.CURRENT_STATUSES:
+            raise ValueError(f"{cid} is {st.status}, not current")
+        if cp.has_unadopted_edit(cid, root):
+            raise ValueError(f"{cid}: its page has unadopted edits (`zurvan claim adopt` first)")
         normalise(r.get("subject"), r.get("predicate"), r.get("object"))
     written = []
     for r in approved:

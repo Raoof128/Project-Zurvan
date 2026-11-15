@@ -120,3 +120,12 @@ def test_cli_add_and_verify_a_pdf_claim(root):
     v = run("verify", cid)
     assert v.returncode == 0, v.stderr
     assert json.loads(v.stdout.splitlines()[0])["counts"].get("intact") == 1
+
+
+def test_a_quote_on_two_pages_is_refused_at_anchor(root):                  # I2 (design §4.2)
+    from scripts.claim_store import ClaimRefused
+    _pdf(root / PDF, ["Orrin Mill is in Halden.", OUTPUT, "Again: Orrin Mill is in Halden."])
+    with pytest.raises(ClaimRefused) as exc:
+        _add(root, "is in Halden")
+    assert exc.value.code == "EVIDENCE_AMBIGUOUS"
+    assert cl.current(root) == {}

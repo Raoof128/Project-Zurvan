@@ -224,6 +224,8 @@ def _next(s, claim_id, *, event, status, actor, method, reason, expected_rev, **
         row["text_cid"] = cs.put_content(s.conn, "text", row.pop("text"))
     if "tags" in row:
         row["tags_cid"] = cs.put_content(s.conn, "tags", json.dumps(list(row.pop("tags"))))
+    if "triple" in row:
+        row.update(_spo_columns(s.conn, row.pop("triple")))
     if "anchored" in row:
         src, a, rdr = row.pop("anchored")
         row["evidence"] = [_store_evidence(s.conn, src, a, rdr)]
@@ -372,9 +374,29 @@ def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, v
         "observed_at_legacy": observed_at_legacy,
         "observed_at_legacy_source": observed_at_legacy_source,
         "evidence": ev_rows, "relations": relations or [],
-        **({"subject_id": triple[0], "predicate_id": triple[1], "object_json": triple[2]}
-           if triple else {})})
+        **(_spo_columns(s.conn, triple) if triple else {})})
     return claim_id
+
+
+def _spo_columns(conn, triple) -> dict:
+    """The revision columns for a triple. The subject and the object can be personal
+    data, so (final review 2026-11-15, C1) they are stored as CONTENT and the columns
+    `subject_id` / `object_json` hold their cids: `erase` blanks them like the text.
+    The predicate is vocabulary and stays inline."""
+    return {"subject_id": cs.put_content(conn, "spo_subject", triple[0]),
+            "predicate_id": triple[1],
+            "object_json": cs.put_content(conn, "spo_object", triple[2])}
+
+
+def _spo_values(conn, row) -> tuple:
+    """(subject, predicate, object) of a revision row; all None if unset or erased."""
+    if not row["predicate_id"]:
+        return None, None, None
+    subj = cs.get_content(conn, row["subject_id"])
+    obj = cs.get_content(conn, row["object_json"])
+    if subj is None or obj is None:
+        return None, None, None
+    return subj, row["predicate_id"], json.loads(obj)
 
 
 def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_from=None,
@@ -444,7 +466,7 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
                    "valid_until": valid_until, "text": text, "tags": tags,
                    "confidence_basis": json.dumps(list(basis)) if basis is not None else None}
         if triple:
-            changes.update(subject_id=triple[0], predicate_id=triple[1], object_json=triple[2])
+            changes["triple"] = triple
         if evidence is not None:
             changes["anchored"] = (source, _anchor(s.root, source, evidence, reader), reader)
         status = s.latest(claim_id)
@@ -522,9 +544,8 @@ def _state(conn, row, rows_by_claim) -> ClaimState:
                       valid_from=row["valid_from"], valid_until=row["valid_until"],
                       evidence=evidence, legacy_id=claim["legacy_id"],
                       scope_project=claim["scope_project"], claim_type=row["claim_type"],
-                      mutation_id=row["mutation_id"], subject=row["subject_id"],
-                      predicate=row["predicate_id"],
-                      object=json.loads(row["object_json"]) if row["object_json"] else None)
+                      mutation_id=row["mutation_id"],
+                      **dict(zip(("subject", "predicate", "object"), _spo_values(conn, row))))
 
 
 def _belief(root, vis, upto) -> dict:
@@ -613,7 +634,8 @@ def history(claim_id, root=None) -> list:
                         "reason": cs.get_content(conn, r["reason_cid"]),
                         "recorded_at": r["recorded_at"],
                         "belief_revision": None if b == float("inf") else b,
-                        "mutation_id": r["mutation_id"]})
+                        "mutation_id": r["mutation_id"],
+                        **dict(zip(("subject", "predicate", "object"), _spo_values(conn, r)))})
         return out
     finally:
         conn.close()
@@ -645,9 +667,9 @@ def source_has_erased_claim(file_sha: str, root=None) -> bool:
 def _claim_cids(conn, claim_id) -> list:
     # The extraction key is not blanked here: erase turns it into a tombstone.
     cids = []
-    for row in conn.execute("SELECT text_cid, reason_cid, tags_cid"
+    for row in conn.execute("SELECT text_cid, reason_cid, tags_cid, subject_id, object_json"
                             " FROM revisions WHERE claim_id = ?", (claim_id,)):
-        cids += [c for c in row if c]
+        cids += [c for c in row if c and c.startswith("cnt_")]   # S-P-O: cids since C1
     for row in conn.execute("SELECT source_ref_cid, selector_cid, capsule_cid,"
                             " location_hint_cid FROM evidence WHERE claim_id = ?", (claim_id,)):
         cids += [c for c in row if c]

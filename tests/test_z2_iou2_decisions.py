@@ -151,3 +151,43 @@ def test_python_and_rust_tool_lists_include_the_tool():
     assert "zurvan_decision_supersede" in {t["name"] for t in fixture["tools"]}
     rs = (REPO / "rust" / "zurvan-mcp" / "src" / "bridge.rs").read_text()
     assert '"zurvan_decision_supersede" => ("decision_supersede", true)' in rs
+
+
+@pytest.mark.parametrize("fail_on", ["old", "new"])
+def test_a_failed_page_write_leaves_a_retryable_state(store, fail_on):   # I4
+    a, b = _decide(store, "Old rule"), _decide(store, "New rule")
+    target = a if fail_on == "old" else b
+    code = (
+        "import sys, scripts.memory as m\n"
+        "real = m.write_file_safely\n"
+        "def flaky(p, c):\n"
+        f"    if p.endswith('{target.name}'): raise OSError('disk full')\n"
+        "    return real(p, c)\n"
+        "m.write_file_safely = flaky\n"
+        "from scripts import knowledge_revision as kr\n"
+        "try:\n"
+        "    with kr.operation(writer='test'):\n"
+        f"        m.supersede_decision('{a.stem}', '{b.stem}', 'r')\n"
+        "except OSError: print('failed as planned')\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=_env(store), cwd=str(REPO))
+    assert "failed as planned" in r.stdout, r.stderr
+    from scripts import knowledge_revision as kr
+    if kr.current(store).state == kr.SUSPECT:
+        assert subprocess.run([sys.executable, str(REPO / "scripts" / "cli.py"), "knowledge", "reconcile"],
+                              capture_output=True, text=True, env=_env(store), cwd=str(REPO)).returncode == 0
+    r = zurvan(store, "decision", "supersede", a.stem, "--by", b.stem, "--reason", "retry")
+    assert r.returncode == 0, r.stderr
+    assert _fm(b)[0]["supersedes"].strip().strip('"') == a.stem          # not "a, a"
+    assert _fm(a)[0]["superseded_by"].strip().strip('"') == b.stem
+
+
+def test_cross_project_supersession_is_refused(store):                     # I5
+    a = _decide(store, "Rule in orrin")
+    r = zurvan(store, "decision", "add", "--title", "Rule in halden", "--reason", "x", "--status", "accepted",
+               "--project", "halden")
+    assert r.returncode == 0, r.stderr
+    b = sorted((store / "wiki" / "decisions").glob("*.md"), key=lambda p: p.stat().st_mtime_ns)[-1]
+    before = kr.current(store).revision
+    r = zurvan(store, "decision", "supersede", a.stem, "--by", b.stem, "--reason", "r")
+    assert r.returncode == 1 and "DECISION_PROJECT_MISMATCH" in r.stderr
+    assert kr.current(store).revision == before

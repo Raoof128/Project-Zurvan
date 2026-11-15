@@ -108,6 +108,13 @@ def anchor(source_ref: str, quote: str, reader: str, root, now: str) -> dict:
         admit_quote(quote, text)
     except EvidenceRejected as exc:
         raise ClaimRefused("EVIDENCE_REJECTED", str(exc)) from None
+    if reader == PDF_READER and len(_occurrences(text, quote)) > 1:
+        # Design §4.2 (final review I2): a page locator for a quote that occurs more
+        # than once would name one page silently. Quote more of the passage.
+        pages = sorted({page_of(text, h) for h in _occurrences(text, quote)})
+        raise ClaimRefused("EVIDENCE_AMBIGUOUS",
+                           f"the quote occurs {len(_occurrences(text, quote))} times "
+                           f"(pages {', '.join(map(str, pages))}); quote a longer passage")
     start = text.index(quote)
     end = start + len(quote)
     out = {

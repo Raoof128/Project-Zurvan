@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
 from datetime import date
 from functools import lru_cache
@@ -19,7 +18,6 @@ from pathlib import Path
 from scripts.filename_utils import sanitize_filename
 
 _VOCAB = Path(__file__).with_name("claim_predicates.json")
-_SLUG = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @lru_cache(maxsize=1)
@@ -31,7 +29,9 @@ def entity_id(name) -> str:
     """`ent:<slug>` from a name or an existing id."""
     raw = str(name or "").strip()
     slug = raw[len("ent:"):] if raw.startswith("ent:") else sanitize_filename(raw)
-    if not slug or not _SLUG.match(slug) or not slug.strip("_-"):
+    # The entity page stem keeps any Unicode letter or digit (`sanitize_filename`),
+    # so "Müller AG" and Persian names are entities too (final review I3).
+    if not slug or not all(c.isalnum() or c in "_-" for c in slug) or not slug.strip("_-"):
         raise ValueError(f"subject/entity must name an entity, got {name!r}")
     return f"ent:{slug}"
 
