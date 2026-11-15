@@ -775,6 +775,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     counts = {o: 0 for o in ce.OUTCOMES}
     per_claim, written, skipped, details = {}, [], [], {}
     unmounted = []
+    reads = {}                               # one read per (source, reader) this run
     for cid in targets:
         state = now.get(cid)
         if state is None or state.status == "erased":
@@ -784,7 +785,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
             if not ev.get("selector") or not ev.get("source"):
                 continue
             outcome, detail = ce.resolve(ev["selector"], ev["source"], ev.get("reader", "utf8"),
-                                         base)
+                                         base, cache=reads)
             outcomes.append(outcome)
             details.setdefault(cid, []).append(
                 {"outcome": outcome, "source": ev["source"], "detail": detail})

@@ -126,10 +126,28 @@ def unmounted_volume(source_ref: str, root) -> str | None:
     return None
 
 
-def resolve(selector: dict, source_ref: str, reader: str, root) -> tuple:
-    """(outcome, detail). Never raises for an unreadable or undecodable source."""
+def _read_cached(source_ref, reader, root, cache):
+    """read_source, memoised per (source, reader) for one verify run: a PDF used
+    by many claims was re-parsed once per claim. Errors are cached too."""
+    if cache is None:
+        return read_source(source_ref, reader, root)
+    key = (source_ref, reader)
+    if key not in cache:
+        try:
+            cache[key] = ("ok", read_source(source_ref, reader, root))
+        except Exception as exc:  # noqa: BLE001 - re-raised below, for every claim
+            cache[key] = ("err", exc)
+    kind, value = cache[key]
+    if kind == "err":
+        raise value
+    return value
+
+
+def resolve(selector: dict, source_ref: str, reader: str, root, cache=None) -> tuple:
+    """(outcome, detail). Never raises for an unreadable or undecodable source.
+    `cache`: a dict shared across one run, so each source is read once."""
     try:
-        raw, text = read_source(source_ref, reader, root)
+        raw, text = _read_cached(source_ref, reader, root, cache)
     except SourceUnavailable as exc:
         mount = unmounted_volume(source_ref, root)
         if mount:
