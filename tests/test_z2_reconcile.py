@@ -94,3 +94,53 @@ def test_doctor_cli(root):
                          capture_output=True, text=True, env=env, cwd=str(REPO))
     assert res.returncode == 0, res.stderr
     assert '"chain_ok": true' in res.stdout
+
+
+# Deferred minor from the final review, fixed 2026-11-15: a writer that dies
+# mid-transaction leaves `claims.sqlite-journal` (a hot journal). A read-only
+# connection cannot roll it back, so every reader failed with
+# SQLITE_READONLY_ROLLBACK - `_connect_ro` callers saw it at the first query,
+# and `reconcile_ok` returned False, so the store could never be reconciled.
+_HOT = r'''
+import os, sqlite3, sys
+c = sqlite3.connect(sys.argv[1], isolation_level=None)
+c.execute("PRAGMA cache_size=1")
+c.execute("BEGIN IMMEDIATE")
+c.execute("INSERT INTO content(cid, kind, body) SELECT 'cnt_hot' || i, 'text', "
+          "hex(randomblob(2000)) FROM (WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL "
+          "SELECT i + 1 FROM r WHERE i < 300) SELECT i FROM r)")
+os._exit(0)
+'''
+
+
+def _leave_hot_journal(root):
+    subprocess.run([sys.executable, "-c", _HOT, str(cs.db_path(root))], check=True)
+    journal = Path(str(cs.db_path(root)) + "-journal")
+    assert journal.exists() and journal.stat().st_size > 0
+    return journal
+
+
+def test_a_reader_names_a_hot_journal_instead_of_crashing_or_going_empty(root):
+    with kr.operation(writer="test", root=root):
+        cid = cl.add("kept", SRC, Q, confidence="high", actor="a", method="human", root=root)
+    _leave_hot_journal(root)
+    with pytest.raises(cs.ClaimRefused) as ei:
+        cl.current(root)
+    assert ei.value.code == "CLAIMS_STORE_RECOVERY_NEEDED"
+    assert "knowledge reconcile" in ei.value.detail
+    assert cid  # the claim is not silently reported missing
+
+
+def test_reconcile_rolls_back_a_hot_journal_left_by_a_crashed_claim_write(root):
+    with kr.operation(writer="test", root=root):
+        kept = cl.add("kept", SRC, Q, confidence="high", actor="a", method="human", root=root)
+    _crash_after_claim(root)
+    journal = _leave_hot_journal(root)
+    assert krec.reconcile(root, actor="test")["status"] == "CLEAN"
+    assert not journal.exists()
+    assert kept in cl.current(root)
+    assert cs.doctor(root)["integrity"] == "ok"
+    assert kr.current(root).state == kr.CLEAN
+    with kr.operation(writer="test", root=root):              # no drift recorded later
+        cl.add("after", SRC, Q, confidence="high", actor="a", method="human", root=root)
+    assert kr.external_observations(root) == []
