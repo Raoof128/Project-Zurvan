@@ -162,3 +162,27 @@ def test_apply_never_orphans_a_claim_whose_volume_is_unmounted(tmp_path, monkeyp
     assert cl.current(root)[cid].status == "asserted"
     assert out["skipped_unmounted"] == [cid]
     assert "not mounted" in out["details"][cid][0]["detail"]
+
+
+# Deferred minor, fixed 2026-11-15: verify re-read (and for a PDF, re-parsed)
+# the same source once per claim. One read per source and reader per run.
+def test_verify_reads_each_source_once(tmp_path, monkeypatch):
+    from scripts import claim_evidence as ce
+    root = tmp_path
+    monkeypatch.setenv("ZURVAN_ROOT", str(root))
+    (root / "data").mkdir()
+    (root / "wiki" / "sources").mkdir(parents=True)
+    (root / "wiki" / "claims").mkdir(parents=True)
+    (root / "wiki" / "sources" / "one.md").write_text("alpha fact\nbeta fact\ngamma fact\n",
+                                                     encoding="utf-8")
+    kr.ensure_schema(root)
+    with kr.operation(writer="test", root=root):
+        for q in ("alpha fact", "beta fact", "gamma fact"):
+            cl.add(q, "wiki/sources/one.md", q, confidence="high", actor="a", method="human",
+                   root=root)
+    reads = []
+    real = ce.read_source
+    monkeypatch.setattr(ce, "read_source", lambda *a: reads.append(a[0]) or real(*a))
+    out = cl.verify(root=root)
+    assert out["counts"]["intact"] == 3
+    assert reads == ["wiki/sources/one.md"]
