@@ -241,3 +241,24 @@ def test_mcp_claim_show_never_leaks_context_from_an_unreadable_source(root):
     tools.tool_zurvan_claim_add("ok", "wiki/decisions/ev.md", "the evidence line", "high", [])
     ok_id = next(c for c in cl.current(root) if c != cid)
     assert "more" in tools.tool_zurvan_claim_show(ok_id)
+
+
+# Deferred minor from the final review, fixed 2026-11-15: every refused MCP
+# claim_add said "Ensure evidence ... exists verbatim", even when the ledger
+# refused for another reason (a store awaiting migration, a SUSPECT store).
+def test_mcp_claim_add_names_the_real_refusal(root):
+    from scripts import mcp_tools as tools
+    (root / "wiki" / "claims" / "claim-legacy01.md").write_text(
+        "---\ntype: claim\n---\n# Claim\nold\n", encoding="utf-8")
+    out = tools.tool_zurvan_claim_add("mcp fact", "wiki/decisions/ev.md", "the evidence line",
+                                      "high", [])
+    assert out.startswith("Error: failed to add claim"), out
+    assert "MIGRATION_REQUIRED" in out and "verbatim" not in out
+
+
+def test_mcp_claim_add_still_explains_a_non_verbatim_quote(root):
+    from scripts import mcp_tools as tools
+    out = tools.tool_zurvan_claim_add("mcp fact", "wiki/decisions/ev.md", "not in the file",
+                                      "high", [])
+    assert out.startswith("Error: failed to add claim"), out
+    assert "EVIDENCE_REJECTED" in out and "verbatim" in out
