@@ -3,6 +3,47 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-14 (Australia/Sydney) — On suite `97d564c6d51b048b`: gates 4, 5, 8 and 9 PASSED, tamper drill PASS; budget 5; Z1b NOT closed (only the live "ninth run refused" of gate 4 is missing; Raouf kept the budget)
+
+Raouf:
+- **Scope:** Package B, continued from 2026-11-13b. Raouf said "proceed".
+- **Host check before spending:** load average 2.02 (from 77.7 at 15:16 on 11-13). Worktree `.worktrees/z1b-gate4` clean at `dfef49a`; not stale; budget 7; open incidents 0; every scan target carries the `zurvaneval` ACL.
+- **Gate 4: PASSED.** A NEW measurement under the unchanged pre-registered limits (`query_timeout_s` 30, `run_timeout_s` 3600); 2026-11-13b run 1 stays recorded as FAILED.
+  - Run 1, 18:40:28–18:51:02: `ok`, `seal_valid: true`, `n_items` 160, `target_missing` 0. Recall@1 **0.627**, @3 **0.826**, @10 **0.897**, MRR **0.760**. Latency p50/p95 5000 ms (public ladder), peak RSS 1024 MB (ladder). Abstain 10, **passed 0**. Budget 7 → **6**. Load at the end: 5.63.
+  - Run 2: identical, `cached: true`, budget unchanged at 6.
+  - **Not comparable with 11-13** (0.922 @10, MRR 0.849): those were on the 61 items the burns left, these are on all 160.
+  - **The candidate never abstained correctly (0/10 on `not_found`).** Gate 4 does not test this; it is a real retrieval weakness, recorded for Z2.
+- **Gate 5: PASSED.**
+  - First attempt with `--commit c753dbf`: refused `DECLARATION_INVALID`, uncharged. The client reads the declaration committed AT the candidate commit, and at `c753dbf` it names the retired suite `bedc01c1dce53b46`.
+  - The probe was rebuilt as `2c426bd`, on the local branch `z1b-gate5-probe-97d564c6`, never merged: the tree of `dfef49a` with ONLY `scripts/z1b_candidate.py` taken from `c753dbf`. The blob is identical (checked by `git rev-parse`).
+  - Run, 18:57:24–19:00:56: `CANDIDATE_FAILED`, charged (budget 6 → **5**). `/tmp/z1b-escape-probe` absent before and after; open incidents 0; holdout/reserve still 160/80.
+- **Gate 8: PASSED.** The committed `eval/z1b/manifest.json` (suite `97d564c6d51b048b`, seq 6, holdout 160 / reserve 80, `short: []`, `burn_ledger: []`) has SHA-256 `3dff0612…`, equal to the `suite_manifest_sha256` the broker returned in the gate 4 result. Live status after gate 5 is 160/80.
+- **seal-check after the runs:** `ok: true`, 25/25, every sealed path EACCES to the dev identity.
+- **Unknown commit refused (gate 4 live proof, "dirty/unknown refused").** `run --commit 0123…4567` (a commit that does not exist) returned `CANDIDATE_NOT_FROZEN`, uncharged; budget stayed 5. A dirty checkout was already refused live on 2026-11-13 (`CANDIDATE_NOT_FROZEN`, untracked spec file).
+- **Tamper drill: PASS** (gate 1b/3 oracle), run by Raouf at 19:11: `sudo bash scripts/eval_seal/tamper_drill.sh; sudo -k` printed `DRILL PASS`. Afterwards:
+  - the wrapper's ctime is 19:11:16 (so the drill really ran), its SHA-256 is back to the sudoers pin `390b6134…`, and no `.bak` remains;
+  - seal-check is 25/25 (the ticket was dropped);
+  - budget 5, open incidents 0, holdout/reserve 160/80.
+  - The drill overlapped the red-team. A broker call refused in that window can only refuse, never leak, so the gate 9 result stands.
+- **Gate 9: PASSED.** A fresh Sonnet agent, given the plan's brief verbatim, in an isolated worktree, as the dev user, reported **FAILURE**: no holdout/reserve query, target page or canary obtained. Transcript `~/.zurvan/reports/z1b-redteam-2026-11-14.jsonl` (0600); it contains no `zc-` canary-shaped token. What it tried:
+  - grammar fuzz of the broker door (every attempt returned `BAD_ARGS`, exit 2, carrying only the code and the sha);
+  - `run` with well-formed nonexistent bundles (no output, uncharged);
+  - `broker scan` (clean);
+  - a canary grep over the repo and recent transcripts (none);
+  - a read of the installed broker source (0444, closed serializers, stderr discarded, `python3 -I`, `env_reset`/`!setenv`).
+  - Its direct read of sealed paths was blocked by the harness; the dev EACCES on every sealed path is covered by seal-check.
+  - Its note that the tracked manifest names a different suite is about its OWN worktree base, which was older than `HEAD`, probably the unpushed remote's `main`. `HEAD`'s `eval/z1b/manifest.json` names `97d564c6d51b048b`.
+  - It analysed, without running, the known residual channel: the candidate shapes its public metrics, about 3 bits per item per run. That is the bounded covert channel already accepted in decision G20 (≤ ~56 bits per declared run). It is not a leak of an item.
+- **Verdict: Z1b is NOT CLOSED, by Raouf's decision.** Every gate has live evidence, except one part of gate 4's live proof (`tests/test_z1b_closure.py` `LIVE_PROOF["4"]`): the ninth run refused once the budget is spent (`SUITE_RENEWAL_REQUIRED`). It is unit-tested (`test_t10_eight_runs_then_the_ninth_is_suite_renewal_required`, `test_t7_eight_reserves_then_ninth_needs_renewal`) but has never been shown on the real broker. Showing it now would spend the last 5 runs. Raouf chose to keep them for Z2 promotions. The criterion is NOT redefined: it stays open until a suite's budget runs out on the real broker.
+- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). No code changed. Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`), not merged, not pushed. Outside the repo: `~/.zurvan/reports/z1b-redteam-2026-11-14.jsonl`.
+- **Verification:** the commands and outputs above. Code unchanged since `dfef49a` (`-k z1b`: 1831 passed / 5 skipped / 0 failed). `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Z1b closes when the real broker refuses a run because the budget is spent (`SUITE_RENEWAL_REQUIRED`, uncharged): on this suite after its 5 remaining runs, or on a later suite.
+  - (2) Z2 candidate work: the candidate never abstains correctly (0/10 `not_found`).
+  - (3) Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`) is kept as gate 5 evidence; never merge it.
+  - (4) Open question: should a charged run refuse (uncharged) under host overload?
+  - (5) Rotate the sudo password.
+
 ### 2026-11-13b (Australia/Sydney) — Fresh suite `97d564c6d51b048b` SEALED (HOLDOUT 160 / RESERVE 80, budget 8); seal-check 25/25; gate 4 run 1 FAILED `CANDIDATE_FAILED` (query 16 read timeout, host overloaded); Z1b NOT closed
 
 Raouf:
