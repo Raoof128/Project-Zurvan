@@ -88,6 +88,23 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-11-15c (Australia/Sydney) — IOU-Z2-6 closed: a claim that stops being current leaves search and context at once, in Python and in the Rust MCP
+
+Raouf:
+- **Scope:** Raouf asked for the open items to be worked through autonomously after the 2026-11-15b close-out. IOU-Z2-6 was the only one that needed no decision from him. Branch `z2-iou6`, rebased and fast-forwarded to `main` at `ee7cb60`.
+- **Problem:** the chunker skips a non-current claim page (§7.5a), but only when the index is rebuilt. Until `zurvan index search` ran, search and `context` kept serving a superseded, retracted, orphaned or erased claim, from the CLI, the Python MCP and the Rust MCP. Keyword mode had no filter at all, so it served such a page always, not only until a rebuild.
+- **Fix, each with a test that failed first:**
+  - **Python** (`hybrid_search.search_hybrid(hide_root=...)`): each claim hit's frontmatter is re-read from the live store; a non-current hit is dropped and the scan reruns with its chunks excluded until a pass hides nothing new, so the result is still refilled to `limit`. `context_export._search_internal` passes the store's own root; its keyword scan skips such pages.
+  - **Rust** (`rust/zurvan-mcp/src/claims.rs`, a port of `claim_visibility.py`): `hybrid_once` widens top-k by the number hidden and filters; both keyword paths (cache and uncached scan) skip such pages.
+  - **Measurements are unchanged by construction:** `eval_search` and Z1b pass an explicit snapshot `db_path` and no `hide_root`, so they read frozen bytes only (`test_a_snapshot_search_is_unchanged`). No eval re-run was needed for that path; the ranking of every non-hidden result is unchanged.
+  - The CLI hint now says what still waits for a rebuild: a new or restored claim, and the graph.
+  - The Z2 closure matrix lists the new tests under G12.
+- **Files:** `scripts/{hybrid_search,context_export,claim_cli}.py`, `rust/zurvan-mcp/src/{claims,search,keyword,lib}.rs`, `tests/test_z2_query_time_visibility.py` (new), `tests/test_z2_closure.py`.
+- **Verification:** 11 new Python tests and 3 new Rust tests, each seen failing first. Branch suite 3948 passed / 4 failed (the same four worktree-only failures as 2026-11-15b); those four plus the new file on `main`: 15 passed. `cargo test --release` 120 lib + integration tests passed, `cargo clippy --all-targets` clean, `tests/test_mcp_rust_parity.py` 8 passed. `check.sh` was NOT re-run after the merge; the last full gate is 2026-11-15b's at `f5fe668`. `public_repo_guard.py` and `git diff --check` before each commit.
+- **Rust MCP installed:** previous binary kept as `~/.zurvan/bin/zurvan-mcp.2026-11-15.bak` (sha256 `b241648c…`, hard link); new one copied and `mv`'d over (sha256 `2430b873…`, 10,460,576 bytes). `codesign -v` ok; `initialize` answers 3.0.0; `tools/list` returns 19; a live `zurvan_search` returns the same results as the previous binary. Rollback: `mv ~/.zurvan/bin/zurvan-mcp.2026-11-15.bak ~/.zurvan/bin/zurvan-mcp`. Sessions started earlier keep the old binary until restarted.
+- **Host note:** a cold MCP search and the live eval are disk-bound on this machine today (gate 6 took ~55 min; the four live-store tests 39 min).
+- **Follow-ups:** IOU-Z2-1…5 need design (S-P-O, decision supersession Z7, retraction propagation into summaries, PDF/media locators, a public benchmark). Z1b still NOT closed (the live ninth-run refusal; Raouf kept the budget). Rotate the sudo password.
+
 ### 2026-11-15b (Australia/Sydney) — Z2 follow-ups: all final-review minors fixed, IOU-Z2-7 and -8 closed on the live store, two security findings fixed; G5's live counts now reconcile
 
 Raouf:
@@ -115,50 +132,3 @@ Raouf:
 - **Skills:** user-level `zurvan` skill (Claude Code and Codex, identical) gained the erase, re-extraction, unmounted-disk and error-code behaviour. The repo's tracked copy (`.claude/skills/zurvan/SKILL.md`) gained a Z2 claims section (`2756d60`).
 - **Verification:** branch suite 3933 passed / 4 failed (the four worktree-only failures: no live wiki, graph or index) after one run that caught the smoke-test write above; `bash scripts/check.sh` on `main`: all 25 gates passed, exit 0: gate 0 Boundary red team 27/27, gate 1 guard passed, gate 2 pytest **3941 passed / 0 failed / 9 skipped** (37:05), gate 5 index 459,113 chunks healthy, gate 6 Top-1 72% / Top-3 74% (legacy capture, UNVERIFIED; the eval took ~55 min on a disk-bound host); store CLEAN at 3471, search and graph COHERENT+CURRENT. `public_repo_guard.py` and `git diff --check` before each commit.
 - **Follow-ups:** IOU-Z2-1…6 unchanged (entry 2026-11-15). Z1b still NOT closed. Rotate the sudo password.
-
-### 2026-11-15 (Australia/Sydney) — Z2 claim ledger merged to `main` and the live store migrated: 551 claims in `data/claims.sqlite`, 0 provenance mismatches; retrieval unchanged; first run crashed and was restored; G5's live criterion NOT met exactly
-
-Raouf:
-- **Scope:** Roadmap package C (Z2). Plan `docs/superpowers/plans/2026-11-14-z2-claim-ledger.md`, tasks 1–15; spec `docs/superpowers/specs/2026-11-14-z2-claim-ledger-design.md`. Raouf said the other sessions were paused and to run the migration.
-- **What changed:** claims now live in an append-only, hash-chained ledger (`data/claims.sqlite`) and every `wiki/claims/*.md` page is generated from it. New commands `zurvan claim supersede | retract | revise | show | history | list | verify | conflicts | adopt | erase | migrate | doctor | regenerate`; four new MCP tools (`zurvan_claim_supersede`, `_retract`, `_show`, `_history`), 19 in total. Superseded, retracted, orphaned and erased claims leave search, context, the graph and the recall digest after a rebuild. The knowledge scope is version 2 and includes `data/claims.sqlite`.
-- **Merge:** `main` fast-forwarded `7b91ffa` → `1e0bf1f` (17 commits of branch `z2-claim-ledger`), then `e224619` (the fix below).
-- **Before the migration:** full suite on `main` 3918 passed / 0 failed / 9 skipped (after rebuilding `rust/zurvan-mcp/target/release`; the first run failed `test_mcp_rust_parity.py::test_listing_parity_on_fixture_root` because that binary was still the 15-tool build). Backup at `~/.zurvan/z2/pre-migration-backup-20261115/` (wiki, registry, search, graph; APFS clones).
-- **First live run CRASHED, and the store was restored from backup.**
-  - `claim-dummy-001` has a quote and no `source_file`; the ledger refused a `None` source (`TypeError: content body must be str`) after 484 of 551 pages were rewritten. The store was SUSPECT with an orphaned mutation. The dry run did not exercise this path.
-  - Recovery was a restore, not a reconcile: the 551 pages were copied back from the frozen legacy copy (which keeps file dates; my own backup did not), `data/registry.sqlite` was replaced by the backup taken at revision 3451, and the partial `data/claims.sqlite` was moved out. `diff -rq wiki <backup>` showed 0 differences and status was CLEAN at 3451. The failed run's files are kept: `~/.zurvan/z2/claims-legacy-20261114.aborted-run1/`, `claims.sqlite.aborted-run1`, `registry.sqlite.aborted-run1`. **This bypassed `knowledge reconcile` on purpose**: reconcile would have left a half-migrated store that `claim migrate` refuses to finish.
-  - Fix `e224619`, test first: `test_quote_without_a_source_is_imported_and_orphaned_not_a_crash`. The evidence is kept with an empty source reference and the claim is orphaned as `gone`.
-  - The whole migration was then rehearsed on a clone of the store under `ZURVAN_ROOT` (551 imported, 0 mismatches, doctor ok, CLEAN) before the second live run.
-- **Second live run: succeeded.** Revision 3451 → 3452, CLEAN. Report `~/.zurvan/z2/migration-report-20261114.json` (the date in the name is UTC), frozen originals `~/.zurvan/z2/claims-legacy-20261114/` (551 files, 0444, manifest verified against both the copy and the backup).
-  - 551 parsed, 0 unparseable; 491 intact, 25 `moved_normalised`, 7 `changed`, 27 `gone`, 1 `no_evidence`. Result: 516 asserted, 34 orphaned, 1 unknown. `provenance_mismatches == []`. First-seen dates: 535 from `wiki/log.md`, 16 from file dates.
-  - The spec's §2.1 forecast was 546 parsed / 2 unparseable / 31 broken. The parser reads both legacy shapes, so nothing was unparseable; 34 were broken, not 31.
-  - `claim doctor`: chain ok, integrity ok, 0 invisible rows, 0 dangling cids, 0 page mismatches. No wiki file outside `wiki/claims/` changed.
-- **Rebuilds:** `index search` 458,599 chunks (1,069 embeddings computed); `graph rebuild` 15,766 nodes / 22,085 edges (15,790 / 22,076 before). Both COHERENT+CURRENT at 3452.
-- **Retrieval (G10), RETIRED 50-item instrument, legacy capture (coherence UNVERIFIED):** before Top-1 0.72 / Top-3 0.74 / MRR 0.737, 13 failing items (indexes 3, 4, 6, 8, 9, 15, 17, 27, 29, 31, 39, 45, 47). After: identical numbers and the identical failing set; no previously-passing item fails. The result digest changed (`27accf2a…` → `19db356a…`), so some rankings below the top 3 moved. Reports `~/.zurvan/reports/z2-eval-{before,after}-20261115.json`.
-- **Live `claim verify`:** 516 intact, 2 ambiguous, 5 changed, 26 gone; integrity rate 0.940; nothing written.
-- **Gates (spec §8):**
-  | Gate | Result | Evidence |
-  | --- | --- | --- |
-  | G1 authored Markdown intact | PASS | 0 non-claim differences against the backup; manifest verified |
-  | G2 provenance retained | PASS | 551/551, `provenance_mismatches == []` |
-  | G3 historical views | PASS | `tests/test_z2_closure.py` matrix |
-  | G4 belief replay vs snapshots | PASS | matrix |
-  | G5 evidence decay detected | **unit tests PASS; live criterion NOT MET exactly** | migration classed 7 `changed` / 27 `gone`; `verify` reports 5 / 26 plus 2 `ambiguous`. Two claims on `wiki/sources/anthropic-risk-report-august-2026.md` (`clm_d4782cf842887bc4`, `clm_e04c67df1d37b828`) were orphaned by the migration although their quote matches twice after whitespace normalisation, which `verify` never orphans. The source-less claim is not counted by `verify`. |
-  | G6 no silent overwrite | PASS | matrix |
-  | G7 erasure keeps the chain | PASS | matrix (no live erase was run) |
-  | G8 crash safety | PASS in tests | matrix. The live crash left the store SUSPECT as designed; it was restored, not reconciled (above) |
-  | G9 writers routed | PASS | matrix |
-  | G10 retrieval | PASS | above |
-  | G11 snapshot coherence | PASS | matrix |
-  | G12 non-current claims leave views | PASS | matrix; graph lost 24 nodes after the rebuild |
-- **Rust MCP:** rebuilt and installed. Old binary kept as `~/.zurvan/bin/zurvan-mcp.2026-11-07c.bak` (sha256 `c5a030b9…`, hard link); new one copied and `mv`'d over (sha256 `b241648c…`, 10,459,968 bytes). `codesign -v` ok; `initialize` answers 3.0.0; `tools/list` returns 19. Rollback: `mv ~/.zurvan/bin/zurvan-mcp.2026-11-07c.bak ~/.zurvan/bin/zurvan-mcp`. Sessions started before 11:10 keep the old inode until restarted. `scripts/e2e_mcp_smoke.py` passed.
-- **Skill:** `~/.claude/skills/zurvan/SKILL.md` and `~/.codex/skills/zurvan/SKILL.md` updated (19 tools, never hand-edit a claim page, supersede/retract, rebuild after a correction); previous copy at `~/.zurvan/z2/SKILL.md.bak-20261115`. The copy tracked in this repo (`.claude/skills/zurvan/SKILL.md`) is an older, different text and was not touched. MCP configuration needed no change.
-- **Files:** `scripts/claim_{store,evidence,ledger,visibility,pages,cli,migrate}.py`, `scripts/{cli,memory,extract,chunk,graph_build,agent_workflow,claim_federation,mcp_server,mcp_bridge,mcp_tools,mcp_parity,build_snapshot,knowledge_revision,knowledge_scope,knowledge_reconcile,measurement_snapshot}.py`, `rust/zurvan-mcp/` (bridge, tools fixture), `tests/test_z2_*.py` (16 files) and the tests rewritten to the new contract, `tests/conftest.py`, `tests/test_ingest.py`, `.gitignore`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation).
-- **Verification:** `bash scripts/check.sh` on `main` after the migration: gate 0 Boundary 27/27, gate 1 guard passed, gate 2 pytest **3919 passed / 0 failed / 9 skipped** (55:03); gate 6 Top-3 74% (legacy capture, UNVERIFIED); all 25 gates passed, exit 0. `public_repo_guard.py` and `git diff --check` before each commit.
-- **Also found:** three ingest tests had been rewriting the live `wiki/index.md` on every suite run (fixed in `91d360a`). Another session wrote a decision at 12:04 (revision 3453), after the migration; the sessions were not all paused.
-- **Follow-ups:**
-  - IOU-Z2-1 subject/predicate/object columns are empty. IOU-Z2-2 decision supersession links (Z7). IOU-Z2-3 retraction propagation into summaries built from claims. IOU-Z2-4 PDF, image and media locators. IOU-Z2-5 a public record-time benchmark.
-  - IOU-Z2-6 non-current claims stay in search until `index search` runs; hiding them at query time needs the same filter in the Rust search.
-  - **IOU-Z2-7 (new):** decide the two ambiguous-but-orphaned claims above (re-anchor with more context, or leave orphaned), and make the migration and `verify` classify a double match the same way.
-  - **IOU-Z2-8 (new):** `claim-dummy-001` is a fixture page living in the real store; it is now an orphaned claim with no source. Retract or erase it.
-  - Deferred minors from the final review: the erase residue list omits `wiki/log.md` lines; `conflicts` and `verify` are quadratic in the number of claims; MCP claim errors do not name the real refusal code; the scope-version switch shows a false `drift: UNRECORDED` until the first write.
-  - Z1b is still NOT closed (the live ninth-run refusal). Rotate the sudo password.

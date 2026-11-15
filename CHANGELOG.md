@@ -1,5 +1,22 @@
 ## Change Log
 
+### 2026-11-15c (Australia/Sydney) — IOU-Z2-6 closed: a claim that stops being current leaves search and context at once, in Python and in the Rust MCP
+
+Raouf:
+- **Scope:** Raouf asked for the open items to be worked through autonomously after the 2026-11-15b close-out. IOU-Z2-6 was the only one that needed no decision from him. Branch `z2-iou6`, rebased and fast-forwarded to `main` at `ee7cb60`.
+- **Problem:** the chunker skips a non-current claim page (§7.5a), but only when the index is rebuilt. Until `zurvan index search` ran, search and `context` kept serving a superseded, retracted, orphaned or erased claim, from the CLI, the Python MCP and the Rust MCP. Keyword mode had no filter at all, so it served such a page always, not only until a rebuild.
+- **Fix, each with a test that failed first:**
+  - **Python** (`hybrid_search.search_hybrid(hide_root=...)`): each claim hit's frontmatter is re-read from the live store; a non-current hit is dropped and the scan reruns with its chunks excluded until a pass hides nothing new, so the result is still refilled to `limit`. `context_export._search_internal` passes the store's own root; its keyword scan skips such pages.
+  - **Rust** (`rust/zurvan-mcp/src/claims.rs`, a port of `claim_visibility.py`): `hybrid_once` widens top-k by the number hidden and filters; both keyword paths (cache and uncached scan) skip such pages.
+  - **Measurements are unchanged by construction:** `eval_search` and Z1b pass an explicit snapshot `db_path` and no `hide_root`, so they read frozen bytes only (`test_a_snapshot_search_is_unchanged`). No eval re-run was needed for that path; the ranking of every non-hidden result is unchanged.
+  - The CLI hint now says what still waits for a rebuild: a new or restored claim, and the graph.
+  - The Z2 closure matrix lists the new tests under G12.
+- **Files:** `scripts/{hybrid_search,context_export,claim_cli}.py`, `rust/zurvan-mcp/src/{claims,search,keyword,lib}.rs`, `tests/test_z2_query_time_visibility.py` (new), `tests/test_z2_closure.py`.
+- **Verification:** 11 new Python tests and 3 new Rust tests, each seen failing first. Branch suite 3948 passed / 4 failed (the same four worktree-only failures as 2026-11-15b); those four plus the new file on `main`: 15 passed. `cargo test --release` 120 lib + integration tests passed, `cargo clippy --all-targets` clean, `tests/test_mcp_rust_parity.py` 8 passed. `check.sh` was NOT re-run after the merge; the last full gate is 2026-11-15b's at `f5fe668`. `public_repo_guard.py` and `git diff --check` before each commit.
+- **Rust MCP installed:** previous binary kept as `~/.zurvan/bin/zurvan-mcp.2026-11-15.bak` (sha256 `b241648c…`, hard link); new one copied and `mv`'d over (sha256 `2430b873…`, 10,460,576 bytes). `codesign -v` ok; `initialize` answers 3.0.0; `tools/list` returns 19; a live `zurvan_search` returns the same results as the previous binary. Rollback: `mv ~/.zurvan/bin/zurvan-mcp.2026-11-15.bak ~/.zurvan/bin/zurvan-mcp`. Sessions started earlier keep the old binary until restarted.
+- **Host note:** a cold MCP search and the live eval are disk-bound on this machine today (gate 6 took ~55 min; the four live-store tests 39 min).
+- **Follow-ups:** IOU-Z2-1…5 need design (S-P-O, decision supersession Z7, retraction propagation into summaries, PDF/media locators, a public benchmark). Z1b still NOT closed (the live ninth-run refusal; Raouf kept the budget). Rotate the sudo password.
+
 ### 2026-11-15b (Australia/Sydney) — Z2 follow-ups: all final-review minors fixed, IOU-Z2-7 and -8 closed on the live store, two security findings fixed; G5's live counts now reconcile
 
 Raouf:
