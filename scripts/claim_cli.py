@@ -15,9 +15,12 @@ from dataclasses import asdict
 
 WRITE_METHODS = ("human", "agent")
 
-#: Final review 2026-11-14 (I3): derived views drop a non-current claim only when
-#: they are rebuilt; until then search, context and the graph still serve the old page.
-STALE_HINT = ("note: search, context and the graph show this change after "
+#: Final review 2026-11-14 (I3): derived views follow a claim change only when
+#: rebuilt. Since IOU-Z2-6 (2026-11-15) search and context hide a claim that
+#: stopped being current at query time; a new or restored claim, and the graph,
+#: still wait for the rebuild.
+STALE_HINT = ("note: search and context hide a claim that stopped being current at once; "
+              "a new or restored claim, and the graph, follow after "
               "`zurvan index search` and `zurvan graph rebuild`")
 _WRITES = ("add", "supersede", "retract", "revise", "erase", "adopt", "regenerate", "migrate")
 

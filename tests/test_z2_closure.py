@@ -21,6 +21,7 @@ _WR = "test_z2_writers.py"
 _SNAP = "test_z2_snapshot.py"
 _VIS = "test_z2_visibility.py"
 _PAGES = "test_z2_pages.py"
+_QTV = "test_z2_query_time_visibility.py"
 
 MATRIX = {
     "G1": [  # authored Markdown intact
@@ -106,6 +107,11 @@ MATRIX = {
         (_ERA, "test_erased_claim_hidden_from_views"),
         (_VER, "test_orphaned_claim_hidden_from_views"),
         (_PAGES, "test_status_banner_and_supersedes_line"),
+        # IOU-Z2-6: hidden at query time, before the index is rebuilt
+        (_QTV, "test_a_claim_made_noncurrent_after_indexing_is_hidden_at_once"),
+        (_QTV, "test_the_result_is_refilled_to_limit"),
+        (_QTV, "test_a_snapshot_search_is_unchanged"),
+        (_QTV, "test_keyword_mode_hides_it"),
     ],
 }
 

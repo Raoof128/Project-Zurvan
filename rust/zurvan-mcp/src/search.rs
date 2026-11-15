@@ -204,6 +204,9 @@ pub fn keyword(root: &Path, query: &str, limit: usize) -> Vec<Hit> {
             // read at its canonical path (security review 2026-10-19).
             let target = crate::security::open_target(root, &r, false).ok()?;
             let content = read_universal(&target).ok()?;
+            if crate::claims::text_is_hidden(&r, &content) {
+                return None; // Z2 §7.5a: a claim page that is no longer current
+            }
             let lower = content.to_lowercase();
             let score = tokens.iter().filter(|t| lower.contains(t.as_str())).count() as i64;
             (score > 0).then(|| Hit {
@@ -457,8 +460,23 @@ impl SearchState {
         // the FTS stage runs over FTS_PARTS rowid ranges in parallel.
         let pool = self.fts_pool(&meta)?;
         let kw = pool.scores(&cache, query)?;
-        let top = cache.top_k(&qv, &kw, limit);
-        let hits = if top.is_empty() { Ok(Vec::new()) } else { pool.with_conn(|conn| hydrate(conn, &cache, &top))? };
+        // IOU-Z2-6 / spec §7.5a: the index forgets a claim only when it is
+        // rebuilt, so a hit on a claim page that is no longer current is
+        // dropped here and the result refilled to `limit` from a deeper top-k.
+        // No claim hit went non-current (the common case): one pass, and a
+        // frontmatter read per claim hit.
+        let mut k = limit;
+        let hits = loop {
+            let top = cache.top_k(&qv, &kw, k);
+            let hits = if top.is_empty() { Ok(Vec::new()) } else { pool.with_conn(|conn| hydrate(conn, &cache, &top))? };
+            let Ok(hits) = hits else { break hits };
+            let hidden: Vec<bool> = hits.iter().map(|h| crate::claims::page_is_hidden(&self.cfg.root, &h.source_path)).collect();
+            let n = hidden.iter().filter(|&&x| x).count();
+            if n == 0 || top.len() < k || limit + n <= k {
+                break Ok(hits.into_iter().zip(hidden).filter(|(_, x)| !x).map(|(h, _)| h).take(limit).collect());
+            }
+            k = limit + n;
+        };
         #[cfg(test)]
         if let Some(barrier) = self.after_hydrate.lock().unwrap().as_ref() {
             barrier();
@@ -874,4 +892,39 @@ mod tests {
         assert_eq!(hits[0].chunk_id, "z");
         assert_ne!(st.fts_generation(), Some(g1), "a new pool for the new index");
     }
+
+    /// IOU-Z2-6 / spec §7.5a: the index forgets a claim only when it is
+    /// rebuilt, so a hit on a claim page that is no longer current is dropped
+    /// at query time and the result refilled to `limit`.
+    #[test]
+    fn a_claim_made_noncurrent_after_indexing_leaves_hybrid_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::resolve_from(Some(dir.path().to_path_buf()), |_| None);
+        let claim_text = "sourdough starter hydration notes";
+        let mut chunks: Vec<Chunk> = DOCS
+            .iter()
+            .map(|(id, p, t)| Chunk { chunk_id: id, source_path: p, heading: Some("H"), text: t, indexed_at: "2026-10-18T00:00:00", vector: mock(t) })
+            .collect();
+        chunks.push(Chunk { chunk_id: "k1", source_path: "wiki/claims/clm_a.md", heading: None, text: claim_text, indexed_at: "2026-10-18T00:00:00", vector: mock(claim_text) });
+        search_db(&cfg.search_db, "mock", "deterministic_hash", &chunks, &[("built_from_revision", "1")]);
+        fs::create_dir_all(dir.path().join("wiki/claims")).unwrap();
+        let page = |status: &str| format!("---\nauthority: structured\nstatus: {status}\n---\n\n{claim_text}\n");
+        let claim = dir.path().join("wiki/claims/clm_a.md");
+        fs::write(&claim, page("asserted")).unwrap();
+        let st = SearchState::new(cfg);
+        let ids = |hits: Vec<Hit>| hits.into_iter().map(|h| h.chunk_id).collect::<Vec<_>>();
+        let before = ids(st.hybrid(claim_text, 10).unwrap());
+        assert!(before.contains(&"k1".to_string()), "a current claim is served: {before:?}");
+        for status in NONCURRENT_FOR_TEST {
+            fs::write(&claim, page(status)).unwrap();
+            let after = ids(st.hybrid(claim_text, 2).unwrap());
+            let expected: Vec<String> = before.iter().filter(|i| *i != "k1").take(2).cloned().collect();
+            assert_eq!(after, expected, "{status}: dropped, and refilled to the limit");
+        }
+        // A legacy page (no `authority`) is never hidden.
+        fs::write(&claim, format!("---\nstatus: retracted\n---\n\n{claim_text}\n")).unwrap();
+        assert!(ids(st.hybrid(claim_text, 10).unwrap()).contains(&"k1".to_string()));
+    }
+
+    const NONCURRENT_FOR_TEST: [&str; 4] = ["superseded", "retracted", "orphaned", "erased"];
 }

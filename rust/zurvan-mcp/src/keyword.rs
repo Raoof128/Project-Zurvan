@@ -285,6 +285,9 @@ impl KeywordCache {
             .into_iter()
             .filter_map(|(i, score)| {
                 let text = read_universal(&files[i].1).ok()?;
+                if crate::claims::text_is_hidden(&files[i].0, &text) {
+                    return None; // Z2 §7.5a: a claim page that is no longer current
+                }
                 Some(Hit {
                     chunk_id: String::new(),
                     source_path: files[i].0.clone(),
@@ -605,5 +608,25 @@ mod tests {
         fs::set_permissions(&real, fs::Permissions::from_mode(0o666)).unwrap();
         let cache = KeywordCache::new(vec![dir]);
         assert_eq!(cache.search(&root, "omega", 10), crate::search::keyword(&root, "omega", 10), "a group/world-writable cache file is not served");
+    }
+
+    /// IOU-Z2-6 / spec §7.5a: a claim page that stops being current leaves
+    /// keyword search at once, through the cache and the uncached scan alike.
+    #[test]
+    fn a_noncurrent_claim_leaves_keyword_search() {
+        let (_d, _o, root) = store();
+        fs::create_dir_all(root.join("wiki/claims")).unwrap();
+        let page = |status: &str| format!("---\ntype: claim\nauthority: structured\nstatus: {status}\n---\n\nalpha zetaclaim\n");
+        let claim = root.join("wiki/claims/clm_a.md");
+        let cache = KeywordCache::new(vec![root.join("data/cache")]);
+        let paths = |hits: Vec<Hit>| hits.into_iter().map(|h| h.source_path).collect::<Vec<_>>();
+        fs::write(&claim, page("asserted")).unwrap();
+        assert!(paths(cache.search(&root, "zetaclaim", 10)).contains(&"wiki/claims/clm_a.md".to_string()));
+        fs::write(&claim, page("retracted")).unwrap();
+        assert!(paths(cache.search(&root, "zetaclaim", 10)).is_empty(), "cached");
+        assert!(paths(crate::search::keyword(&root, "zetaclaim", 10)).is_empty(), "uncached");
+        assert_same(&cache, &root);
+        // `limit` counts what is served: the hidden page does not use a slot.
+        assert_eq!(cache.search(&root, "alpha", 2).len(), 2);
     }
 }

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from scripts.chunk import EXCLUDED_PATH_PREFIXES
+from scripts.claim_visibility import page_is_hidden
 from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -39,7 +40,9 @@ def _search_internal(
     base = store.root
     if hybrid:
         from scripts.hybrid_search import search_hybrid
-        results = search_hybrid(query, limit, db_path=str(store.search_db), timings=timings)
+        # The store's own index: hide what has stopped being current (IOU-Z2-6).
+        results = search_hybrid(query, limit, db_path=str(store.search_db), timings=timings,
+                                hide_root=base)
         for r in results:
             r["project"] = store.project
             r["index_path"] = str(store.search_db)
@@ -67,6 +70,8 @@ def _search_internal(
         # the retired instrument; the Rust server's read gate refuses them).
         posix = rel.replace(os.sep, "/")
         if any(posix == p or posix.startswith(p + "/") for p in EXCLUDED_PATH_PREFIXES):
+            continue
+        if page_is_hidden(base, posix):      # Z2 §7.5a: non-current claim
             continue
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
