@@ -47,6 +47,7 @@ pub fn bridge_tool(mcp_name: &str) -> Option<(&'static str, bool)> {
         "zurvan_remember" => ("remember", true),
         "zurvan_decision_add" => ("decision_add", true),
         "zurvan_decision_set_project" => ("decision_set_project", true),
+        "zurvan_decision_supersede" => ("decision_supersede", true),
         "zurvan_claim_add" => ("claim_add", true),
         "zurvan_claim_supersede" => ("claim_supersede", true),
         "zurvan_claim_retract" => ("claim_retract", true),
@@ -62,7 +63,7 @@ pub fn bridge_tool(mcp_name: &str) -> Option<(&'static str, bool)> {
 fn is_write(tool: &str) -> bool {
     matches!(
         tool,
-        "remember" | "decision_add" | "decision_set_project" | "claim_add" | "claim_supersede" | "claim_retract" | "question_add"
+        "remember" | "decision_add" | "decision_set_project" | "decision_supersede" | "claim_add" | "claim_supersede" | "claim_retract" | "question_add"
     )
 }
 
@@ -315,6 +316,8 @@ mod tests {
     fn z2_claim_tools_are_bridged() {
         assert_eq!(bridge_tool("zurvan_claim_supersede"), Some(("claim_supersede", true)));
         assert_eq!(bridge_tool("zurvan_claim_retract"), Some(("claim_retract", true)));
+        assert_eq!(bridge_tool("zurvan_decision_supersede"), Some(("decision_supersede", true)));
+        assert!(is_write("decision_supersede"));
         assert_eq!(bridge_tool("zurvan_claim_show"), Some(("claim_show", false)));
         assert_eq!(bridge_tool("zurvan_claim_history"), Some(("claim_history", false)));
         assert!(is_write("claim_supersede") && is_write("claim_retract"));

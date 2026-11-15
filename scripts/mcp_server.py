@@ -263,6 +263,21 @@ def zurvan_decision_set_project(
     """
     return tools.tool_zurvan_decision_set_project(pages, project)
 
+@mcp.tool(title="Supersede a decision", annotations=ADDITIVE_WRITE)
+def zurvan_decision_supersede(
+    old: Annotated[str, Field(description="The decision being replaced: a page path under wiki/decisions or its slug.")],
+    new: Annotated[str, Field(description="The decision that replaces it: a page path or slug.")],
+    reason: Annotated[str, Field(description="Why the old decision no longer holds.")],
+) -> str:
+    """Link an older decision as superseded by a newer one, INSIDE the ledger.
+
+    The old page gets `status: superseded` and `superseded_by:`, the new one
+    `supersedes:`; a superseded decision leaves the recall digest but stays
+    searchable. Refused (nothing written) when either decision is not current.
+    One call is one ledger revision. Requires write mode.
+    """
+    return tools.tool_zurvan_decision_supersede(old, new, reason)
+
 @mcp.tool(title="Record an evidenced claim", annotations=ADDITIVE_WRITE)
 def zurvan_claim_add(
     text: Annotated[str, Field(description="The claim being asserted.")],

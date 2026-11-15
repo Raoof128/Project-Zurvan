@@ -386,6 +386,20 @@ def run_writes(args, env: dict) -> list[dict]:
             verdict = "FAIL"  # the success path is the one under test
         rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
                      "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
+        # IOU-Z2-2: decision supersession refusals write nothing and read the same
+        # on both servers (the success path is covered by tests/test_z2_iou2_decisions.py).
+        for cid, targs, code in (("writes:decision_supersede_self", {"old": page[:-3], "new": page[:-3], "reason": "r"},
+                                 "Error: DECISION_CYCLE"),
+                                ("writes:decision_supersede_unknown", {"old": page[:-3], "new": "no-such-decision",
+                                                                       "reason": "r"}, "Error: DECISION_UNKNOWN")):
+            case = tool(cid, "writes", "zurvan_decision_supersede", targs)
+            ta, _, _ = observe(peers["a"], case)
+            tb, b_flag, _ = observe(peers["b"], case)
+            verdict, diff = compare(case, ta, tb, b_flag)
+            if not (ta.startswith(code) and tb.startswith(code)):
+                verdict = "FAIL"
+            rows.append({"case_id": case.case_id, "group": "writes", "verdict": verdict,
+                         "a_chars": len(ta), "b_chars": len(tb), "diff_lines": diff})
         # Z2 claim lifecycle on the claim `claim_add` created. Ids, mutation ids
         # and timestamps differ per store by construction: masked, nothing else.
         import sqlite3 as _sq

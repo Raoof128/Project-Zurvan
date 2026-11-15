@@ -31,8 +31,8 @@
     "required": [
      "query"
     ],
-    "type": "object",
-    "title": "zurvan_searchArguments"
+    "title": "zurvan_searchArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -44,8 +44,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_searchOutput"
+    "title": "zurvan_searchOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -76,8 +76,8 @@
     "required": [
      "topic"
     ],
-    "type": "object",
-    "title": "zurvan_orientArguments"
+    "title": "zurvan_orientArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -89,8 +89,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_orientOutput"
+    "title": "zurvan_orientOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -133,8 +133,8 @@
     "required": [
      "topic"
     ],
-    "type": "object",
-    "title": "zurvan_contextArguments"
+    "title": "zurvan_contextArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -146,8 +146,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_contextOutput"
+    "title": "zurvan_contextOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -185,8 +185,8 @@
     "required": [
      "path"
     ],
-    "type": "object",
-    "title": "zurvan_read_pageArguments"
+    "title": "zurvan_read_pageArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -198,8 +198,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_read_pageOutput"
+    "title": "zurvan_read_pageOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -213,10 +213,11 @@
    "description": "Return the knowledge graph size as structured {nodes, edges} counts.\n\n    Use as a quick health/size check of the graph before relying on graph tools.\n    Emits machine-readable structured output (plus a JSON text fallback).\n    ",
    "inputSchema": {
     "properties": {},
-    "type": "object",
-    "title": "zurvan_graph_statsArguments"
+    "title": "zurvan_graph_statsArguments",
+    "type": "object"
    },
    "outputSchema": {
+    "description": "Structured node/edge counts for the knowledge graph.",
     "properties": {
      "nodes": {
       "title": "Nodes",
@@ -231,9 +232,8 @@
      "nodes",
      "edges"
     ],
-    "type": "object",
-    "description": "Structured node/edge counts for the knowledge graph.",
-    "title": "GraphStats"
+    "title": "GraphStats",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -271,8 +271,8 @@
     "required": [
      "path_or_node_id"
     ],
-    "type": "object",
-    "title": "zurvan_graph_neighboursArguments"
+    "title": "zurvan_graph_neighboursArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -284,8 +284,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_graph_neighboursOutput"
+    "title": "zurvan_graph_neighboursOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -331,8 +331,8 @@
     "required": [
      "path_or_node_id"
     ],
-    "type": "object",
-    "title": "zurvan_graph_expandArguments"
+    "title": "zurvan_graph_expandArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -344,8 +344,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_graph_expandOutput"
+    "title": "zurvan_graph_expandOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -359,8 +359,8 @@
    "description": "Report corpus size, search-index freshness, and graph size.\n\n    Call this FIRST in a session. It answers the question every other tool\n    depends on: is the index current? A STALE index means search is answering\n    from out-of-date content, and a `mock` embedding provider means semantic\n    search is meaningless. Also reports whether write tools are enabled.\n    ",
    "inputSchema": {
     "properties": {},
-    "type": "object",
-    "title": "zurvan_statusArguments"
+    "title": "zurvan_statusArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -372,8 +372,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_statusOutput"
+    "title": "zurvan_statusOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -417,8 +417,8 @@
       "title": "Max Queries"
      }
     },
-    "type": "object",
-    "title": "zurvan_eval_searchArguments"
+    "title": "zurvan_eval_searchArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -430,8 +430,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_eval_searchOutput"
+    "title": "zurvan_eval_searchOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -445,8 +445,8 @@
    "description": "Validate that every path referenced by the gold question set still exists.\n\n    Use to catch a stale evaluation set after files are renamed or removed.\n    Read-only and safe.\n    ",
    "inputSchema": {
     "properties": {},
-    "type": "object",
-    "title": "zurvan_validate_goldArguments"
+    "title": "zurvan_validate_goldArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -458,8 +458,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_validate_goldOutput"
+    "title": "zurvan_validate_goldOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": true,
@@ -510,8 +510,8 @@
      "body",
      "tags"
     ],
-    "type": "object",
-    "title": "zurvan_rememberArguments"
+    "title": "zurvan_rememberArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -523,8 +523,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_rememberOutput"
+    "title": "zurvan_rememberOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": false,
@@ -589,8 +589,8 @@
      "status",
      "tags"
     ],
-    "type": "object",
-    "title": "zurvan_decision_addArguments"
+    "title": "zurvan_decision_addArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -602,8 +602,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_decision_addOutput"
+    "title": "zurvan_decision_addOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": false,
@@ -636,8 +636,8 @@
      "pages",
      "project"
     ],
-    "type": "object",
-    "title": "zurvan_decision_set_projectArguments"
+    "title": "zurvan_decision_set_projectArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -649,8 +649,58 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_decision_set_projectOutput"
+    "title": "zurvan_decision_set_projectOutput",
+    "type": "object"
+   },
+   "annotations": {
+    "readOnlyHint": false,
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
+   "name": "zurvan_decision_supersede",
+   "title": "Supersede a decision",
+   "description": "Link an older decision as superseded by a newer one, INSIDE the ledger.\n\n    The old page gets `status: superseded` and `superseded_by:`, the new one\n    `supersedes:`; a superseded decision leaves the recall digest but stays\n    searchable. Refused (nothing written) when either decision is not current.\n    One call is one ledger revision. Requires write mode.\n    ",
+   "inputSchema": {
+    "properties": {
+     "old": {
+      "description": "The decision being replaced: a page path under wiki/decisions or its slug.",
+      "title": "Old",
+      "type": "string"
+     },
+     "new": {
+      "description": "The decision that replaces it: a page path or slug.",
+      "title": "New",
+      "type": "string"
+     },
+     "reason": {
+      "description": "Why the old decision no longer holds.",
+      "title": "Reason",
+      "type": "string"
+     }
+    },
+    "required": [
+     "old",
+     "new",
+     "reason"
+    ],
+    "title": "zurvan_decision_supersedeArguments",
+    "type": "object"
+   },
+   "outputSchema": {
+    "properties": {
+     "result": {
+      "title": "Result",
+      "type": "string"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "zurvan_decision_supersedeOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": false,
@@ -706,8 +756,8 @@
      "confidence",
      "tags"
     ],
-    "type": "object",
-    "title": "zurvan_claim_addArguments"
+    "title": "zurvan_claim_addArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -719,8 +769,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_claim_addOutput"
+    "title": "zurvan_claim_addOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": false,
@@ -1026,8 +1076,8 @@
      "reason",
      "tags"
     ],
-    "type": "object",
-    "title": "zurvan_question_addArguments"
+    "title": "zurvan_question_addArguments",
+    "type": "object"
    },
    "outputSchema": {
     "properties": {
@@ -1039,8 +1089,8 @@
     "required": [
      "result"
     ],
-    "type": "object",
-    "title": "zurvan_question_addOutput"
+    "title": "zurvan_question_addOutput",
+    "type": "object"
    },
    "annotations": {
     "readOnlyHint": false,

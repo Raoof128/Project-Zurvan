@@ -28,6 +28,7 @@ WRITES = {
     "remember": "tool_zurvan_remember",
     "decision_add": "tool_zurvan_decision_add",
     "decision_set_project": "tool_zurvan_decision_set_project",
+    "decision_supersede": "tool_zurvan_decision_supersede",
     "claim_add": "tool_zurvan_claim_add",
     "question_add": "tool_zurvan_question_add",
     "claim_supersede": "tool_zurvan_claim_supersede",

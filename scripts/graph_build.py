@@ -135,6 +135,13 @@ def extract_edges(path: str, content: str, nodes_dict: Dict[str, Dict]) -> List[
         source_targets.append(f"wiki/sources/{fm['source_id']}.md")
     for target in dict.fromkeys(source_targets):
         add_edge(target, 'derived_from', 'YAML source_file/source_id')
+    # IOU-Z2-2: a decision names the decisions it replaced, by slug.
+    if 'supersedes' in fm:
+        for slug in [x.strip().strip('"').strip("'") for x in str(fm['supersedes']).strip('"').split(',')]:
+            for n_data in nodes_dict.values():
+                if slug and n_data['slug'] == slug and n_data['path'].startswith('wiki/decisions/'):
+                    add_edge(n_data['path'], 'supersedes', 'YAML supersedes')
+                    break
     
     # Extracted lines (simple parsing)
     for line in body.splitlines():

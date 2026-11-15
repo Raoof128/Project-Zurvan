@@ -240,6 +240,129 @@ def set_decision_project(paths: List[str], project: str) -> List[tuple]:
     return changed
 
 
+class DecisionRefused(ValueError):
+    """A refused decision link, with a closed code (IOU-Z2-2)."""
+
+    def __init__(self, code: str, detail: str):
+        self.code, self.detail = code, detail
+        super().__init__(f"{code}: {detail}")
+
+
+_STATUS_LINE = re.compile(r"^status:.*$", re.M)
+_ENDED_STATUSES = ("superseded", "rejected", "deprecated")
+
+
+def _decision_page(ref: str) -> Path:
+    """A decision page from a path or a slug; DECISION_UNKNOWN otherwise."""
+    decisions = (PROJECT_ROOT / "wiki" / "decisions").resolve()
+    p = Path(ref)
+    page = p.resolve() if p.suffix == ".md" else (decisions / f"{ref}.md").resolve()
+    if page.parent != decisions or not page.is_file():
+        raise DecisionRefused("DECISION_UNKNOWN", f"no decision page {ref!r} under wiki/decisions")
+    return page
+
+
+def _split_front(page: Path, text: str):
+    if not text.startswith("---\n") or "\n---" not in text[4:]:
+        raise DecisionRefused("DECISION_UNKNOWN", f"no frontmatter: {page.name}")
+    end = text.index("\n---", 4)
+    return text[:end], text[end:]
+
+
+def decision_front(page: Path) -> dict:
+    """Flat frontmatter of a decision page, values unquoted (read-only)."""
+    try:
+        front, _ = _split_front(page, page.read_text(encoding="utf-8"))
+    except (OSError, DecisionRefused):
+        return {}
+    out = {}
+    for line in front[4:].splitlines():
+        if ":" in line and not line.startswith((" ", "-")):
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def _set_field(front: str, key: str, value: str) -> str:
+    line = f"{key}: {escape_yaml_string(value)}"
+    pat = re.compile(rf"^{re.escape(key)}:.*$", re.M)
+    if pat.search(front):
+        return pat.sub(lambda _m: line, front, count=1)
+    m = _STATUS_LINE.search(front)
+    at = m.end() if m else len(front)
+    return front[:at] + "\n" + line + front[at:]
+
+
+def supersede_decision(old: str, new: str, reason: str) -> tuple:
+    """Link `old` as superseded by `new`, inside the caller's operation (IOU-Z2-2).
+
+    Decisions stay authority=markdown: only frontmatter fields change, plus one
+    dated line under the old page's `## Status`. Every check runs before any byte
+    lands. Returns (old_path, new_path).
+    """
+    require_active_operation("memory.supersede_decision()")
+    if reason is None or not str(reason).strip():
+        raise DecisionRefused("REASON_REQUIRED", "a supersession needs a reason")
+    op, np_ = _decision_page(old), _decision_page(new)
+    if op == np_:
+        raise DecisionRefused("DECISION_CYCLE", f"{op.stem} cannot supersede itself")
+    fo, fn = decision_front(op), decision_front(np_)
+    for page, fm, role in ((op, fo, "old"), (np_, fn, "new")):
+        if fm.get("superseded_by") or fm.get("status", "").lower() in _ENDED_STATUSES:
+            hint = f"; it was superseded by {fm['superseded_by']}" if fm.get("superseded_by") else ""
+            raise DecisionRefused("DECISION_NOT_CURRENT",
+                                  f"the {role} decision {page.stem} is {fm.get('status') or 'ended'}{hint}")
+    if op.stem in _chain_slugs(np_.stem):
+        raise DecisionRefused("DECISION_CYCLE", f"{np_.stem} already descends from {op.stem}")
+    old_text, new_text = op.read_text(encoding="utf-8"), np_.read_text(encoding="utf-8")
+    of, orest = _split_front(op, old_text)
+    nf, nrest = _split_front(np_, new_text)
+    of = _set_field(_set_field(of, "status", "superseded"), "superseded_by", np_.stem)
+    earlier = [x.strip() for x in fn.get("supersedes", "").split(",") if x.strip()]
+    nf = _set_field(nf, "supersedes", ", ".join(earlier + [op.stem]))
+    note = (f"\nSuperseded by [[{np_.stem}]] on {datetime.now().date().isoformat()}: "
+            f"{' '.join(str(reason).split())}\n")
+    if "\n## Status" not in orest:
+        note = "\n## Status" + note
+    from scripts.knowledge_revision import declare_store_project
+    if fo.get("project"):
+        declare_store_project(fo["project"])
+    for page, content in ((op, of + orest.rstrip("\n") + "\n" + note), (np_, nf + nrest)):
+        if not write_file_safely(str(page), content):
+            raise OSError(f"failed to securely write {page}")
+    append_to_log("Decision Superseded", f"{op.stem} -> {np_.stem}: {' '.join(str(reason).split())}")
+    return str(op), str(np_)
+
+
+def _chain_slugs(slug: str) -> list:
+    return [s for s, _ in decision_chain(slug)]
+
+
+def decision_chain(ref: str) -> list:
+    """[(slug, frontmatter)] from the earliest predecessor to the latest successor
+    of `ref` (read-only; follows the first `supersedes` entry backwards)."""
+    decisions = (PROJECT_ROOT / "wiki" / "decisions")
+    start = _decision_page(ref).stem
+    seen, back, cur = {start}, [], start
+    while True:
+        prev = [x.strip() for x in decision_front(decisions / f"{cur}.md").get("supersedes", "").split(",") if x.strip()]
+        if not prev or prev[0] in seen or not (decisions / f"{prev[0]}.md").is_file():
+            break
+        cur = prev[0]
+        seen.add(cur)
+        back.append(cur)
+    chain = list(reversed(back)) + [start]
+    cur = start
+    while True:
+        nxt = decision_front(decisions / f"{cur}.md").get("superseded_by")
+        if not nxt or nxt in seen or not (decisions / f"{nxt}.md").is_file():
+            break
+        seen.add(nxt)
+        chain.append(nxt)
+        cur = nxt
+    return [(s, decision_front(decisions / f"{s}.md")) for s in chain]
+
+
 def add_note(title: str, body: str, tags: List[str]):
     require_active_operation("memory.add_note()")
     filepath = _unique_path("wiki", _make_note_slug(title), prefix="note-")

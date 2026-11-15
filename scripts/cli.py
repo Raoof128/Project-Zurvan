@@ -348,6 +348,13 @@ def _main():
              "(never hand-edit wiki/decisions)")
     dec_set.add_argument("pages", nargs="+")
     dec_set.add_argument("--project", required=True, dest="subject_project")
+    dec_sup = decision_sub.add_parser(
+        "supersede", help="Link a decision as superseded by a newer one, inside the ledger (IOU-Z2-2)")
+    dec_sup.add_argument("old", help="decision page path or slug")
+    dec_sup.add_argument("--by", required=True, dest="new", help="the superseding decision (path or slug)")
+    dec_sup.add_argument("--reason", required=True)
+    dec_hist = decision_sub.add_parser("history", help="A decision's supersession chain (read-only)")
+    dec_hist.add_argument("decision", help="decision page path or slug")
     dec_add = decision_sub.add_parser("add")
     dec_add.add_argument("--title", required=True)
     dec_add.add_argument("--reason", required=True)
@@ -1019,6 +1026,23 @@ def _main():
             sys.exit(2)
         for path, old in changed:
             print(f"{path}: project {old} -> {args.subject_project}")
+    elif args.command == "decision" and args.action == "supersede":
+        from scripts.memory import DecisionRefused, supersede_decision
+        try:
+            old_p, new_p = supersede_decision(args.old, args.new, args.reason)
+        except DecisionRefused as exc:
+            print(f"Error: {exc.code}: {exc.detail}", file=sys.stderr)
+            sys.exit(1)
+        print(f"{old_p}: superseded by {Path(new_p).stem}")
+    elif args.command == "decision" and args.action == "history":
+        from scripts.memory import DecisionRefused, decision_chain
+        try:
+            chain = decision_chain(args.decision)
+        except DecisionRefused as exc:
+            print(f"Error: {exc.code}: {exc.detail}", file=sys.stderr)
+            sys.exit(1)
+        for slug, fm in chain:
+            print(f"{slug}\t{fm.get('status', '?')}\t{fm.get('title', '')}")
     elif args.command == "decision" and args.action == "add":
         from scripts.memory import InvalidProjectError
         try:
