@@ -186,3 +186,15 @@ def test_cli_claim_add_logs_like_the_mcp_path(root):
     cid = next(iter(cl.current(root)))
     log = (root / "wiki" / "log.md").read_text(encoding="utf-8")
     assert f"Claim Added - Claim {cid} from {SRC}" in log
+
+
+# Deferred minor, fixed 2026-11-15: retract wrote its basis (why it was
+# withdrawn) over the claim's confidence_basis (why it was believed).
+def test_retract_keeps_the_confidence_basis_and_records_its_own(root):
+    cid = _add(root, basis=["primary_source"])
+    with kr.operation(writer="test", root=root):
+        cl.retract(cid, reason="source misread", basis=["agent_inference"], actor="a",
+                   method="human", root=root)
+    assert cl.current(root)[cid].basis == ["primary_source"]
+    last = cl.history(cid, root)[-1]
+    assert last["reason"] == "source misread (retraction basis: agent_inference)"
