@@ -5,6 +5,7 @@ A holdout run is sealed: scores only, never an item, in the report or on stdout.
 
 import contextvars
 import json
+import os
 import sys
 import tempfile
 from datetime import datetime
@@ -141,8 +142,16 @@ def dispatch(args) -> int:
     if args.action == "generate":
         from scripts.rtbench.generate import DEV_SEEDS, holdout_seeds, write_split
         seeds = DEV_SEEDS if args.split == "dev" else holdout_seeds(HOME / "instruments")
-        print(json.dumps(write_split(args.split, seeds, Path(args.out) if args.out else _default_dir(args.split)),
-                         indent=2, sort_keys=True))
+        out = Path(args.out) if args.out else _default_dir(args.split)
+        if args.split == "holdout":
+            # Sealed like the retrieval instrument: owner-only before any byte lands.
+            out.mkdir(parents=True, exist_ok=True)
+            os.chmod(out, 0o700)
+        manifest = write_split(args.split, seeds, out)
+        if args.split == "holdout":
+            for f in out.iterdir():
+                os.chmod(f, 0o600)
+        print(json.dumps(manifest, indent=2, sort_keys=True))
         return 0
     if args.action == "run":
         return _run(args)

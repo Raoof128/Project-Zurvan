@@ -43,3 +43,16 @@ def test_zurvan_through_the_cli_is_not_nested_in_the_live_operation(tmp_path):
     assert r.returncode == 0, r.stderr
     rep = json.loads(next((tmp_path / "r").glob("*.json")).read_text())
     assert rep["errors"] == 0 and rep["score"]["headline"] == 1.0
+
+
+def test_holdout_files_are_private(tmp_path):
+    import os, stat
+    env = {"PYTHONPATH": ".", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    r = subprocess.run([sys.executable, "scripts/cli.py", "bench", "rtbench", "generate", "--split", "holdout"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    inst = tmp_path / ".zurvan" / "instruments"
+    mode = lambda p: stat.S_IMODE(os.stat(p).st_mode)
+    assert mode(inst / "rtbench_holdout") == 0o700
+    assert {mode(p) for p in (inst / "rtbench_holdout").iterdir()} == {0o600}
+    assert mode(inst / "rtbench_holdout.seeds") == 0o600
