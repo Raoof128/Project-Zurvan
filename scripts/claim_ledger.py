@@ -42,6 +42,9 @@ class ClaimState:
     scope_project: str | None = None
     claim_type: str | None = None
     mutation_id: str | None = None
+    subject: str | None = None          # IOU-Z2-1: ent:<slug>
+    predicate: str | None = None        # IOU-Z2-1: claim_predicates.json
+    object: dict | None = None          # IOU-Z2-1: {"entity"|"value"(+"unit")|"date": ...}
 
 
 @dataclass
@@ -298,8 +301,9 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         extraction_key=None, legacy_id=None, observed_at_legacy=None,
         observed_at_legacy_source=None, location_hint=None, status="asserted",
         extra_evidence=(), root=None, _migrating=False, _unanchored=False,
-        _normalised=False) -> str:
+        _normalised=False, spo=None) -> str:
     _check_vocab(confidence, basis, method)
+    triple = _spo(spo)
     _check_time("valid_from", valid_from)
     _check_time("valid_until", valid_until)
     _check_project(project)
@@ -312,15 +316,24 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
                        observed_at_legacy_source=observed_at_legacy_source,
                        location_hint=location_hint, status=status,
                        extra_evidence=extra_evidence, unanchored=_unanchored,
-                       normalised=_normalised)
+                       normalised=_normalised, triple=triple)
     _write_pages(root, claim_id)
     return claim_id
+
+
+def _spo(spo):
+    """Validate a (subject, predicate, object) triple before anything is written."""
+    if spo is None:
+        return None
+    from scripts.claim_spo import normalise
+    return normalise(*spo)
 
 
 def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, valid_until,
             project, actor, method, reader, claim_type, extraction_key, legacy_id,
             observed_at_legacy, observed_at_legacy_source, location_hint, status,
-            relations=None, extra_evidence=(), unanchored=False, normalised=False) -> str:
+            relations=None, extra_evidence=(), unanchored=False, normalised=False,
+            triple=None) -> str:
     quotes = ([(evidence, location_hint)] if evidence is not None else []) + list(extra_evidence)
     if unanchored:
         # Migration only: a legacy quote whose source is gone or changed keeps its
@@ -350,14 +363,17 @@ def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, v
         "claim_type": claim_type, "extraction_key": extraction_key,
         "observed_at_legacy": observed_at_legacy,
         "observed_at_legacy_source": observed_at_legacy_source,
-        "evidence": ev_rows, "relations": relations or []})
+        "evidence": ev_rows, "relations": relations or [],
+        **({"subject_id": triple[0], "predicate_id": triple[1], "object_json": triple[2]}
+           if triple else {})})
     return claim_id
 
 
 def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_from=None,
               expected_rev=None, confidence="high", basis=(), tags=None, reader="utf8",
-              root=None) -> str:
+              root=None, spo=None) -> str:
     _require_reason(reason)
+    triple = _spo(spo)
     _check_vocab(confidence, basis, method)
     _check_time("valid_from", valid_from)
     _refuse_if_edited(old_id, root)
@@ -377,7 +393,7 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
                          actor=actor, method=method, reader=reader, claim_type=None,
                          extraction_key=None, legacy_id=None, observed_at_legacy=None,
                          observed_at_legacy_source=None, location_hint=None,
-                         status="asserted")
+                         status="asserted", triple=triple)
         s.conn.execute("UPDATE claims SET scope_project = (SELECT scope_project FROM claims"
                        " WHERE claim_id = ?) WHERE claim_id = ?", (old_id, new_id))
         _next(s, old_id, event="supersede", status="superseded", actor=actor, method=method,
@@ -407,8 +423,9 @@ def retract(claim_id, *, reason, basis, actor, method, expected_rev=None, root=N
 
 def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, confidence=None,
            basis=None, tags=None, valid_from=None, valid_until=None, source=None,
-           evidence=None, reader="utf8", root=None, _adopting=False) -> int:
+           evidence=None, reader="utf8", root=None, _adopting=False, spo=None) -> int:
     _require_reason(reason)
+    triple = _spo(spo)
     _check_vocab(confidence, basis, method)
     _check_time("valid_from", valid_from)
     _check_time("valid_until", valid_until)
@@ -418,6 +435,8 @@ def revise(claim_id, *, reason, actor, method, expected_rev=None, text=None, con
         changes = {"confidence": confidence, "valid_from": valid_from,
                    "valid_until": valid_until, "text": text, "tags": tags,
                    "confidence_basis": json.dumps(list(basis)) if basis is not None else None}
+        if triple:
+            changes.update(subject_id=triple[0], predicate_id=triple[1], object_json=triple[2])
         if evidence is not None:
             changes["anchored"] = (source, _anchor(s.root, source, evidence, reader), reader)
         status = s.latest(claim_id)
@@ -495,7 +514,9 @@ def _state(conn, row, rows_by_claim) -> ClaimState:
                       valid_from=row["valid_from"], valid_until=row["valid_until"],
                       evidence=evidence, legacy_id=claim["legacy_id"],
                       scope_project=claim["scope_project"], claim_type=row["claim_type"],
-                      mutation_id=row["mutation_id"])
+                      mutation_id=row["mutation_id"], subject=row["subject_id"],
+                      predicate=row["predicate_id"],
+                      object=json.loads(row["object_json"]) if row["object_json"] else None)
 
 
 def _belief(root, vis, upto) -> dict:

@@ -1,0 +1,91 @@
+"""Reviewed, opt-in S-P-O backfill (IOU-Z2-1; design 2026-11-15-z2-iou-1-4 §3).
+
+    zurvan claim structure --propose --out proposals.jsonl [--limit N]
+        asks the configured model for a triple per current claim that has none and
+        writes ONLY the proposals file (every entry "approved": false). Refuses the
+        mock provider. Never touches the store.
+    zurvan claim structure --apply proposals.jsonl
+        writes one `revise` (method model_extraction) per entry a human marked
+        "approved": true, all inside the caller's one operation; every entry is
+        validated before anything is written.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+REASON = "S-P-O backfill (IOU-Z2-1), reviewed proposal"
+
+PROMPT = """You turn one factual claim into a single subject-predicate-object triple.
+Return ONLY a JSON object: {{"subject": <entity name>, "predicate": <one of the predicates
+below>, "object": {{"entity": <name>}} or {{"value": <text>, "unit": <text, optional>}}
+or {{"date": "YYYY-MM-DD"}}}}. Use "related_to" when no predicate fits.
+
+Predicates:
+{predicates}
+
+Claim: {text}
+"""
+
+
+def _prompt(text: str) -> str:
+    from scripts.claim_spo import predicates
+    lines = "\n".join(f"- {k}: {v}" for k, v in predicates().items())
+    return PROMPT.format(predicates=lines, text=text)
+
+
+def _parse(raw: str) -> dict:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`").split("\n", 1)[-1]
+    start, end = raw.find("{"), raw.rfind("}")
+    return json.loads(raw[start:end + 1])
+
+
+def provider_is_real() -> bool:
+    return os.environ.get("ZURVAN_LLM_PROVIDER", "mock").lower() != "mock"
+
+
+def propose(out_path, *, call=None, limit=None, root=None) -> int:
+    """Write proposals for current claims without a triple. Returns how many."""
+    from scripts import claim_ledger as cl
+    from scripts.claim_spo import normalise
+    if call is None:
+        from scripts.llm import run_llm as call
+    todo = [s for s in sorted(cl.current(root).values(), key=lambda s: s.claim_id)
+            if s.status in cl.CURRENT_STATUSES and not s.predicate and s.text]
+    if limit:
+        todo = todo[:limit]
+    rows = []
+    for s in todo:
+        row = {"claim_id": s.claim_id, "rev": s.rev, "text": s.text, "approved": False}
+        try:
+            t = _parse(call(_prompt(s.text)))
+            normalise(t.get("subject"), t.get("predicate"), t.get("object"))
+            row.update(subject=t["subject"], predicate=t["predicate"], object=t["object"])
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            row.update(subject=None, predicate=None, object=None, error=str(exc))
+        rows.append(row)
+    Path(out_path).write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows), encoding="utf-8")
+    return len(rows)
+
+
+def apply(path, *, actor, root=None) -> list:
+    """Revise every approved claim; all entries are checked first. Returns ids written."""
+    from scripts import claim_ledger as cl
+    from scripts.claim_spo import normalise
+    rows = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    approved = [r for r in rows if r.get("approved") is True]
+    current = cl.current(root)
+    for r in approved:
+        if r.get("claim_id") not in current:
+            raise ValueError(f"unknown claim {r.get('claim_id')!r}")
+        normalise(r.get("subject"), r.get("predicate"), r.get("object"))
+    written = []
+    for r in approved:
+        cl.revise(r["claim_id"], reason=REASON, actor=actor, method="model_extraction",
+                  expected_rev=r.get("rev"), spo=(r["subject"], r["predicate"], r["object"]), root=root)
+        written.append(r["claim_id"])
+    return written

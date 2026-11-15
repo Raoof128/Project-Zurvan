@@ -214,6 +214,7 @@ def extract_source(filepath):
     
     # Claims (planned and conflict-checked above), through the Z2 ledger
     from scripts import claim_ledger
+    from scripts.claim_spo import from_extraction
     for rec in claim_records:
         claim = rec["claim"]
         evs = claim["evidence"]
@@ -223,7 +224,8 @@ def extract_source(filepath):
             tags=list(claim.get("tags") or []), actor="extract", method="model_extraction",
             reader="extract_text@1", claim_type=claim.get("claim_type"),
             extraction_key=rec["key"], location_hint=evs[0].get("location"),
-            extra_evidence=[(e["quote"], e.get("location")) for e in evs[1:]])
+            extra_evidence=[(e["quote"], e.get("location")) for e in evs[1:]],
+            spo=from_extraction(claim))    # IOU-Z2-1: optional; an invalid triple is dropped
 
     # Concepts and Entities: canonical writer is wiki_merge (compounding wiki)
     from scripts.wiki_merge import merge_extraction

@@ -8,6 +8,7 @@ Rules:
 - Evidence must be a short direct quote.
 - If a claim has no evidence, do not include it.
 - Prefer precise, atomic claims.
+- Optionally give a claim an "spo" triple when it states one clear relation. The predicate must be one of: is_a, part_of, located_in, owned_by, works_for, uses, depends_on, produces, causes, has_value, has_status, occurred_on, decided, prefers, related_to (use related_to when none fits). The object is exactly one of {"entity": "<name>"}, {"value": "<text>", "unit": "<unit, optional>"} or {"date": "YYYY-MM-DD"}. Leave "spo" out rather than guess.
 - Separate facts, definitions, arguments, decisions, and hypotheses.
 - Identify concepts and entities only if they are meaningfully discussed.
 - Identify open questions if the source leaves uncertainty.
@@ -35,7 +36,8 @@ Return this JSON structure:
           "location": "..."
         }
       ],
-      "tags": ["..."]
+      "tags": ["..."],
+      "spo": {"subject": "...", "predicate": "...", "object": {"value": "...", "unit": "..."}}
     }
   ],
   "concepts": [

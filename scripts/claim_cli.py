@@ -40,6 +40,12 @@ def register(subparsers) -> None:
         p.add_argument("--actor", default=None, help="default local:<os user>")
         p.add_argument("--method", choices=WRITE_METHODS, default="human")
 
+    def triple(p):   # IOU-Z2-1: all three or none
+        p.add_argument("--subject", help="entity name or ent:<slug>")
+        p.add_argument("--predicate", help="one of scripts/claim_predicates.json")
+        p.add_argument("--object", dest="obj",
+                       help='JSON: {"entity": ...} | {"value": ..., "unit": ...} | {"date": "YYYY-MM-DD"}')
+
     a = sub.add_parser("add", help="Assert a new evidence-backed claim")
     a.add_argument("--text", required=True)
     a.add_argument("--source", required=True)
@@ -51,6 +57,7 @@ def register(subparsers) -> None:
     a.add_argument("--valid-until", dest="valid_until")
     a.add_argument("--project")
     who(a)
+    triple(a)
 
     s = sub.add_parser("supersede", help="Replace a claim with a newer one")
     s.add_argument("claim_id")
@@ -64,6 +71,7 @@ def register(subparsers) -> None:
     s.add_argument("--tags", nargs="+", default=None)
     s.add_argument("--expected-rev", dest="expected_rev", type=int)
     who(s)
+    triple(s)
 
     r = sub.add_parser("retract", help="Withdraw a claim (kept in history)")
     r.add_argument("claim_id")
@@ -85,6 +93,7 @@ def register(subparsers) -> None:
     v.add_argument("--evidence")
     v.add_argument("--expected-rev", dest="expected_rev", type=int)
     who(v)
+    triple(v)
 
     def when(p):
         g = p.add_mutually_exclusive_group()
@@ -125,6 +134,12 @@ def register(subparsers) -> None:
     im = sub.add_parser("impact", help="Derived artifacts (syntheses, packs, reports) citing a claim")
     im.add_argument("claim_id")
     im.add_argument("--json", action="store_true")
+    st = sub.add_parser("structure", help="Reviewed S-P-O backfill: --propose (model, file only) or --apply FILE")
+    mode = st.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--propose", action="store_true")
+    mode.add_argument("--apply", dest="apply_path")
+    st.add_argument("--out", help="proposals file to write (--propose)")
+    st.add_argument("--limit", type=int)
     sd = sub.add_parser("stale-derived", help="Derived artifacts citing a claim that is no longer current")
     sd.add_argument("--json", action="store_true")
     rg = sub.add_parser("regenerate", help="Rewrite pages from the ledger")
@@ -151,6 +166,17 @@ def _print_state(s, as_json):
         print(json.dumps(asdict(s), sort_keys=True, default=str))
         return
     print(f"{s.claim_id} rev {s.rev} [{s.status}] {s.confidence or '-'}: {s.text}")
+    if s.predicate:
+        print(f"  {s.subject} {s.predicate} {json.dumps(s.object, sort_keys=True)}")
+
+
+def _triple(args):
+    vals = (getattr(args, "subject", None), getattr(args, "predicate", None), getattr(args, "obj", None))
+    if all(v is None for v in vals):
+        return None
+    if any(v is None for v in vals):
+        raise ValueError("--subject, --predicate and --object go together (all three or none)")
+    return vals
 
 
 def _dependents(claim_id) -> None:
@@ -180,7 +206,7 @@ def dispatch(args) -> int:
             cid = cl.add(args.text, args.source, args.evidence, confidence=args.confidence,
                          basis=args.basis, tags=args.tags, valid_from=args.valid_from,
                          valid_until=args.valid_until, project=args.project, actor=actor,
-                         method=args.method)
+                         method=args.method, spo=_triple(args))
             from scripts.memory import append_claim_log
             append_claim_log(cid, args.source)
             state = cl.current().get(cid)
@@ -191,7 +217,7 @@ def dispatch(args) -> int:
                                evidence=args.evidence, reason=args.reason, actor=actor,
                                method=args.method, valid_from=args.valid_from,
                                expected_rev=args.expected_rev, confidence=args.confidence,
-                               basis=args.basis, tags=args.tags)
+                               basis=args.basis, tags=args.tags, spo=_triple(args))
             print(json.dumps({"claim_id": new, "supersedes": args.claim_id}))
             _dependents(args.claim_id)
         elif action == "retract":
@@ -204,7 +230,7 @@ def dispatch(args) -> int:
                             expected_rev=args.expected_rev, text=args.text,
                             confidence=args.confidence, basis=args.basis, tags=args.tags,
                             valid_from=args.valid_from, valid_until=args.valid_until,
-                            source=args.source, evidence=args.evidence)
+                            source=args.source, evidence=args.evidence, spo=_triple(args))
             print(json.dumps({"claim_id": args.claim_id, "rev": rev}))
         elif action == "show":
             s = _belief(args).get(args.claim_id)
@@ -268,6 +294,23 @@ def dispatch(args) -> int:
             healthy = (report["chain_ok"] and report["integrity"] in ("ok", "absent")
                        and not report["dangling_cids"])
             return 0 if healthy else 1
+        elif action == "structure":
+            from scripts import claim_structure as cst
+            if args.propose:
+                if not args.out:
+                    raise ValueError("--propose needs --out FILE")
+                if not cst.provider_is_real():
+                    raise ClaimRefused("PROVIDER_REQUIRED",
+                                       "set ZURVAN_LLM_PROVIDER to a real provider; the mock "
+                                       "would propose dummy triples")
+                n = cst.propose(args.out, limit=args.limit)
+                print(f"{n} proposals written to {args.out}; mark the good ones \"approved\": true, "
+                      f"then `zurvan claim structure --apply {args.out}`")
+            else:
+                written = cst.apply(args.apply_path, actor=actor)
+                print(json.dumps({"revised": written}))
+                if written:
+                    print(STALE_HINT, file=sys.stderr)
         elif action == "impact":
             from scripts.claim_impact import impact
             if args.claim_id not in cl.current():

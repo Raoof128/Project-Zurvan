@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "note": "IOU-Z2-1 closed predicate vocabulary (design 2026-11-15-z2-iou-1-4 section 3). Add a predicate only with a one-line meaning; use related_to when nothing fits.",
+  "predicates": {
+    "is_a": "the subject is an instance or kind of the object",
+    "part_of": "the subject is a component or member of the object",
+    "located_in": "the subject is situated in the object (a place)",
+    "owned_by": "the subject belongs to the object",
+    "works_for": "the subject is employed by or acts for the object",
+    "uses": "the subject uses or runs on the object",
+    "depends_on": "the subject requires the object",
+    "produces": "the subject makes or outputs the object",
+    "causes": "the subject brings about the object",
+    "has_value": "the subject measures or amounts to the object's value (with a unit when it has one)",
+    "has_status": "the subject is in the state the object names",
+    "occurred_on": "the subject happened on the object's date",
+    "decided": "the subject chose or ruled the object",
+    "prefers": "the subject favours the object",
+    "related_to": "fallback: a relation none of the above names"
+  }
+}

@@ -52,6 +52,9 @@ def render(state, history: list, superseded_texts: list, generated_from_mutation
     if state.confidence:
         fm.append(f"confidence: {_s(state.confidence)}")
     fm.append(f"confidence_basis: {json.dumps(list(state.basis))}")
+    if getattr(state, "predicate", None):        # IOU-Z2-1, only when set
+        fm += [f"subject: {_s(state.subject)}", f"predicate: {_s(state.predicate)}",
+               f"object: {_s(json.dumps(state.object, sort_keys=True, separators=(',', ':')))}"]
     if state.valid_from:
         fm.append(f"valid_from: {_s(state.valid_from)}")
     if state.valid_until:
