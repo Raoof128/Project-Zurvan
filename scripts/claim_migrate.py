@@ -165,7 +165,7 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
             now=None) -> dict:
     base = ks.store_root(root)
     stamp = (now or datetime.now(timezone.utc).isoformat())[:10].replace("-", "")
-    z2 = Path.home() / ".zurvan" / "z2"
+    z2 = cs.private_dir(base)
     legacy_dir = Path(legacy_dir) if legacy_dir else z2 / f"claims-legacy-{stamp}"
     report_path = Path(report_path) if report_path else z2 / f"migration-report-{stamp}.json"
 

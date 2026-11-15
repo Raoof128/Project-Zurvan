@@ -133,3 +133,6 @@ data/writes.jsonl
 # writes per index generation (data/cache/vectors-<key>.zvec, never published)
 rust/zurvan-mcp/target/
 data/cache/
+
+# Z2 migration files of a store that is not this checkout (claim_store.private_dir)
+.zurvan-z2/

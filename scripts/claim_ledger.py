@@ -638,13 +638,36 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
         if (snap / "claims.sqlite").exists() or any(snap.rglob("wiki/claims/*.md")):
             residue.append({"kind": "snapshot", "where": str(snap),
                             "action": "held until its lease expires; `zurvan knowledge gc`"})
+    private = cs.private_dir(base)
     if legacy_id:
         dirs = [legacy_dir] if legacy_dir else sorted(
-            _glob.glob(str(Path.home() / ".zurvan" / "z2" / "claims-legacy-*")))
+            _glob.glob(str(private / "claims-legacy-*")))
         for d in dirs:
             stub = _stub_legacy(d, legacy_id, reason_class, now)
             if stub:
                 residue.append(stub)
+    # Lines and reports that NAME the claim and its source (not its text).
+    names = [n for n in (claim_id, legacy_id,
+                         legacy_id[len("claim-"):] if legacy_id and legacy_id.startswith("claim-")
+                         else None) if n]
+    log = base / "wiki" / "log.md"
+    if names and log.is_file():
+        try:
+            log_text = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log_text = ""
+        if any(f"Claim {n} " in log_text or f"Claim {n}\n" in log_text for n in names):
+            residue.append({"kind": "log_line", "where": str(log),
+                            "action": "a `Claim Added` line names the claim and its source; "
+                                      "edit by hand if required"})
+    for rep in sorted(private.glob("migration-report-*.json")) if private.is_dir() else []:
+        try:
+            body = rep.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(f'"{n}' in body for n in names):          # also "<legacy_id>.md"
+            residue.append({"kind": "migration_report", "where": str(rep),
+                            "action": "names the claim and its source; edit by hand if required"})
     if text_before:
         for f in sorted((base / "data" / "extractions").glob("*.json")) if (base / "data" / "extractions").is_dir() else []:
             try:
@@ -653,6 +676,9 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
                                     "action": "raw model output; delete by hand if required"})
             except OSError:
                 pass
+    residue.append({"kind": "ledger_metadata", "where": str(cs.db_path(base)),
+                    "action": "kept by design: claim id, legacy id, project slug, actors, "
+                              "timestamps and revision events (the hash chain needs them)"})
     residue.append({"kind": "time_machine", "where": "backups",
                     "action": "out of Zurvan's reach"})
     return {"rev": rev, "residue": residue, "bound": ERASE_BOUND}

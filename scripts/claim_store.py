@@ -155,6 +155,17 @@ def db_path(root=None) -> Path:
     return ks.store_root(root).joinpath(*ks.CLAIMS_DB_REL)
 
 
+def private_dir(root=None) -> Path:
+    """Where migration keeps its frozen legacy copy and report, and where erase
+    looks for them. `~/.zurvan/z2` belongs to the store that lives in this code
+    checkout; any other store (a test's tmp root, a second store) keeps them
+    beside itself, so it can never read or stub the live store's copies."""
+    base = ks.store_root(root)
+    if base == Path(__file__).resolve().parent.parent:
+        return Path.home() / ".zurvan" / "z2"
+    return base / ".zurvan-z2"
+
+
 def _pragmas(conn) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA secure_delete = ON")
