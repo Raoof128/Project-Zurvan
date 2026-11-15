@@ -344,6 +344,14 @@ def current(root=None) -> Revision:
                     atomicity=row[2], manifest_digest=row[3])
 
 
+def scope_change(root=None):
+    """(recorded, current) scope versions when they differ, else None. The
+    recorded digest is then not comparable; the next managed write records
+    the new scope's baseline (spec §7.5)."""
+    stored = _stored_scope_version(root)
+    return (stored, ks.SCOPE_VERSION) if stored != ks.SCOPE_VERSION else None
+
+
 def _stored_scope_version(root=None) -> int:
     conn = _connect_ro(root)
     try:

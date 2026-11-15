@@ -142,3 +142,19 @@ def test_views_on_a_store_without_a_ledger_are_empty(tmp_path):
     assert kr.belief_revisions(tmp_path) == {}
     assert kr.revision_at("2030-01-01T00:00:00+00:00", tmp_path) is None
     assert claim_ledger.current(tmp_path) == {}
+
+
+# Deferred minor, fixed 2026-11-15: right after the scope version changed (Z2
+# fast-forward on the live store) `knowledge status` said the wiki changed
+# outside the barrier. Nothing was edited; the digest's scope moved.
+def test_status_names_a_scope_change_instead_of_an_outside_edit(root, monkeypatch, capsys):
+    import sys
+    from scripts import cli
+    _write(root, "a.md", "one\n")
+    stored = ks.SCOPE_VERSION
+    monkeypatch.setattr(ks, "SCOPE_VERSION", stored + 1)
+    monkeypatch.setattr(sys, "argv", ["zurvan", "knowledge", "status"])
+    cli.main()
+    out = capsys.readouterr().out
+    assert f"scope changed (v{stored} to v{stored + 1})" in out
+    assert "outside the mutation barrier" not in out
