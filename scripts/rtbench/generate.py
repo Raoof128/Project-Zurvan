@@ -13,18 +13,21 @@ import secrets
 from datetime import date, timedelta
 from pathlib import Path
 
-from scripts.rtbench import GENERATOR_VERSION
+from scripts.rtbench import GENERATOR_VERSIONS
 from scripts.rtbench.canon import dumps, sha256_file
 from scripts.rtbench.events import generate_events
 from scripts.rtbench.oracle import answer, fold
 from scripts.rtbench.vocab import fresh_value, make_slots
 
 DEV_SEEDS = list(range(1000, 1200))
+DEV2_SEEDS = list(range(2000, 2200))
+# split -> generator version (spec §12): v2 splits never share seeds with v1.
+SPLIT_VERSION = {"dev": 1, "holdout": 1, "dev2": 2, "holdout2": 2}
 BASE_DATE = "2026-01-05"
 TYPE_WEIGHTS = (("Q1", 20), ("Q2", 20), ("Q3", 20), ("Q4", 20), ("Q5", 12), ("Q6", 8))
 P_CHANGE = 0.6
 FINAL_CAP = 0.20
-HOLDOUT_FILE = "rtbench_holdout.seeds"
+HOLDOUT_FILE = "rtbench_holdout.seeds"   # rtbench-1; rtbench-2 uses rtbench_holdout2.seeds
 N_HOLDOUT = 200
 
 
@@ -35,6 +38,8 @@ def _change_points(tl) -> dict:
             points.setdefault(s.slot, []).extend([s.ended] * (2 if s.end_kind in ("retracted", "erased") else 1))
         if s.erased:
             points.setdefault(s.slot, []).extend(range(s.born, s.ended))
+        if s.erased_at is not None and s.erased_at != s.ended:   # rtbench-2: dead history erased
+            points.setdefault(s.slot, []).extend([s.erased_at] * 2)
     return points
 
 
@@ -103,13 +108,13 @@ def _shift(iso, days):
     return (date.fromisoformat(iso) + timedelta(days=days)).isoformat()
 
 
-def generate_case(seed, case_id) -> tuple:
+def generate_case(seed, case_id, version=1) -> tuple:
     rng = random.Random(seed)
     slots = make_slots(rng, rng.randint(2, 8))
-    events = generate_events(rng, slots, BASE_DATE)
+    events = generate_events(rng, slots, BASE_DATE, dead_erase=version >= 2)
     tl = fold(events)
     questions = _questions(rng, case_id, slots, events, tl)
-    case = {"case_id": case_id, "generator_version": GENERATOR_VERSION, "seed": seed,
+    case = {"case_id": case_id, "generator_version": GENERATOR_VERSIONS[version], "seed": seed,
             "base_date": BASE_DATE, "slots": slots, "events": events, "questions": questions}
     gold = {"case_id": case_id, "answers": {
         q["qid"]: {"S": answer(tl, q), "N": answer(tl, {**q, "answer_as": "value"})} for q in questions}}
@@ -117,25 +122,26 @@ def generate_case(seed, case_id) -> tuple:
 
 
 def write_split(split, seeds, out_dir) -> dict:
+    version = SPLIT_VERSION[split]
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     cases_p, gold_p = out / f"{split}.cases.jsonl", out / f"{split}.gold.jsonl"
     with open(cases_p, "w", encoding="utf-8", newline="\n") as fc, \
          open(gold_p, "w", encoding="utf-8", newline="\n") as fg:
         for i, seed in enumerate(seeds):
-            case, gold = generate_case(seed, f"{split}-{i:04d}")
+            case, gold = generate_case(seed, f"{split}-{i:04d}", version)
             fc.write(dumps(case) + "\n")
             fg.write(dumps(gold) + "\n")
-    return {"split": split, "generator_version": GENERATOR_VERSION, "n_items": len(seeds),
+    return {"split": split, "generator_version": GENERATOR_VERSIONS[version], "n_items": len(seeds),
             "sha256": sha256_file(cases_p), "gold_sha256": sha256_file(gold_p)}
 
 
-def holdout_seeds(instruments_dir) -> list:
+def holdout_seeds(instruments_dir, split="holdout") -> list:
     d = Path(instruments_dir)
-    p = d / HOLDOUT_FILE
+    p = d / f"rtbench_{split}.seeds"
     if not p.exists():
         d.mkdir(parents=True, exist_ok=True)
-        seeds, dev = [], set(DEV_SEEDS)
+        seeds, dev = [], set(DEV_SEEDS) | set(DEV2_SEEDS)
         while len(seeds) < N_HOLDOUT:
             s = secrets.randbits(63)
             if s not in dev and s not in seeds:

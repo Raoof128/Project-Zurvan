@@ -249,3 +249,24 @@ split digest, adapter name and per-type scores. A holdout run prints scores only
 Template wording for Track N (fixed, versioned with the generator); the vocabulary of entities, attributes and value
 generators; the exact sampling weights within the §7 ranges; the normalisation table for answer tokens; JSON field
 names beyond §7–8; module split inside `scripts/rtbench/`.
+
+## 13. Generator rtbench-2: erasing dead history (Raouf, 15 Nov 2026)
+
+rtbench-1 only ever erased a statement that was still believed. The common erasure request (GDPR art. 17) is the
+opposite: forget a value that was superseded or retracted long ago. rtbench-2 adds that case and changes nothing
+else; rtbench-1 stays frozen and its registered dev split regenerates byte for byte (a test checks it).
+
+- **Events.** An erase may target a superseded or retracted statement that is not yet erased. When dead history
+  exists, an erase picks it with probability 0.6 (always, when no statement is believed). The share of cases with
+  an erase rises from 0.20 to 0.35. Every other invariant of §5 holds; a statement is erased at most once.
+- **Oracle.** A statement keeps how and when it ended (`superseded` or `retracted`) and gains `erased_at`. Q2 reads
+  `erased` from `erased_at` on and its earlier status before it; content is `[erased]` at every tick (Q1 values,
+  Q3, Q4); Q5 never asks about an erased value. A live erase is unchanged (`erased_at` equals the end tick).
+- **Change points.** The tick of a dead-history erase counts twice, alongside the ticks the statement was believed.
+- **Splits.** `dev2` (DEV2_SEEDS = range(2000, 2200)) and `holdout2` (200 private `secrets` seeds in
+  `~/.zurvan/instruments/rtbench_holdout2.seeds`, files in `rtbench_holdout2/`, 0700/0600), registered as
+  `rtbench_dev2` and `rtbench_holdout2` in `eval/datasets.json` by whole-file digest only. Holdout seeds avoid both
+  dev ranges. `zurvan bench rtbench generate|run|validity --split dev2|holdout2`; every split whose name starts with
+  `holdout` is sealed (registered only, no `--limit`, no items in reports).
+- **Validity** (§6.5) was measured on `dev2` before registration and holds: oracle 1.000 on both tracks, overwrite
+  0.323 (S and N), append_only 0.552 (S) / 0.548 (N).

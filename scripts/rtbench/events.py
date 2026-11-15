@@ -1,5 +1,6 @@
 """Event-log generator (spec §5). Invariants: one believed statement per slot;
-no event targets a superseded, retracted or erased statement; an abort mints no
+no event targets a superseded, retracted or erased statement (rtbench-2 exception:
+an erase may target a superseded or retracted one, spec §12); an abort mints no
 tick and its sid and value are never reused; values are unique within a case."""
 
 from datetime import date, timedelta
@@ -9,19 +10,24 @@ from scripts.rtbench.vocab import NOTES, RETRACT_REASONS, SUPERSEDE_REASONS, fre
 WEIGHTS = {"assert": 28, "supersede": 22, "retract": 18, "revise": 10, "erase": 12,
            "noise": 15, "abort": 8}
 CONFIDENCES = ("low", "medium", "high")
+P_ERASE = {False: 0.20, True: 0.35}   # rtbench-1 / rtbench-2 share of cases with an erase
+P_DEAD = 0.6                          # rtbench-2: chance an erase picks dead history when any exists
 
 
 def _iso(base, days):
     return (date.fromisoformat(base) + timedelta(days=days)).isoformat()
 
 
-def generate_events(rng, slots, base_date) -> list:
+def generate_events(rng, slots, base_date, dead_erase=False) -> list:
+    """`dead_erase=False` is rtbench-1 and must stay byte-identical: every rtbench-2
+    branch below is gated on it and draws no random number when it is off."""
     length = rng.randint(8, 60)
-    has_erase = rng.random() < 0.20
+    has_erase = rng.random() < P_ERASE[dead_erase]
     has_abort = rng.random() < 0.30
     has_valid = rng.random() < 0.30
     units = {s["slot"]: s["unit"] for s in slots}
     used, current, events = set(), {}, []
+    dead = []   # rtbench-2: superseded or retracted, not yet erased, in order of death
     state = {"t": 0, "n": 0, "erased": False, "aborted": False, "valid": False}
 
     def new_sid():
@@ -50,13 +56,15 @@ def generate_events(rng, slots, base_date) -> list:
         full = [s["slot"] for s in slots if s["slot"] in current]
         left = length - len(events)
         if has_erase and not state["erased"] and left <= 2:
-            kind = "erase" if full else "assert"
+            kind = "erase" if full or (dead_erase and dead) else "assert"
         elif has_abort and not state["aborted"] and left <= 1:
             kind = "abort"
         else:
             legal = ["noise"] + (["assert"] if empty else [])
             if full:
                 legal += ["supersede", "retract", "revise"] + (["erase"] if has_erase else [])
+            elif dead_erase and dead and has_erase:
+                legal.append("erase")
             if has_abort:
                 legal.append("abort")
             kind = rng.choices(legal, [WEIGHTS[k] for k in legal])[0]
@@ -71,12 +79,19 @@ def generate_events(rng, slots, base_date) -> list:
         if kind in ("assert", "supersede"):
             slot = rng.choice(empty if kind == "assert" else full)
             e = change(kind, slot)
+            if kind == "supersede" and dead_erase:
+                dead.append(current[slot])
             current[slot] = e["sid"]
+        elif kind == "erase" and dead_erase and dead and (not full or rng.random() < P_DEAD):
+            e = {"type": "erase", "sid": dead.pop(rng.randrange(len(dead)))}
+            state["erased"] = True
         elif kind in ("retract", "erase"):
             slot = rng.choice(full)
             e = {"type": kind, "sid": current.pop(slot)}
             if kind == "retract":
                 e["reason"] = rng.choice(RETRACT_REASONS)
+                if dead_erase:
+                    dead.append(e["sid"])
             else:
                 state["erased"] = True
         elif kind == "revise":

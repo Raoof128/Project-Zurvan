@@ -14,6 +14,11 @@ from pathlib import Path
 HOME = Path.home() / ".zurvan"
 REGISTRY = Path(__file__).resolve().parents[2] / "eval" / "datasets.json"
 TYPES = ("Q1", "Q2", "Q3", "Q4", "Q5", "Q6")
+SPLITS = ("dev", "holdout", "dev2", "holdout2")   # *2 = generator rtbench-2 (spec §12)
+
+
+def _sealed(split) -> bool:
+    return split.startswith("holdout")
 
 
 def register(subparsers) -> None:
@@ -23,12 +28,12 @@ def register(subparsers) -> None:
     rt = names.add_parser("rtbench", help="System-neutral record-time benchmark")
     sub = rt.add_subparsers(dest="action")
     g = sub.add_parser("generate", help="Write a split's cases and gold")
-    g.add_argument("--split", choices=("dev", "holdout"), required=True)
+    g.add_argument("--split", choices=SPLITS, required=True)
     g.add_argument("--out", default=None)
     r = sub.add_parser("run", help="Score one adapter on one track of one split")
     r.add_argument("--adapter", choices=sorted(ADAPTERS), required=True)
     r.add_argument("--track", choices=("S", "N"), required=True)
-    r.add_argument("--split", choices=("dev", "holdout"), required=True)
+    r.add_argument("--split", choices=SPLITS, required=True)
     r.add_argument("--cases-dir", default=None)
     r.add_argument("--report-dir", default=None)
     r.add_argument("--work-dir", default=None, help="Zurvan adapters: where per-case stores go (default: a temp dir)")
@@ -36,12 +41,12 @@ def register(subparsers) -> None:
     p = sub.add_parser("report", help="Print a run report")
     p.add_argument("path")
     v = sub.add_parser("validity", help="Spec §6.5: oracle and both baselines on both tracks")
-    v.add_argument("--split", choices=("dev", "holdout"), default="dev")
+    v.add_argument("--split", choices=SPLITS, default="dev")
     v.add_argument("--cases-dir", default=None)
 
 
 def _default_dir(split):
-    return HOME / "rtbench" / "dev" if split == "dev" else HOME / "instruments" / "rtbench_holdout"
+    return HOME / "instruments" / f"rtbench_{split}" if _sealed(split) else HOME / "rtbench" / split
 
 
 def _registration(split, cases_path):
@@ -71,7 +76,7 @@ def write_report(report, report_dir) -> tuple:
     out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = out / f"rtbench-{report['adapter']}-{report['track']}-{report.get('split', 'dev')}-{stamp}"
-    sealed = report.get("split") == "holdout"
+    sealed = _sealed(report.get("split", "dev"))
     if sealed:
         report = {k: v for k, v in report.items() if k != "misses"}
     j, m = base.with_suffix(".json"), base.with_suffix(".md")
@@ -114,7 +119,7 @@ def _load_split(split, cases_dir):
         print(f"refused: the {registration.split(': ')[1]} file under {d} does not match the registered "
               f"rtbench_{split} digest", file=sys.stderr)
         return None
-    if split == "holdout" and registration != "REGISTERED":
+    if _sealed(split) and registration != "REGISTERED":
         print(f"refused: the holdout runs only as a registered split ({registration})", file=sys.stderr)
         return None
     return _load(cases_p), _load(d / f"{split}.gold.jsonl"), registration
@@ -138,14 +143,13 @@ def validity_command(args) -> dict:
 
 
 def _run(args) -> int:
-    from scripts.rtbench import GENERATOR_VERSION
     from scripts.rtbench.adapters import ADAPTERS, ZURVAN_ADAPTERS, TrackNReader
     from scripts.rtbench.run import run_cases
     if args.adapter in ZURVAN_ADAPTERS and args.track == "N":
         print("refused: the Zurvan adapters are Track S only (spec §8); Track N is for systems that read prose",
               file=sys.stderr)
         return 2
-    if args.split == "holdout" and args.limit:
+    if _sealed(args.split) and args.limit:
         print("refused: --limit on the holdout would expose per-case results by differencing runs", file=sys.stderr)
         return 2
     loaded = _load_split(args.split, args.cases_dir)
@@ -166,12 +170,13 @@ def _run(args) -> int:
         # A fresh context: the CLI's live-store operation must not enclose the
         # adapter's temporary-store operations (NestedMutationError otherwise).
         report = contextvars.Context().run(run_cases, adapter, args.track, cases, golds,
-                                           itemised=args.split != "holdout")
+                                           itemised=not _sealed(args.split))
     finally:
         adapter.close()
         if tmp is not None:
             tmp.cleanup()
-    report.update(split=args.split, generator_version=GENERATOR_VERSION, registration=registration,
+    versions = sorted({c.get("generator_version", "?") for c in cases})
+    report.update(split=args.split, generator_version=",".join(versions), registration=registration,
                   date=datetime.now().date().isoformat())
     j, _ = write_report(report, args.report_dir or HOME / "reports")
     s = report["score"]
@@ -187,15 +192,16 @@ def dispatch(args) -> int:
         print("usage: zurvan bench rtbench {generate,run,report} ...", file=sys.stderr)
         return 2
     if args.action == "generate":
-        from scripts.rtbench.generate import DEV_SEEDS, holdout_seeds, write_split
-        seeds = DEV_SEEDS if args.split == "dev" else holdout_seeds(HOME / "instruments")
+        from scripts.rtbench.generate import DEV2_SEEDS, DEV_SEEDS, holdout_seeds, write_split
+        seeds = {"dev": DEV_SEEDS, "dev2": DEV2_SEEDS}.get(args.split) \
+            or holdout_seeds(HOME / "instruments", args.split)
         out = Path(args.out) if args.out else _default_dir(args.split)
-        if args.split == "holdout":
+        if _sealed(args.split):
             # Sealed like the retrieval instrument: owner-only before any byte lands.
             out.mkdir(parents=True, exist_ok=True)
             os.chmod(out, 0o700)
         manifest = write_split(args.split, seeds, out)
-        if args.split == "holdout":
+        if _sealed(args.split):
             for f in out.iterdir():
                 os.chmod(f, 0o600)
         print(json.dumps(manifest, indent=2, sort_keys=True))
@@ -209,5 +215,5 @@ def dispatch(args) -> int:
         print("validity:", "PASS" if out["pass"] else "FAIL")
         return 0 if out["pass"] else 1
     rep = json.loads(Path(args.path).read_text(encoding="utf-8"))
-    print(_markdown(rep, rep.get("split") == "holdout"), end="")
+    print(_markdown(rep, _sealed(rep.get("split", "dev"))), end="")
     return 0

@@ -18,6 +18,7 @@ class Stmt:
     ended: int | None = None
     end_kind: str | None = None
     erased: bool = False
+    erased_at: int | None = None   # == ended for a live erase; later for dead history (rtbench-2)
 
     def believed_at(self, t: int) -> bool:
         return self.born <= t and (self.ended is None or self.ended > t)
@@ -43,11 +44,16 @@ def fold(events) -> "Timeline":
             if kind == "supersede":
                 old = tl.statements[e["old"]]
                 old.ended, old.end_kind = t, "superseded"
-        elif kind in ("retract", "erase"):
+        elif kind == "retract":
             s = tl.statements[e["sid"]]
-            s.ended = t
-            s.end_kind = "retracted" if kind == "retract" else "erased"
-            s.erased = kind == "erase"
+            s.ended, s.end_kind = t, "retracted"
+        elif kind == "erase":
+            # A live statement ends here; a dead one keeps how and when it ended,
+            # and its status reads "erased" from this tick on.
+            s = tl.statements[e["sid"]]
+            if s.ended is None:
+                s.ended, s.end_kind = t, "erased"
+            s.erased, s.erased_at = True, t
     return tl
 
 
@@ -74,6 +80,8 @@ def answer(tl, question) -> object:
         t = question["t"]
         if s is None or s.born > t:
             return "not_yet"
+        if s.erased_at is not None and s.erased_at <= t:
+            return "erased"
         if s.ended is not None and s.ended <= t:
             return s.end_kind
         return "believed"
