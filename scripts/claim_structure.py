@@ -48,8 +48,29 @@ def provider_is_real() -> bool:
     return os.environ.get("ZURVAN_LLM_PROVIDER", "mock").lower() != "mock"
 
 
-def propose(out_path, *, call=None, limit=None, root=None) -> int:
-    """Write proposals for current claims without a triple. Returns how many."""
+def boundary_gate(text: str):
+    """None when `text` may leave the machine, else a refusal that names no span.
+
+    Ruled 2026-11-16 (deferred minor of 2026-11-15f): a remote model provider is
+    off the machine, so a claim is scanned as the PUBLIC_ARTIFACT sink, the sink
+    PRIVATE and INSTRUMENT text may never reach. Opt-in like Boundary itself: with
+    no built store nothing is scanned."""
+    from scripts.boundary_guard import default_root
+    from scripts.boundary import store as bstore
+    root = default_root()
+    if not bstore._is_built(root):
+        return None
+    from scripts import boundary
+    verdict = boundary.scan(root, text, "PUBLIC_ARTIFACT")
+    if verdict.blocked:
+        classes = sorted({getattr(m, "source_class", "?") for m in verdict.matches})
+        return f"BOUNDARY_BLOCKED: protected text ({', '.join(classes)}); not sent to the model"
+    return None
+
+
+def propose(out_path, *, call=None, limit=None, root=None, gate=boundary_gate) -> int:
+    """Write proposals for current claims without a triple. Returns how many.
+    Every claim passes `gate` before its text is sent to the model."""
     from scripts import claim_ledger as cl
     from scripts.claim_spo import normalise
     if call is None:
@@ -61,6 +82,11 @@ def propose(out_path, *, call=None, limit=None, root=None) -> int:
     rows = []
     for s in todo:
         row = {"claim_id": s.claim_id, "rev": s.rev, "text": s.text, "approved": False}
+        refused = gate(s.text) if gate else None
+        if refused:
+            row.update(subject=None, predicate=None, object=None, error=refused)
+            rows.append(row)
+            continue
         try:
             t = _parse(call(_prompt(s.text)))
             normalise(t.get("subject"), t.get("predicate"), t.get("object"))

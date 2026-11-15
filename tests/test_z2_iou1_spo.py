@@ -33,6 +33,8 @@ def root(tmp_path, monkeypatch):
         (tmp_path / d).mkdir(parents=True, exist_ok=True)
     (tmp_path / SRC).write_text(BODY, encoding="utf-8")
     monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    # Never the live Boundary store: `--propose` scans each claim against it.
+    monkeypatch.setenv("ZURVAN_BOUNDARY_ROOT", str(tmp_path / "no-boundary"))
     kr.ensure_schema(tmp_path)
     return tmp_path
 
@@ -266,3 +268,43 @@ def test_apply_refuses_before_any_write(root, tmp_path, problem):           # I1
     assert kr.current(root).revision == before and kr.current(root).state != kr.SUSPECT
     assert {q: q.read_bytes() for q in (root / "wiki" / "claims").glob("*.md")} == pages
     assert cl.current(root)[a].predicate is None
+
+
+def test_propose_never_sends_a_boundary_protected_claim(root, tmp_path, monkeypatch):
+    """Deferred minor (2026-11-15f), ruled: a remote model provider is off the machine,
+    so `--propose` scans each claim text as the PUBLIC_ARTIFACT sink when a Boundary
+    store is configured. A blocked claim is never sent; its row says why."""
+    from scripts import boundary
+    from scripts import claim_structure as cst
+    bnd = tmp_path / "boundary"
+    (bnd / "sources").mkdir(parents=True)
+    secret = ("The Halden settlement figure agreed with the regulator was "
+              "kept out of every public filing by both parties for years.")
+    (bnd / "sources" / "private.md").write_text(secret + "\n", encoding="utf-8")
+    boundary.build(bnd)
+    monkeypatch.setenv("ZURVAN_BOUNDARY_ROOT", str(bnd))
+    (root / SRC).write_text(BODY + secret + "\n", encoding="utf-8")
+    a = _op(root, lambda: cl.add("Orrin produced 4210 t", SRC, Q1, confidence="high", root=root, **W))
+    b = _op(root, lambda: cl.add(secret, SRC, secret, confidence="high", root=root, **W))
+    sent = []
+
+    def fake(prompt):
+        sent.append(prompt)
+        return json.dumps({"subject": "Orrin Mill", "predicate": "related_to", "object": {"value": "x"}})
+
+    out = tmp_path / "p.jsonl"
+    assert cst.propose(out, call=fake, root=root) == 2
+    rows = {r["claim_id"]: r for r in map(json.loads, out.read_text().splitlines())}
+    assert len(sent) == 1 and "Orrin produced" in sent[0] and "Halden settlement" not in sent[0]
+    assert rows[b]["predicate"] is None and rows[b]["error"].startswith("BOUNDARY_BLOCKED")
+    assert "Halden" not in rows[b]["error"]
+    assert rows[a]["predicate"] == "related_to"
+
+
+def test_propose_without_a_boundary_store_sends_every_claim(root, tmp_path):
+    from scripts import claim_structure as cst
+    _op(root, lambda: cl.add("Orrin produced 4210 t", SRC, Q1, confidence="high", root=root, **W))
+    sent = []
+    cst.propose(tmp_path / "p.jsonl", call=lambda p: sent.append(p) or json.dumps(
+        {"subject": "Orrin Mill", "predicate": "related_to", "object": {"value": "x"}}), root=root)
+    assert len(sent) == 1

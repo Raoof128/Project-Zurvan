@@ -146,3 +146,28 @@ def test_erase_lists_derived_artifacts_as_residue(root):
     with kr.operation(writer="test", root=root):
         out = cl.erase(a, reason_class="owner_request", actor="local:test", root=root)
     assert any(r["kind"] == "derived_artifact" and "syntheses" in r["where"] for r in out["residue"])
+
+
+def test_impact_ignores_evidence_from_another_registered_project(root, tmp_path):
+    """Deferred minor (2026-11-15f): an evidence item names its project. Another
+    registered store has its own `wiki/claims/...` with the same relative paths, so
+    a path match from that project is not a citation of this store's claim."""
+    a = _add(root, "week 9 is 52", "Week 9 totals 52 days")
+    rel = _page_rel(root, a)
+    other = tmp_path / "other"
+    other.mkdir()
+    (_cfg() / "projects.json").write_text(json.dumps({"current": None, "projects": {
+        "here": {"path": str(root)}, "elsewhere": {"path": str(other)}}}), encoding="utf-8")
+    for name, proj in (("pack-here", "here"), ("pack-else", "elsewhere"), ("pack-unknown", "ghost")):
+        d = _cfg() / "evidence-packs" / name
+        d.mkdir(parents=True)
+        (d / "items.json").write_text(json.dumps([{"project": proj, "source_path": rel}]), encoding="utf-8")
+    rep = _cfg() / "reports" / "rep-else"
+    rep.mkdir(parents=True)
+    (rep / "report.json").write_text(json.dumps({"claims": [{"project": "elsewhere", "source_path": rel}],
+                                                 "citations": [{"project": "elsewhere", "path": rel}]}),
+                                     encoding="utf-8")
+    hits = sorted(Path(h["path"]).name for h in ci.impact(a, root=root))
+    # An unregistered project cannot be told apart, so it is still flagged (flagging
+    # a non-citation is cheap; missing a citation of a retracted claim is not).
+    assert hits == ["pack-here", "pack-unknown"]

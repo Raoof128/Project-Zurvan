@@ -256,7 +256,9 @@ def _decision_page(ref: str) -> Path:
     """A decision page from a path or a slug; DECISION_UNKNOWN otherwise."""
     decisions = (PROJECT_ROOT / "wiki" / "decisions").resolve()
     p = Path(ref)
-    page = p.resolve() if p.suffix == ".md" else (decisions / f"{ref}.md").resolve()
+    # A relative path is store-relative, never cwd-relative (deferred minor 2026-11-15f).
+    page = ((p if p.is_absolute() else PROJECT_ROOT / p).resolve() if p.suffix == ".md"
+            else (decisions / f"{ref}.md").resolve())
     if page.parent != decisions or not page.is_file():
         raise DecisionRefused("DECISION_UNKNOWN", f"no decision page {ref!r} under wiki/decisions")
     return page
@@ -293,6 +295,26 @@ def _set_field(front: str, key: str, value: str) -> str:
     return front[:at] + "\n" + line + front[at:]
 
 
+def _status_section_superseded(body: str, old_status: str, note: str) -> str:
+    """The body's `## Status` section now says `superseded` and carries the dated
+    note; a page without one gets the section at its end (deferred minor 2026-11-15f:
+    the old status line survived and the note landed after any later section)."""
+    head = "\n## Status\n"
+    if head not in body:
+        return body.rstrip("\n") + f"\n{head}superseded\n\n{note}\n"
+    before, after = body.split(head, 1)
+    nxt = after.find("\n## ")
+    section, rest = (after, "") if nxt == -1 else (after[:nxt + 1], after[nxt + 1:])
+    lines = section.rstrip("\n").split("\n")
+    first = next((i for i, l in enumerate(lines) if l.strip()), None)
+    if first is not None and lines[first].strip().strip('"').lower() == old_status.lower():
+        lines[first] = "superseded"
+    else:
+        lines.insert(0, "superseded")
+    section = "\n".join(lines).rstrip("\n") + f"\n\n{note}\n"
+    return before + head + section + ("\n" + rest if rest else "")
+
+
 def supersede_decision(old: str, new: str, reason: str) -> tuple:
     """Link `old` as superseded by `new`, inside the caller's operation (IOU-Z2-2).
 
@@ -326,17 +348,16 @@ def supersede_decision(old: str, new: str, reason: str) -> tuple:
     earlier = [x.strip() for x in fn.get("supersedes", "").split(",") if x.strip()]
     # A retry after a failed write finds `supersedes` already naming old: never twice.
     nf = _set_field(nf, "supersedes", ", ".join(earlier + ([] if op.stem in earlier else [op.stem])))
-    note = (f"\nSuperseded by [[{np_.stem}]] on {datetime.now().date().isoformat()}: "
-            f"{' '.join(str(reason).split())}\n")
-    if "\n## Status" not in orest:
-        note = "\n## Status" + note
+    note = (f"Superseded by [[{np_.stem}]] on {datetime.now().date().isoformat()}: "
+            f"{' '.join(str(reason).split())}")
+    orest = _status_section_superseded(orest, fo.get("status", ""), note)
     from scripts.knowledge_revision import declare_store_project
     if fo.get("project"):
         declare_store_project(fo["project"])
     # The NEW page first (final review I4): if the old page's write then fails, old
     # is still current and a retry completes the link (see the idempotent
     # `supersedes` above). Old first would leave old superseded with no way back.
-    for page, content in ((np_, nf + nrest), (op, of + orest.rstrip("\n") + "\n" + note)):
+    for page, content in ((np_, nf + nrest), (op, of + orest)):
         if not write_file_safely(str(page), content):
             raise OSError(f"failed to securely write {page}")
     append_to_log("Decision Superseded", f"{op.stem} -> {np_.stem}: {' '.join(str(reason).split())}")
@@ -344,19 +365,21 @@ def supersede_decision(old: str, new: str, reason: str) -> tuple:
 
 
 def decision_chain(ref: str) -> list:
-    """[(slug, frontmatter)] from the earliest predecessor to the latest successor
-    of `ref` (read-only; follows the first `supersedes` entry backwards)."""
+    """[(slug, frontmatter)] from the earliest predecessors to the latest successor
+    of `ref` (read-only). Predecessors follow EVERY `supersedes` entry, ancestors
+    first, so both sides of a merge are listed (deferred minor 2026-11-15f)."""
     decisions = (PROJECT_ROOT / "wiki" / "decisions")
     start = _decision_page(ref).stem
-    seen, back, cur = {start}, [], start
-    while True:
-        prev = [x.strip() for x in decision_front(decisions / f"{cur}.md").get("supersedes", "").split(",") if x.strip()]
-        if not prev or prev[0] in seen or not (decisions / f"{prev[0]}.md").is_file():
-            break
-        cur = prev[0]
-        seen.add(cur)
-        back.append(cur)
-    chain = list(reversed(back)) + [start]
+    seen, chain = set(), []
+
+    def back(slug):
+        seen.add(slug)
+        for prev in (x.strip() for x in decision_front(decisions / f"{slug}.md").get("supersedes", "").split(",")):
+            if prev and prev not in seen and (decisions / f"{prev}.md").is_file():
+                back(prev)
+        chain.append(slug)
+
+    back(start)
     cur = start
     while True:
         nxt = decision_front(decisions / f"{cur}.md").get("superseded_by")
