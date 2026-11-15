@@ -88,6 +88,34 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-11-15b (Australia/Sydney) — Z2 follow-ups: all final-review minors fixed, IOU-Z2-7 and -8 closed on the live store, two security findings fixed; G5's live counts now reconcile
+
+Raouf:
+- **Scope:** Raouf said "proceed do all fixes" after the Z2 migration (entry 2026-11-15). Work on branch `z2-fixes` (13 fix commits plus 2 test commits), fast-forwarded to `main` at `f5fe668`.
+- **Fixes, each with a test that failed first:**
+  - **Hot journal (crash safety):** a claim writer killed mid-transaction leaves `claims.sqlite-journal`. Read-only readers then failed with `SQLITE_READONLY_ROLLBACK`, and `reconcile_ok` returned False, so the store could never be reconciled. Readers now refuse `CLAIMS_STORE_RECOVERY_NEEDED` naming the fix; reconcile lets SQLite roll a hot journal back first (`0eb16cb`).
+  - **IOU-Z2-7:** migration classed a quote matching twice after whitespace normalisation as `changed` and orphaned it; `verify` calls it `ambiguous`, which never orphans. Migration now agrees: `ambiguous`, imported asserted and unanchored (`ff2f32b`).
+  - **MCP `zurvan_claim_add`** named every refusal as a bad quote. It now names the code (`MIGRATION_REQUIRED`, `CLAIMS_STORE_SUSPECT`, `CLAIMS_BUSY`…) and keeps the verbatim hint only for `EVIDENCE_REJECTED` (`43deed2`).
+  - **Quadratic commands:** `conflicts`, `regenerate` and `verify --apply` re-read the ledger once per claim; `claim conflicts` took 18 s on 556 claims. One read per command now (`9682024`). `verify` also reads each source once per run instead of once per claim (`acaec5e`).
+  - **Test-store isolation:** migration defaults and erase's legacy-copy lookup used the real `~/.zurvan/z2` for ANY store; a test store could have stubbed a page of the live frozen copy (the fixture id `claim-dummy-001` existed in both). `claim_store.private_dir` keeps `~/.zurvan/z2` for the store in this checkout and puts any other store's files in `<store>/.zurvan-z2/` (gitignored) (`58e7b1e`).
+  - **Erase residue** now also lists the `wiki/log.md` line, migration reports naming the claim, the metadata the ledger keeps by design, and any hand edit the rewrite had to overwrite (`58e7b1e`, `e3e4a68`).
+  - **Erase and re-extraction:** erase blanked the extraction key, so re-extracting the source recreated the erased claim. The security review then found two MEDIUM issues in my first fix (`b2cbde6`): keeping the raw key kept the model's own claim id, and a re-extraction would rewrite the raw JSON, summary and concepts with the erased fact. Final fix (`f8c2a19`): the key becomes the tombstone `erased:<sha256 of the file>`, and `extract_source` refuses that exact file (`ExtractionRefused`) **before the model call** and before any write.
+  - **Retract** wrote its basis over the claim's `confidence_basis`; it now goes into the retraction reason (`b2cbde6`). A successor page now marks a replaced claim that was later retracted ("since retracted"), and retract refreshes it, never over a hand edit (`e3e4a68`).
+  - **Unmounted disks:** `verify --apply` orphaned claims whose source sits on a disk that is not mounted. `resolve` now says `volume not mounted: /Volumes/X` and verify leaves them alone (`skipped_unmounted`) (`f8c2a19`).
+  - **`zurvan claim add`** wrote no `Claim Added` log line (the MCP path did); one helper now serves both (`1367640`). The full suite caught that an in-process smoke test then wrote that line into the checkout's own `wiki/log.md`; the test now spies it (`f5fe668`).
+  - **`knowledge status`** reported a scope-version change as an outside edit; it now names the scope change and states the bound (`79d7f1c`).
+  - **Graph parser:** a frontmatter list item containing a colon (a tag `client: acme`) became a junk key; list items are skipped. No key an edge or node field reads can change (`8c6690c`).
+  - **Test gaps closed:** a real (non-dry) `claim migrate` CLI run, erase CLI residue, the 30 s lock default. The Z2 closure matrix names the new tests under G2, G5, G7 and G8.
+- **Live store (IOU-Z2-7, IOU-Z2-8):**
+  - `clm_d4782cf842887bc4` and `clm_e04c67df1d37b828` (risk report §3.1) restored to `asserted` with `claim revise`, each re-anchored to a longer quote that occurs exactly once (the §3.1 passage; the first occurrence is the executive summary). This is the designed evidence path, not a restore by assertion.
+  - `claim-dummy-001` (`clm_ce29e757eafa54c4`), a 2026-05-30 test fixture page in the real store with no source, retracted.
+  - Live `claim verify`: 515 intact, 7 moved, 5 changed, 26 gone, 0 ambiguous; integrity 0.944. The broken counts now equal the migration's (27 gone, 7 changed) minus the source-less fixture and the two restored claims. **G5's live criterion is met** after the fix; it was not met at the migration itself, and that entry stands.
+- **Retrieval:** `index search` 459,113 chunks; graph 15,784 nodes / 22,103 edges; both CURRENT at 3471. `eval_search --hybrid` (RETIRED instrument, legacy capture): Top-1 0.72, Top-3 0.74, MRR 0.737, the same 13 failing items as this morning's post-migration run; none newly failing. The comparison is against this morning's report at revision 3452, not a fresh "before" (no ranking code changed). Report `~/.zurvan/reports/z2-fixes-eval-after-20261115.json`.
+- **Rust MCP:** no Rust file changed; the installed binary (`b241648c…`) stands. Its write tools run the Python on `main` per call, so the fixes are live without a restart.
+- **Skills:** user-level `zurvan` skill (Claude Code and Codex, identical) gained the erase, re-extraction, unmounted-disk and error-code behaviour. The repo's tracked copy (`.claude/skills/zurvan/SKILL.md`) gained a Z2 claims section (`2756d60`).
+- **Verification:** branch suite 3933 passed / 4 failed (the four worktree-only failures: no live wiki, graph or index) after one run that caught the smoke-test write above; `bash scripts/check.sh` on `main`: all 25 gates passed, exit 0: gate 0 Boundary red team 27/27, gate 1 guard passed, gate 2 pytest **3941 passed / 0 failed / 9 skipped** (37:05), gate 5 index 459,113 chunks healthy, gate 6 Top-1 72% / Top-3 74% (legacy capture, UNVERIFIED; the eval took ~55 min on a disk-bound host); store CLEAN at 3471, search and graph COHERENT+CURRENT. `public_repo_guard.py` and `git diff --check` before each commit.
+- **Follow-ups:** IOU-Z2-1…6 unchanged (entry 2026-11-15). Z1b still NOT closed. Rotate the sudo password.
+
 ### 2026-11-15 (Australia/Sydney) — Z2 claim ledger merged to `main` and the live store migrated: 551 claims in `data/claims.sqlite`, 0 provenance mismatches; retrieval unchanged; first run crashed and was restored; G5's live criterion NOT met exactly
 
 Raouf:
@@ -134,44 +162,3 @@ Raouf:
   - **IOU-Z2-8 (new):** `claim-dummy-001` is a fixture page living in the real store; it is now an orphaned claim with no source. Retract or erase it.
   - Deferred minors from the final review: the erase residue list omits `wiki/log.md` lines; `conflicts` and `verify` are quadratic in the number of claims; MCP claim errors do not name the real refusal code; the scope-version switch shows a false `drift: UNRECORDED` until the first write.
   - Z1b is still NOT closed (the live ninth-run refusal). Rotate the sudo password.
-
-### 2026-11-14 (Australia/Sydney) — On suite `97d564c6d51b048b`: gates 4, 5, 8 and 9 PASSED, tamper drill PASS; budget 5; Z1b NOT closed (only the live "ninth run refused" of gate 4 is missing; Raouf kept the budget)
-
-Raouf:
-- **Scope:** Package B, continued from 2026-11-13b. Raouf said "proceed".
-- **Host check before spending:** load average 2.02 (from 77.7 at 15:16 on 11-13). Worktree `.worktrees/z1b-gate4` clean at `dfef49a`; not stale; budget 7; open incidents 0; every scan target carries the `zurvaneval` ACL.
-- **Gate 4: PASSED.** A NEW measurement under the unchanged pre-registered limits (`query_timeout_s` 30, `run_timeout_s` 3600); 2026-11-13b run 1 stays recorded as FAILED.
-  - Run 1, 18:40:28–18:51:02: `ok`, `seal_valid: true`, `n_items` 160, `target_missing` 0. Recall@1 **0.627**, @3 **0.826**, @10 **0.897**, MRR **0.760**. Latency p50/p95 5000 ms (public ladder), peak RSS 1024 MB (ladder). Abstain 10, **passed 0**. Budget 7 → **6**. Load at the end: 5.63.
-  - Run 2: identical, `cached: true`, budget unchanged at 6.
-  - **Not comparable with 11-13** (0.922 @10, MRR 0.849): those were on the 61 items the burns left, these are on all 160.
-  - **The candidate never abstained correctly (0/10 on `not_found`).** Gate 4 does not test this; it is a real retrieval weakness, recorded for Z2.
-- **Gate 5: PASSED.**
-  - First attempt with `--commit c753dbf`: refused `DECLARATION_INVALID`, uncharged. The client reads the declaration committed AT the candidate commit, and at `c753dbf` it names the retired suite `bedc01c1dce53b46`.
-  - The probe was rebuilt as `2c426bd`, on the local branch `z1b-gate5-probe-97d564c6`, never merged: the tree of `dfef49a` with ONLY `scripts/z1b_candidate.py` taken from `c753dbf`. The blob is identical (checked by `git rev-parse`).
-  - Run, 18:57:24–19:00:56: `CANDIDATE_FAILED`, charged (budget 6 → **5**). `/tmp/z1b-escape-probe` absent before and after; open incidents 0; holdout/reserve still 160/80.
-- **Gate 8: PASSED.** The committed `eval/z1b/manifest.json` (suite `97d564c6d51b048b`, seq 6, holdout 160 / reserve 80, `short: []`, `burn_ledger: []`) has SHA-256 `3dff0612…`, equal to the `suite_manifest_sha256` the broker returned in the gate 4 result. Live status after gate 5 is 160/80.
-- **seal-check after the runs:** `ok: true`, 25/25, every sealed path EACCES to the dev identity.
-- **Unknown commit refused (gate 4 live proof, "dirty/unknown refused").** `run --commit 0123…4567` (a commit that does not exist) returned `CANDIDATE_NOT_FROZEN`, uncharged; budget stayed 5. A dirty checkout was already refused live on 2026-11-13 (`CANDIDATE_NOT_FROZEN`, untracked spec file).
-- **Tamper drill: PASS** (gate 1b/3 oracle), run by Raouf at 19:11: `sudo bash scripts/eval_seal/tamper_drill.sh; sudo -k` printed `DRILL PASS`. Afterwards:
-  - the wrapper's ctime is 19:11:16 (so the drill really ran), its SHA-256 is back to the sudoers pin `390b6134…`, and no `.bak` remains;
-  - seal-check is 25/25 (the ticket was dropped);
-  - budget 5, open incidents 0, holdout/reserve 160/80.
-  - The drill overlapped the red-team. A broker call refused in that window can only refuse, never leak, so the gate 9 result stands.
-- **Gate 9: PASSED.** A fresh Sonnet agent, given the plan's brief verbatim, in an isolated worktree, as the dev user, reported **FAILURE**: no holdout/reserve query, target page or canary obtained. Transcript `~/.zurvan/reports/z1b-redteam-2026-11-14.jsonl` (0600); it contains no `zc-` canary-shaped token. What it tried:
-  - grammar fuzz of the broker door (every attempt returned `BAD_ARGS`, exit 2, carrying only the code and the sha);
-  - `run` with well-formed nonexistent bundles (no output, uncharged);
-  - `broker scan` (clean);
-  - a canary grep over the repo and recent transcripts (none);
-  - a read of the installed broker source (0444, closed serializers, stderr discarded, `python3 -I`, `env_reset`/`!setenv`).
-  - Its direct read of sealed paths was blocked by the harness; the dev EACCES on every sealed path is covered by seal-check.
-  - Its note that the tracked manifest names a different suite is about its OWN worktree base, which was older than `HEAD`, probably the unpushed remote's `main`. `HEAD`'s `eval/z1b/manifest.json` names `97d564c6d51b048b`.
-  - It analysed, without running, the known residual channel: the candidate shapes its public metrics, about 3 bits per item per run. That is the bounded covert channel already accepted in decision G20 (≤ ~56 bits per declared run). It is not a leak of an item.
-- **Verdict: Z1b is NOT CLOSED, by Raouf's decision.** Every gate has live evidence, except one part of gate 4's live proof (`tests/test_z1b_closure.py` `LIVE_PROOF["4"]`): the ninth run refused once the budget is spent (`SUITE_RENEWAL_REQUIRED`). It is unit-tested (`test_t10_eight_runs_then_the_ninth_is_suite_renewal_required`, `test_t7_eight_reserves_then_ninth_needs_renewal`) but has never been shown on the real broker. Showing it now would spend the last 5 runs. Raouf chose to keep them for Z2 promotions. The criterion is NOT redefined: it stays open until a suite's budget runs out on the real broker.
-- **Files:** AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation). No code changed. Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`), not merged, not pushed. Outside the repo: `~/.zurvan/reports/z1b-redteam-2026-11-14.jsonl`.
-- **Verification:** the commands and outputs above. Code unchanged since `dfef49a` (`-k z1b`: 1831 passed / 5 skipped / 0 failed). `public_repo_guard.py` passed; `git diff --check` clean.
-- **Follow-ups:**
-  - (1) Z1b closes when the real broker refuses a run because the budget is spent (`SUITE_RENEWAL_REQUIRED`, uncharged): on this suite after its 5 remaining runs, or on a later suite.
-  - (2) Z2 candidate work: the candidate never abstains correctly (0/10 `not_found`).
-  - (3) Local branch `z1b-gate5-probe-97d564c6` (`2c426bd`) is kept as gate 5 evidence; never merge it.
-  - (4) Open question: should a charged run refuse (uncharged) under host overload?
-  - (5) Rotate the sudo password.
