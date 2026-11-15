@@ -9,7 +9,7 @@ from scripts.mcp_security import enforce_read_only, is_readable_path
 from scripts.context_export import search_memory, export_context
 from scripts.graph_query import get_stats, get_neighbours
 from scripts.graph_context import expand_graph_context
-from scripts.memory import add_decision, add_note, add_claim, add_question
+from scripts.memory import add_decision, add_note, add_claim, add_claim_detailed, add_question
 
 
 def mcp_operation(func):
@@ -438,11 +438,17 @@ def tool_zurvan_claim_add(text: str, source: str, evidence: str, confidence: str
     if not is_readable_path(source, allow_raw=allow_raw):
         return CLAIM_SOURCE_ERROR
     
-    if add_claim(text, source, evidence, confidence, tags):
+    ok, refusal = add_claim_detailed(text, source, evidence, confidence, tags)
+    if ok:
         return f"Claim added successfully: {text}"
     # "Error" prefix: the A5 error flag (and the Rust server's isError) keys on
-    # it, so a refused claim is reported as a refusal, not a success.
-    return "Error: failed to add claim. Ensure evidence is non-empty and exists verbatim in the source file."
+    # it, so a refused claim is reported as a refusal, not a success. The
+    # refusal code is named: a store awaiting migration or reconcile is not a
+    # bad quote (final-review minor, fixed 2026-11-15).
+    msg = f"Error: failed to add claim: {refusal}"
+    if refusal and refusal.startswith("EVIDENCE_REJECTED"):
+        msg += ". Ensure evidence is non-empty and exists verbatim in the source file."
+    return msg
 
 def _mcp_actor() -> str:
     from scripts import knowledge_revision as kr

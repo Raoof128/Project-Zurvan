@@ -263,6 +263,14 @@ def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List
     `claim_pages`; this function never writes `wiki/claims/` itself. Method is
     `agent` when the enclosing operation is an MCP call, else `human`.
     """
+    ok, _ = add_claim_detailed(text, source, evidence, confidence, tags)
+    return ok
+
+
+def add_claim_detailed(text: str, source: str, evidence: str, confidence: str,
+                       tags: List[str]) -> tuple:
+    """`add_claim`, returning (ok, refusal) where refusal is `CODE: detail` (or
+    the validation message) so a caller can name the real reason."""
     require_active_operation("memory.add_claim()")
     from scripts import claim_ledger
     from scripts import knowledge_revision as kr
@@ -278,14 +286,14 @@ def add_claim(text: str, source: str, evidence: str, confidence: str, tags: List
                                     method="agent" if agent else "human")
     except ClaimRefused as e:
         print(f"Error: {e.code}: {e.detail}.")
-        return False
+        return False, f"{e.code}: {e.detail}"
     except ValueError as e:
         print(f"Error: {e}.")
-        return False
+        return False, f"INVALID: {e}"
     append_to_log("Claim Added", f"Claim {claim_id} from {source}")
     from scripts import claim_pages
     print(f"Created {claim_pages.page_path(claim_ledger.current()[claim_id])}")
-    return True
+    return True, None
 
 
 def _os_user() -> str:

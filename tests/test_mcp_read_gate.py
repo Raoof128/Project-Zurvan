@@ -117,7 +117,8 @@ def test_mcp_read_gate_claim_source_is_allow_listed(root, monkeypatch):
     from scripts import mcp_tools
     monkeypatch.setenv("ZURVAN_MCP_READONLY", "0")
     called = []
-    monkeypatch.setattr(mcp_tools, "add_claim", lambda *a, **k: called.append(a) or True)
+    monkeypatch.setattr(mcp_tools, "add_claim_detailed",
+                        lambda *a, **k: called.append(a) or (True, None))
     import contextlib
     # No ledger operation may open against any real store from this test.
     monkeypatch.setattr("scripts.knowledge_revision.operation", lambda **k: contextlib.nullcontext())
