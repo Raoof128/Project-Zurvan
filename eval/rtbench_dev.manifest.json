@@ -1,0 +1,8 @@
+{
+  "generator_version": "rtbench-1",
+  "gold_sha256": "53a5e834738c4ae941fc4e0038d8a43b2de4ee7ca3dfff315aa5c571c7feb423",
+  "n_items": 200,
+  "note": "Regenerate with `zurvan bench rtbench generate --split dev`; DEV_SEEDS = range(1000, 1200).",
+  "sha256": "58d4828445cb18b00a64448b679b5b91d8a3aa4eaeea0c75a1e23961418e23f6",
+  "split": "dev"
+}

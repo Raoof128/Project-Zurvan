@@ -315,6 +315,7 @@ Runs 22 stages: unit tests · extraction gauntlet · wiki audit · retrieval eva
 | [Deployment](docs/DEPLOYMENT.md) | Deployment notes and limitations |
 | [Workflows & Scripts](docs/workflows_and_plans.md) | Detailed pipeline logic |
 | [Extraction Test Matrix](docs/extraction_test_matrix.md) | Formats handled by the gauntlet |
+| [RTBench](docs/evaluation/rtbench.md) | Record-time benchmark: what a memory system believed at an earlier point |
 | [Agent Rules](AGENTS.md) | Strict invariants for AI agent interaction |
 | [MCP Integration](docs/mcp/) | Claude Code, Cursor, Codex-style agent setup |
 | [Obsidian Setup](docs/obsidian/) | Vault config, plugins, graph view |
