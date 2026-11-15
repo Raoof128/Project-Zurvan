@@ -136,7 +136,9 @@ def _superseded_texts(claim_id, root, now) -> list:
             " ORDER BY relation_id", (claim_id,))]
     finally:
         conn.close()
-    return [now[o].text for o in olds if o in now and now[o].text is not None]
+    # A replaced claim that was later withdrawn says so (final-review minor).
+    return [now[o].text + ("" if now[o].status == "superseded" else f" (since {now[o].status})")
+            for o in olds if o in now and now[o].text is not None]
 
 
 def write_page(claim_id, root=None, *, force: bool = False, now=None) -> Path:

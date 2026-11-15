@@ -198,3 +198,31 @@ def test_retract_keeps_the_confidence_basis_and_records_its_own(root):
     assert cl.current(root)[cid].basis == ["primary_source"]
     last = cl.history(cid, root)[-1]
     assert last["reason"] == "source misread (retraction basis: agent_inference)"
+
+
+# Deferred minor, fixed 2026-11-15: after A was superseded by B and then
+# retracted, B's page still said "Supersedes: <A's text>" with no sign that A
+# was withdrawn - B's page was never regenerated.
+def test_a_successor_page_shows_that_the_claim_it_replaced_was_retracted(root):
+    a = _add(root, text="the old reading")
+    with kr.operation(writer="test", root=root):
+        b = cl.supersede(a, text="the new reading", source=SRC, evidence=Q2, reason="re-read",
+                         actor="a", method="human", root=root)
+    with kr.operation(writer="test", root=root):
+        cl.retract(a, reason="never true", basis=[], actor="a", method="human", root=root)
+    page = (root / "wiki" / "claims" / f"{b}.md").read_text(encoding="utf-8")
+    assert "Supersedes: the old reading (since retracted)" in page
+    from scripts import claim_pages as cp
+    assert not cp.has_unadopted_edit(b, root)
+
+
+def test_a_retract_never_overwrites_a_hand_edit_on_the_successor_page(root):
+    a = _add(root, text="the old reading")
+    with kr.operation(writer="test", root=root):
+        b = cl.supersede(a, text="the new reading", source=SRC, evidence=Q2, reason="re-read",
+                         actor="a", method="human", root=root)
+    page = root / "wiki" / "claims" / f"{b}.md"
+    page.write_text(page.read_text(encoding="utf-8") + "my note\n", encoding="utf-8")
+    with kr.operation(writer="test", root=root):
+        cl.retract(a, reason="never true", basis=[], actor="a", method="human", root=root)
+    assert page.read_text(encoding="utf-8").endswith("my note\n")
