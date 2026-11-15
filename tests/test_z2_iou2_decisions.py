@@ -228,3 +228,26 @@ def test_a_relative_page_path_resolves_against_the_store_not_the_cwd(store):
     r = zurvan(store, "decision", "supersede", rel_old, "--by", new.stem, "--reason", "r")
     assert r.returncode == 0, r.stderr
     assert _fm(old)[0]["superseded_by"].strip().strip('"') == new.stem
+
+
+def test_a_page_marked_superseded_without_a_link_can_be_linked_once(store):
+    """Legacy pages say `status: superseded` with the successor only in prose. Linking
+    them is a repair, not a second supersession; a linked page still refuses."""
+    old, new, other = _decide(store, "Legacy old"), _decide(store, "Legacy new"), _decide(store, "Other")
+    text = old.read_text(encoding="utf-8").replace("status: \"accepted\"", "status: superseded")
+    old.write_text(text, encoding="utf-8")
+    zurvan(store, "knowledge", "reconcile")
+    r = zurvan(store, "decision", "supersede", old.stem, "--by", new.stem, "--reason", "link the prose note")
+    assert r.returncode == 0, r.stderr
+    assert _fm(old)[0]["superseded_by"].strip().strip('"') == new.stem
+    again = zurvan(store, "decision", "supersede", old.stem, "--by", other.stem, "--reason", "r")
+    assert again.returncode == 1 and "DECISION_NOT_CURRENT" in again.stderr
+
+
+def test_a_rejected_decision_still_refuses(store):
+    old, new = _decide(store, "Rejected old"), _decide(store, "Rejected new")
+    old.write_text(old.read_text(encoding="utf-8").replace('status: "accepted"', "status: rejected"),
+                   encoding="utf-8")
+    zurvan(store, "knowledge", "reconcile")
+    r = zurvan(store, "decision", "supersede", old.stem, "--by", new.stem, "--reason", "r")
+    assert r.returncode == 1 and "DECISION_NOT_CURRENT" in r.stderr

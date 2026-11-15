@@ -330,7 +330,11 @@ def supersede_decision(old: str, new: str, reason: str) -> tuple:
         raise DecisionRefused("DECISION_CYCLE", f"{op.stem} cannot supersede itself")
     fo, fn = decision_front(op), decision_front(np_)
     for page, fm, role in ((op, fo, "old"), (np_, fn, "new")):
-        if fm.get("superseded_by") or fm.get("status", "").lower() in _ENDED_STATUSES:
+        status = fm.get("status", "").lower()
+        # A legacy page marked `superseded` with its successor only in prose may be
+        # linked once (2026-11-16): that repairs the record, it does not end it again.
+        repair = role == "old" and status == "superseded" and not fm.get("superseded_by")
+        if fm.get("superseded_by") or (status in _ENDED_STATUSES and not repair):
             hint = f"; it was superseded by {fm['superseded_by']}" if fm.get("superseded_by") else ""
             raise DecisionRefused("DECISION_NOT_CURRENT",
                                   f"the {role} decision {page.stem} is {fm.get('status') or 'ended'}{hint}")

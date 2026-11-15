@@ -32,7 +32,8 @@ from pathlib import Path
 from scripts import knowledge_revision as kr
 from scripts import knowledge_scope as ks
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # v2 (2026-11-16, IOU-Z2-4b): locator_kind admits media_region
+LOCATOR_KINDS = ("text_quote", "media_region")
 
 EVENTS = ("assert", "revise", "supersede", "retract", "orphan", "restore", "erase")
 STATUSES = ("asserted", "supported", "contested", "superseded", "retracted",
@@ -58,6 +59,20 @@ class ClaimRefused(Exception):
 
 def _q(values) -> str:
     return ",".join(f"'{v}'" for v in values)
+
+
+# Column for column the same in every schema version; only the CHECK widens.
+_EVIDENCE_TABLE = """CREATE TABLE IF NOT EXISTS evidence (
+    evidence_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id          TEXT NOT NULL REFERENCES claims(claim_id),
+    rev               INTEGER NOT NULL,
+    source_ref_cid    TEXT NOT NULL REFERENCES content(cid),
+    locator_kind      TEXT NOT NULL DEFAULT 'text_quote' CHECK (locator_kind IN ({kinds})),
+    selector_cid      TEXT NOT NULL REFERENCES content(cid),
+    capsule_cid       TEXT REFERENCES content(cid),
+    location_hint_cid TEXT REFERENCES content(cid),
+    reader            TEXT NOT NULL
+)"""
 
 
 _SCHEMA = f"""
@@ -105,17 +120,7 @@ CREATE TABLE IF NOT EXISTS revisions (
     row_hash                  TEXT NOT NULL UNIQUE,
     UNIQUE (claim_id, rev)
 );
-CREATE TABLE IF NOT EXISTS evidence (
-    evidence_id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    claim_id          TEXT NOT NULL REFERENCES claims(claim_id),
-    rev               INTEGER NOT NULL,
-    source_ref_cid    TEXT NOT NULL REFERENCES content(cid),
-    locator_kind      TEXT NOT NULL DEFAULT 'text_quote' CHECK (locator_kind IN ('text_quote')),
-    selector_cid      TEXT NOT NULL REFERENCES content(cid),
-    capsule_cid       TEXT REFERENCES content(cid),
-    location_hint_cid TEXT REFERENCES content(cid),
-    reader            TEXT NOT NULL
-);
+{_EVIDENCE_TABLE.format(kinds=_q(LOCATOR_KINDS))};
 CREATE TABLE IF NOT EXISTS relations (
     relation_id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_claim  TEXT NOT NULL REFERENCES claims(claim_id),
@@ -237,7 +242,39 @@ def connect(root=None, *, readonly: bool = False) -> sqlite3.Connection:
             conn.execute("ROLLBACK")
             conn.close()
             raise
+    if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+        try:
+            _migrate(conn)
+        except Exception:
+            conn.close()
+            raise
     return conn
+
+
+def _migrate(conn) -> None:
+    """v1 -> v2: rebuild `evidence` with the wider locator_kind CHECK.
+
+    SQLite cannot alter a CHECK in place. Every row is copied with its
+    evidence_id, so `evidence_digest` and the revision hash chain are untouched
+    (nothing hashed changes); one IMMEDIATE transaction, re-checked inside."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] == 1:
+            n = conn.execute("SELECT count(*) FROM evidence").fetchone()[0]
+            conn.execute("PRAGMA defer_foreign_keys = ON")
+            conn.execute("ALTER TABLE evidence RENAME TO evidence_v1")
+            conn.execute(_EVIDENCE_TABLE.format(kinds=_q(LOCATOR_KINDS)))
+            conn.execute("INSERT INTO evidence SELECT * FROM evidence_v1")
+            if conn.execute("SELECT count(*) FROM evidence").fetchone()[0] != n:
+                raise sqlite3.DatabaseError("evidence migration lost rows")
+            conn.execute("DROP TABLE evidence_v1")
+            conn.execute("CREATE INDEX IF NOT EXISTS evidence_claim ON evidence(claim_id, rev)")
+            conn.execute("UPDATE head SET schema_version = 2 WHERE id = 1")
+            conn.execute("PRAGMA user_version = 2")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def new_claim_id() -> str:

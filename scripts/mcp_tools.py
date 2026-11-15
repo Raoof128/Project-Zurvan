@@ -547,6 +547,8 @@ def tool_zurvan_claim_show(claim_id: str, as_of_revision: int | None = None,
         quote["prefix"] = quote["suffix"] = None
         if isinstance(sel.get("state"), dict):
             sel["state"]["sha256"] = None
+            if "region_sha256" in sel["state"]:          # IOU-Z2-4b image region
+                sel["state"]["region_sha256"] = None
         ev["redacted"] = "source outside the MCP read allow-list"
     return _json.dumps(doc, sort_keys=True, default=str)
 

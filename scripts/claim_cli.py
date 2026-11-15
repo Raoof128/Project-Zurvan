@@ -49,7 +49,9 @@ def register(subparsers) -> None:
     a = sub.add_parser("add", help="Assert a new evidence-backed claim")
     a.add_argument("--text", required=True)
     a.add_argument("--source", required=True)
-    a.add_argument("--evidence", required=True)
+    ev = a.add_mutually_exclusive_group()
+    ev.add_argument("--evidence", help="a verbatim quote from the source")
+    ev.add_argument("--region", help="x,y,w,h in pixels: an image region (IOU-Z2-4b)")
     a.add_argument("--confidence", required=True, choices=("low", "medium", "high"))
     a.add_argument("--basis", nargs="+", default=[])
     a.add_argument("--tags", nargs="+", default=[])
@@ -63,7 +65,9 @@ def register(subparsers) -> None:
     s.add_argument("claim_id")
     s.add_argument("--text", required=True)
     s.add_argument("--source", required=True)
-    s.add_argument("--evidence", required=True)
+    sev = s.add_mutually_exclusive_group()
+    sev.add_argument("--evidence", help="a verbatim quote from the source")
+    sev.add_argument("--region", help="x,y,w,h in pixels: an image region (IOU-Z2-4b)")
     s.add_argument("--reason", required=True)
     s.add_argument("--valid-from", dest="valid_from")
     s.add_argument("--confidence", default="high", choices=("low", "medium", "high"))
@@ -179,6 +183,16 @@ def _triple(args):
     return vals
 
 
+def _region(args):
+    """`--region x,y,w,h` as a tuple; a claim needs --evidence or --region (IOU-Z2-4b)."""
+    region = getattr(args, "region", None)
+    if region is None:
+        if getattr(args, "evidence", None) is None:
+            raise ValueError("give --evidence or --region (x,y,w,h) for the claim's source")
+        return None
+    return tuple(p.strip() for p in region.split(","))
+
+
 def _dependents(claim_id) -> None:
     """IOU-Z2-3: say what was built from a claim that just stopped being current.
     Flagged, never rewritten (design 2026-11-15-z2-iou-1-4 §1)."""
@@ -206,7 +220,7 @@ def dispatch(args) -> int:
             cid = cl.add(args.text, args.source, args.evidence, confidence=args.confidence,
                          basis=args.basis, tags=args.tags, valid_from=args.valid_from,
                          valid_until=args.valid_until, project=args.project, actor=actor,
-                         method=args.method, spo=_triple(args))
+                         method=args.method, spo=_triple(args), region=_region(args))
             from scripts.memory import append_claim_log
             append_claim_log(cid, args.source)
             state = cl.current().get(cid)
@@ -217,7 +231,8 @@ def dispatch(args) -> int:
                                evidence=args.evidence, reason=args.reason, actor=actor,
                                method=args.method, valid_from=args.valid_from,
                                expected_rev=args.expected_rev, confidence=args.confidence,
-                               basis=args.basis, tags=args.tags, spo=_triple(args))
+                               basis=args.basis, tags=args.tags, spo=_triple(args),
+                               region=_region(args))
             print(json.dumps({"claim_id": new, "supersedes": args.claim_id}))
             _dependents(args.claim_id)
         elif action == "retract":

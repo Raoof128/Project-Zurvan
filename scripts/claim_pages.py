@@ -78,8 +78,13 @@ def render(state, history: list, superseded_texts: list, generated_from_mutation
     body = ["", "# Claim", state.text if state.text is not None else "(erased)", "",
             "## Evidence"]
     for ev in state.evidence:
-        exact = (ev.get("selector") or {}).get("TextQuoteSelector", {}).get("exact")
-        body.append(_quote_lines(exact) if exact is not None else "> (erased)")
+        sel = ev.get("selector") or {}
+        exact = sel.get("TextQuoteSelector", {}).get("exact")
+        frag = (sel.get("FragmentSelector") or {}).get("value", "")
+        if exact is None and frag.startswith("xywh="):       # IOU-Z2-4b image region
+            body.append(f"> Image region `{frag}` of `{ev.get('source')}`")
+        else:
+            body.append(_quote_lines(exact) if exact is not None else "> (erased)")
         body.append("")
     if state.evidence and state.evidence[0].get("source"):
         body.append(f"**Source**: [[{state.evidence[0]['source']}]]")
