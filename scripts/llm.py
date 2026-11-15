@@ -139,6 +139,8 @@ def _call_mock(prompt: str, model: str, temperature: float) -> str:
                     }
                 ],
                 "tags": ["ai", "retrieval"],
+                "spo": {"subject": "Zurvan", "predicate": "produces",
+                        "object": {"value": "Markdown files"}},
             }
         ],
         "concepts": [],
