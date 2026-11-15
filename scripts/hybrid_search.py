@@ -47,7 +47,15 @@ def _index_identity(cursor):
 
 
 def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
-                  timings: dict | None = None) -> List[Dict]:
+                  timings: dict | None = None, hide_root=None) -> List[Dict]:
+    """Hybrid search over one index.
+
+    `hide_root` (IOU-Z2-6, spec §7.5a): the live store whose claim pages this
+    index was built from. A claim hit whose page there is NOW non-current is
+    dropped and the result refilled to `limit` — the index only forgets it on
+    the next rebuild. Left None for a snapshot: a measurement reads frozen
+    bytes and must not depend on the live wiki.
+    """
     from scripts.config import get_search_db_path
     if db_path is None:
         db_path = str(get_search_db_path())
@@ -127,6 +135,8 @@ def search_hybrid(query: str, limit: int = 10, db_path: str | None = None,
         t = time.perf_counter_ns()
         scored = _hydrate(cursor, top)
         stage["hydrate"] = _ms(t)
+        if hide_root is not None:
+            scored = _drop_noncurrent(cursor, query_emb, fts_scores, limit, scored, hide_root)
     finally:
         conn.close()
 
@@ -187,7 +197,25 @@ class _Ranked:
         return other.__lt__(self)
 
 
-def _score_semantic_top_k(cursor, query_emb, fts_scores, limit):
+def _drop_noncurrent(cursor, query_emb, fts_scores, limit, scored, root):
+    """Drop hits from claim pages that are no longer current, refilled to `limit`.
+
+    The common case (no claim hit went non-current) costs one frontmatter read
+    per claim hit and nothing else. Otherwise the scan runs again with the
+    hidden chunks excluded, until a pass hides nothing new.
+    """
+    from scripts.claim_visibility import page_is_hidden
+    hidden: set = set()
+    while True:
+        found = {c["chunk_id"] for c in scored
+                 if c["chunk_id"] not in hidden and page_is_hidden(root, c["source_path"] or "")}
+        if not found:
+            return [c for c in scored if c["chunk_id"] not in hidden]
+        hidden |= found
+        scored = _hydrate(cursor, _score_semantic_top_k(cursor, query_emb, fts_scores, limit, hidden))
+
+
+def _score_semantic_top_k(cursor, query_emb, fts_scores, limit, exclude=frozenset()):
     """Rank every chunk against the query, keeping only the best `limit`.
 
     Phase 1 (2026-09-14): scoring moved from Python to sqlite-vec. Vectors were
@@ -211,6 +239,8 @@ def _score_semantic_top_k(cursor, query_emb, fts_scores, limit):
 
     heap = []  # _Ranked, worst at the root
     for chunk_id, similarity in vec_storage.scan_similarities(cursor.connection, query_emb):
+        if chunk_id in exclude:
+            continue
         # Cosine is [-1, 1]; map to [0, 1] for reporting only. Note this puts an
         # unrelated chunk at ~0.5, which is exactly why it must NOT be summed
         # against a keyword score — see the fusion comment below.

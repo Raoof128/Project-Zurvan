@@ -7,6 +7,7 @@
 
 pub mod args;
 pub mod bridge;
+pub mod claims;
 pub mod client;
 pub mod config;
 pub mod context;
