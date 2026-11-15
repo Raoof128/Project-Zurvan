@@ -7,7 +7,9 @@ Order, all inside the caller's ONE knowledge operation:
 2. import every legacy page: parsed pages keep text, source and quote; their
    evidence is fingerprinted NOW (stated bound: proves what the source said at
    migration, not at the original assertion); `gone`/`changed` evidence is kept
-   unanchored and the claim is orphaned with the outcome as reason; an empty
+   unanchored and the claim is orphaned with the outcome as reason; a quote
+   that matches more than once is `ambiguous`, kept unanchored and asserted
+   (ambiguous never orphans, as in `verify`); an empty
    quote or an unparseable page is imported as `unknown` - nothing is dropped;
 3. pages are regenerated under their legacy filenames by the renderer;
 4. a JSON report names every orphan, unparseable page and provenance mismatch.
@@ -131,7 +133,9 @@ def _outcome(root, lc: LegacyClaim) -> str:
     try:
         ce.anchor_normalised(lc.source, lc.quote, "utf8", root, cs._now())
         return "moved_normalised"
-    except cs.ClaimRefused:
+    except cs.ClaimRefused as exc:
+        if exc.code == "EVIDENCE_AMBIGUOUS":
+            return "ambiguous"        # the quote is there, more than once: never orphan
         p = Path(lc.source)
         p = p if p.is_absolute() else Path(root) / p
         return "changed" if p.exists() else "gone"
@@ -178,7 +182,7 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
             parsed.append(lc)
     outcomes = {lc.legacy_id: _outcome(base, lc) for lc in parsed}
     counts = {"parsed": len(parsed), "unparseable": len(unparseable)}
-    for o in ("intact", "moved_normalised", "changed", "gone", "no_evidence"):
+    for o in ("intact", "moved_normalised", "ambiguous", "changed", "gone", "no_evidence"):
         counts[o] = sum(1 for v in outcomes.values() if v == o)
     report = {"counts": counts, "dry_run": dry_run,
               "orphaned": [{"legacy_id": k, "outcome": v,
@@ -186,6 +190,7 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
                            for k, v in outcomes.items() if v in ("gone", "changed")],
               "unparseable": [p.name[:-3] for p, _ in unparseable],
               "no_evidence": [k for k, v in outcomes.items() if v == "no_evidence"],
+              "ambiguous": [k for k, v in outcomes.items() if v == "ambiguous"],
               "derived_rebuild_required": not dry_run and bool(pages)}
     if dry_run or not pages:
         report.update(provenance_mismatches=[], legacy_manifest={}, observed_at_sources={})
@@ -217,6 +222,12 @@ def migrate(root=None, *, dry_run: bool = False, legacy_dir=None, report_path=No
         elif outcome == "moved_normalised":
             cid = cl.add(lc.text, lc.source, lc.quote, extra_evidence=lc.extra,
                          _normalised=True, **kw)
+        elif outcome == "ambiguous":
+            # Kept asserted and unanchored: which occurrence the claim meant is
+            # unknown, so no position or fingerprint is guessed. `verify` keeps
+            # reporting it `ambiguous` until a longer quote is attached.
+            cid = cl.add(lc.text, lc.source, lc.quote, extra_evidence=lc.extra,
+                         _unanchored=True, **kw)
         elif outcome == "no_evidence":
             cid = cl.add(lc.text, lc.source, None, status="unknown", **kw)
         else:

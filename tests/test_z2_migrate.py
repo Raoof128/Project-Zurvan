@@ -264,3 +264,30 @@ def test_quote_without_a_source_is_imported_and_orphaned_not_a_crash(root, tmp_p
     assert not state.evidence[0]["source"]                     # nothing invented
     assert out["provenance_mismatches"] == []
     assert {"legacy_id": "claim-00000009", "outcome": "gone", "source": None} in out["orphaned"]
+
+
+# IOU-Z2-7, found by the live migration of 2026-11-15: a legacy quote that matched
+# its source TWICE after whitespace normalisation was classed `changed` and
+# orphaned, while `claim verify` calls the same evidence `ambiguous` - and
+# ambiguous never orphans (spec §7.4). The two must agree.
+def test_a_quote_matching_twice_after_normalising_is_ambiguous_not_orphaned(root,
+                                                                            tmp_path_factory):
+    (root / "wiki" / "sources" / "twice.md").write_text(
+        "first: alpha beta  gamma here.\nsecond: alpha\nbeta gamma there.\n", encoding="utf-8")
+    page = NORMAL.replace("wiki/sources/s.md", "wiki/sources/twice.md").replace(
+        "Week 9 totals 52 days", "Twice-matching quote").replace(
+        "> totals 52 days", ">   alpha   beta gamma")
+    (root / "wiki" / "claims" / "claim-00000007.md").write_text(page, encoding="utf-8")
+    dry = cm.migrate(root=root, dry_run=True)
+    assert dry["counts"]["ambiguous"] == 1
+    assert "claim-00000007" not in {o["legacy_id"] for o in dry["orphaned"]}
+    out, _, _ = _migrate(root, tmp_path_factory)
+    s7 = {s.legacy_id: s for s in cl.current(root).values()}["claim-00000007"]
+    assert s7.status == "asserted"
+    assert s7.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == "alpha   beta gamma"
+    assert s7.evidence[0]["selector"]["state"]["sha256"] is None     # no position guessed
+    assert out["provenance_mismatches"] == []
+    with kr.operation(writer="test", root=root):
+        v = cl.verify(apply=True, root=root)
+    assert v["claims"][s7.claim_id] == ["ambiguous"]
+    assert cl.current(root)[s7.claim_id].status == "asserted"      # verify agrees: never orphan
