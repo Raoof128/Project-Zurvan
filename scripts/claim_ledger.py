@@ -240,6 +240,28 @@ def _refuse_if_edited(claim_id, root):
                               "(`zurvan claim adopt` or `claim regenerate --force`)")
 
 
+def _successors(root, claim_id) -> list:
+    """Claims that superseded `claim_id`; their pages quote its text."""
+    conn = _connect_ro(root)
+    if conn is None:
+        return []
+    try:
+        return [r[0] for r in conn.execute(
+            "SELECT from_claim FROM relations WHERE to_claim = ? AND kind = 'supersedes'",
+            (claim_id,))]
+    finally:
+        conn.close()
+
+
+def _refresh_successor_pages(root, claim_id):
+    """Regenerate the pages that quote `claim_id`, never over a hand edit."""
+    from scripts import claim_pages
+    now = current(root)
+    for cid in _successors(root, claim_id):
+        if cid in now and not claim_pages.has_unadopted_edit(cid, root, now):
+            claim_pages.write_page(cid, root, force=True, now=now)
+
+
 def _write_pages(root, *claim_ids):
     from scripts import claim_pages
     now = current(root) if claim_ids else {}
@@ -353,6 +375,7 @@ def retract(claim_id, *, reason, basis, actor, method, expected_rev=None, root=N
         rev = _next(s, claim_id, event="retract", status="retracted", actor=actor,
                     method=method, reason=why, expected_rev=expected_rev)["rev"]
     _write_pages(root, claim_id)
+    _refresh_successor_pages(root, claim_id)
     return rev
 
 
@@ -631,9 +654,17 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
         conn.execute("VACUUM")
     finally:
         conn.close()
-    _write_pages(base, claim_id, *[r for r in related if r in current(base)])
+    from scripts import claim_pages
+    now_state = current(base)
+    related = [r for r in related if r in now_state]
+    overwritten = [str(claim_pages.page_path(now_state[r], base)) for r in related
+                   if claim_pages.has_unadopted_edit(r, base, now_state)]
+    _write_pages(base, claim_id, *related)
 
-    residue = []
+    residue = [{"kind": "hand_edit_overwritten", "where": w,
+                "action": "this page quoted the erased claim and had a hand edit, which "
+                          "the rewrite replaced; recover anything else it held from backups"}
+               for w in overwritten]
     search = base / "data" / "search.sqlite"
     if search.exists():
         residue.append({"kind": "search_index", "where": str(search),

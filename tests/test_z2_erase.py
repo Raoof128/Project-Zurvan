@@ -195,3 +195,19 @@ def test_erase_lists_the_log_line_and_the_migration_report(root, monkeypatch,
     assert kinds["log_line"]["where"] == str(root / "wiki" / "log.md")
     assert "migration-report-" in kinds["migration_report"]["where"]
     assert "project slug" in kinds["ledger_metadata"]["action"]
+
+
+# Deferred minor, fixed 2026-11-15: erase regenerates every page that quotes
+# the erased claim, and silently replaced a hand edit on one. The rewrite must
+# stay (that page may hold the erased text); the overwrite is now reported.
+def test_erase_reports_a_hand_edit_it_had_to_overwrite(root):
+    old = _add(root)
+    with kr.operation(writer="test", root=root):
+        new = cl.supersede(old, text="newer reading", source=SRC, evidence=Q, reason="r",
+                           actor="local:t", method="human", root=root)
+    page = root / "wiki" / "claims" / f"{new}.md"
+    page.write_text(page.read_text(encoding="utf-8") + "my note\n", encoding="utf-8")
+    out = _erase(root, old)
+    assert TEXT not in page.read_text(encoding="utf-8")
+    hits = [r for r in out["residue"] if r["kind"] == "hand_edit_overwritten"]
+    assert [h["where"] for h in hits] == [str(page)]
