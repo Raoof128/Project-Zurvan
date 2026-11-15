@@ -3,6 +3,37 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-13b (Australia/Sydney) — Fresh suite `97d564c6d51b048b` SEALED (HOLDOUT 160 / RESERVE 80, budget 8); seal-check 25/25; gate 4 run 1 FAILED `CANDIDATE_FAILED` (query 16 read timeout, host overloaded); Z1b NOT closed
+
+Raouf:
+- **Scope:** Package B, gate 8 remedy (continues 2026-11-13). Raouf ran `draft` and `seal` from `~/.zurvan/z1b/new_suite.sh` in a terminal.
+- **Draft:** exit 0 after ~150 min. Accepted 327 items; every stratum full (10 holdout + 5 reserve × 16), `short: []`. Rejected: reviewer 57, resolve_miss 13, corpus_quote 6, answer_leak 1; dup / dev-contamination / unparseable / bad-schema 0. Only aggregate counts reached the screen.
+- **Seal:** suite `97d564c6d51b048b`, sequence **6** (above the ledger's last manifest sequence), models `claude-opus-5-5` / `claude-sonnet-5-5` / `claude-haiku-5-5`, `dev_sha256` `36c69543…` (unchanged), `burn_ledger: []`. Broker status after: `holdout_n` 160, `reserve_n` 80, `budget_remaining` 8, `open_incidents` 0, `manifest_valid`/`corpus_match` true, not stale. The old suite `bedc01c1dce53b46` is ARCHIVED (moved, not deleted) at `/Users/zurvaneval/retired/bedc01c1dce53b46-20261113/`.
+- **Seal took three attempts; the first two wrote nothing.** All three defects were in the operator script (outside the repo), not the broker:
+  - (a) `sudo test -f` ran `/opt/anaconda3/bin/test`, a pytest launcher on the dev `PATH`. Fixed: the script pins `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and calls `/bin/test`.
+  - (b) `zurvan-author seal` refused `BAD_ARGS`: `_author_parse` requires `--spec/--rubric/--prompts` for every subcommand, and `seal` ignores them. This refusal came AFTER the archive step, so for a few minutes no suite was live. Fixed: the flags are passed, and the archive step is idempotent on a re-run.
+  - (c) Found before the third attempt: `zurvaneval` cannot create `public-out` inside the 0755 dev-owned inbox, so the public copy would have crashed AFTER signing. Fixed: the dir is pre-created `zurvaneval`-owned. Also `trap 'sudo -k' EXIT`, because `set -e` had skipped the final `sudo -k`.
+- **seal-check:** `ok: true`, **25/25** checks true, every sealed path EACCES to the dev identity.
+- **Public manifest:** copied from `/Users/Shared/zurvan-eval-inbox/public-20261113/` into `eval/z1b/manifest.json(.sig)`. `manifest.verify` against the tracked `eval/z1b/allowed_signers` passes (suite `97d564c6d51b048b`, seq 6, accepted 327).
+- **Declaration:** `eval/z1b/declarations/closure-baseline.json` is rebound to `97d564c6d51b048b`. Its `suite_id` is the only change. Metric, critical strata, margins, improvement target and budgets are byte-identical, committed before any run on the new suite.
+- **Gate 2 (author isolation): PASSED** with Raouf's operator ticket (`sudo -v` … `sudo -k`), 1 passed. The test used to FAIL whenever no ticket was cached (`sudo -n` refused, so the probe never ran: rc 1, empty output). It now SKIPS as `Z1b: gate 2 UNVERIFIED`. Not running is not evidence of isolation, and it was never evidence of a breach.
+- **Gate 4 run 1: FAILED, reported as failed** (charged, budget 8 → **7**). Run from the clean worktree `.worktrees/z1b-gate4` at `dfef49a`, with `--declare` set to the baseline.
+  - First attempt at 14:01: refused `SCAN_INCOMPLETE`, uncharged (budget stayed 8). The eval identity could not read a transcript dir created this morning by the CLAUDE.md probe: `~/.claude/projects/-private-tmp-…-scratchpad-mdprobe`. Its name contains `Zurvan`, so the leak scan covers it. Fixed by granting the setup ACL (`user:zurvaneval allow read,list,search,readattr,file_inherit,directory_inherit`), as owner, no sudo; then 0 scan targets lacked it.
+  - Second attempt, 14:06–14:26: `CANDIDATE_FAILED`, charged; `open_incidents` 0; holdout/reserve still 160/80. The operator's `errors.log` (pasted by Raouf) reads `candidate_failed stage=query qid=16 step=read elapsed_s=30`. Queries 0–15 were answered; query 16 exceeded the pre-registered `query_timeout_s` 30.
+  - Another line in that log, `a4e5d760… qid=0 step=read elapsed_s=1`, is an earlier run, not this one.
+- **Likely cause: the HOST was overloaded. Inferred, not proven for 14:06–14:26.**
+  - At 15:16 the machine read: load average **77.7** (5-min 51.6), swap **3.7 GB of 5 GB** used, about 4k free pages, 8.7M swapouts. Several other jobs were running (`bun`, `node`, `codex`, two other `claude` sessions).
+  - A dev-side probe (`search_hybrid` on dev queries against the live 456k-chunk index) measured 38 s mean and 167 s max over 55 queries, rising monotonically from 69 s to 167 s. That tracks host load, not query difficulty, so it is NOT a measure of the candidate. The probe was stopped because it added load.
+  - The guest VM shares this host's CPU and RAM.
+  - **The 30 s limit is NOT changed.** Raising it now would redefine a failed gate.
+- **Files:** `eval/z1b/manifest.json`, `eval/z1b/manifest.json.sig`, `eval/z1b/declarations/closure-baseline.json`, `tests/test_z1b_seal_live.py`, AGENTS.md, CHANGELOG.md, `docs/agents-history.md` (rotation).
+- **Verification:** `tests/test_z1b_seal_live.py`: 10 passed, 2 skipped (gate 2 without a ticket; gate 7 on a dirty tree). seal-check 25/25. Manifest signature verified. `-k z1b`: 1831 passed / 5 skipped / 0 failed. `public_repo_guard.py` passed; `git diff --check` clean.
+- **Follow-ups:**
+  - (1) Raouf: quiet the host (pause other agent sessions and builds; let swap drain). The agent checks load before spending, then re-runs gate 4 as a NEW measurement under the same limits (budget 7: one charged run + one cached repeat). After that: gate 5 (`c753dbf`) and gate 8 (committed manifest == live status, 160/80).
+  - (1b) Proposal, prospective only: the client refuses a charged run (uncharged) when host load or swap is above a stated threshold, so contention cannot consume budget.
+  - (2) Then the tamper drill, the gate 9 red-team and the verdict.
+  - (3) Rotate the sudo password.
+
 ### 2026-11-13 (Australia/Sydney) — Gates 4 and 5 PASSED at `2eb8876`; gate 8 FAILED (live suite burned to HOLDOUT 61 / RESERVE 0); author `claude` call hardened for a fresh suite; Z1b NOT closed
 
 Raouf:
