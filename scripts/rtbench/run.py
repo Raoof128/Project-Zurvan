@@ -43,14 +43,26 @@ def _wrong(row):
     return normalise(row["answer"]) != normalise(row["gold"])
 
 
+REQUIRED = tuple((name, track) for name in ("oracle", "overwrite", "append_only") for track in ("S", "N"))
+
+
 def validity(reports) -> dict:
+    """Spec §6.5: the oracle scores 1 on both tracks, both baselines stay at or
+    under the bar on both tracks, and no run had an error. Every one of the six
+    reports must be present; a missing one fails, never passes by omission."""
     checks = []
-    for (name, track), rep in sorted(reports.items()):
+    for name, track in REQUIRED:
+        rep = reports.get((name, track))
+        if rep is None:
+            checks.append({"check": f"{name} {track} report present", "value": None, "ok": False})
+            continue
         s = rep["score"]
+        checks.append({"check": f"{name} {track} errors == 0", "value": rep["errors"], "ok": rep["errors"] == 0})
         if name == "oracle":
-            checks.append({"check": f"oracle {track} headline == 1", "value": s["headline"], "ok": s["headline"] == 1.0})
-            checks.append({"check": f"oracle {track} control == 1", "value": s["control"], "ok": s["control"] == 1.0})
-        elif name in ("overwrite", "append_only"):
+            checks.append({"check": f"oracle {track} headline and control == 1",
+                           "value": [s["headline"], s["control"]],
+                           "ok": s["headline"] == 1.0 and s["control"] == 1.0})
+        else:
             checks.append({"check": f"{name} {track} headline <= {BASELINE_BAR}", "value": s["headline"],
                            "ok": s["headline"] is not None and s["headline"] <= BASELINE_BAR})
-    return {"pass": bool(checks) and all(c["ok"] for c in checks), "checks": checks}
+    return {"pass": all(c["ok"] for c in checks), "checks": checks}

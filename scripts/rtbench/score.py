@@ -13,9 +13,22 @@ HEADLINE_TYPES = ("Q1", "Q2", "Q3", "Q4", "Q5")
 CONTROL_TYPE = "Q6"
 
 
+_NOT_A_STRING = "\x00not-a-string"
+
+
+def as_set(answer) -> list:
+    """A prose set answer -> a list: 'none' is empty; items split on a comma
+    that is not a thousands separator (4,210 stays one value)."""
+    s = answer.strip()
+    s = s[:-1] if s.endswith(".") else s
+    if s.lower() in ("", "none"):
+        return []
+    return [p.strip() for p in re.split(r",\s+|,(?!\d)", s) if p.strip()]
+
+
 def normalise(answer) -> object:
     if isinstance(answer, (list, tuple)):
-        return sorted(normalise(a) for a in answer)
+        return sorted(_NOT_A_STRING if not isinstance(a, str) else normalise(a) for a in answer)
     if not isinstance(answer, str):
         return None
     s = re.sub(r"\s+", " ", answer.strip().lower())
@@ -36,7 +49,10 @@ def wilson(k, n) -> tuple:
 def score_answers(rows) -> dict:
     by_type, tp, n_gold, n_ans = {}, 0, 0, 0
     for r in rows:
-        gold, ans = normalise(r["gold"]), normalise(r["answer"])
+        raw = r["answer"]
+        if isinstance(r["gold"], list) and isinstance(raw, str):
+            raw = as_set(raw)
+        gold, ans = normalise(r["gold"]), normalise(raw)
         ok = ans is not None and ans == gold
         b = by_type.setdefault(r["type"], {"n": 0, "correct": 0})
         b["n"] += 1

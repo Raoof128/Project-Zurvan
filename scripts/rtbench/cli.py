@@ -35,6 +35,9 @@ def register(subparsers) -> None:
     r.add_argument("--limit", type=int, default=None)
     p = sub.add_parser("report", help="Print a run report")
     p.add_argument("path")
+    v = sub.add_parser("validity", help="Spec §6.5: oracle and both baselines on both tracks")
+    v.add_argument("--split", choices=("dev", "holdout"), default="dev")
+    v.add_argument("--cases-dir", default=None)
 
 
 def _default_dir(split):
@@ -42,14 +45,21 @@ def _default_dir(split):
 
 
 def _registration(split, cases_path):
+    """REGISTERED only when BOTH the cases and the gold file match their
+    registered digests: an edited answer key must never run as registered."""
     from scripts.rtbench.canon import sha256_file
     try:
         entry = json.loads(REGISTRY.read_text(encoding="utf-8"))["datasets"].get(f"rtbench_{split}")
     except (OSError, ValueError):
-        entry = None
+        return "UNREADABLE"
     if entry is None:
         return "UNREGISTERED"
-    return "REGISTERED" if entry["sha256"] == sha256_file(cases_path) else "MISMATCH"
+    gold_path = cases_path.with_name(f"{split}.gold.jsonl")
+    if entry["sha256"] != sha256_file(cases_path):
+        return "MISMATCH: cases"
+    if entry.get("gold_sha256") != sha256_file(gold_path):
+        return "MISMATCH: gold"
+    return "REGISTERED"
 
 
 def _load(path):
@@ -70,11 +80,15 @@ def write_report(report, report_dir) -> tuple:
     return j, m
 
 
+def _f(x):
+    return "n/a" if x is None else f"{x:.3f}"
+
+
 def _markdown(rep, sealed):
     s = rep["score"]
     lines = [f"# RTBench run: {rep['adapter']}, Track {rep['track']}, {rep.get('split', 'dev')}", "",
              f"- cases {rep['n_cases']}, questions {rep['n_questions']}, errors {rep['errors']}",
-             f"- headline (Q1-Q5 macro) **{s['headline']:.3f}**; control (Q6) {s['control']:.3f}",
+             f"- headline (Q1-Q5 macro) **{_f(s['headline'])}**; control (Q6) {_f(s['control'])}",
              f"- generator {rep.get('generator_version', '?')}; split {rep.get('registration', '?')}", "",
              "| type | n | accuracy | 95% CI |", "|---|---|---|---|"]
     for t in TYPES:
@@ -87,6 +101,42 @@ def _markdown(rep, sealed):
     return "\n".join(lines) + "\n"
 
 
+def _load_split(split, cases_dir):
+    """(cases, golds, registration) or None after printing why. A registered
+    split must match both digests; the holdout must be registered."""
+    d = Path(cases_dir) if cases_dir else _default_dir(split)
+    cases_p = d / f"{split}.cases.jsonl"
+    if not cases_p.exists():
+        print(f"no cases at {cases_p}; run `zurvan bench rtbench generate --split {split}` first", file=sys.stderr)
+        return None
+    registration = _registration(split, cases_p)
+    if registration.startswith("MISMATCH"):
+        print(f"refused: the {registration.split(': ')[1]} file under {d} does not match the registered "
+              f"rtbench_{split} digest", file=sys.stderr)
+        return None
+    if split == "holdout" and registration != "REGISTERED":
+        print(f"refused: the holdout runs only as a registered split ({registration})", file=sys.stderr)
+        return None
+    return _load(cases_p), _load(d / f"{split}.gold.jsonl"), registration
+
+
+def validity_command(args) -> dict:
+    from scripts.rtbench.adapters import ADAPTERS, TrackNReader
+    from scripts.rtbench.run import REQUIRED, run_cases, validity
+    loaded = _load_split(args.split, args.cases_dir)
+    if loaded is None:
+        return {"pass": False, "checks": [], "refused": True}
+    cases, golds, _ = loaded
+    if getattr(args, "limit", None):
+        cases = cases[:args.limit]
+    reports = {}
+    for name, track in REQUIRED:
+        adapter = ADAPTERS[name]()
+        reports[(name, track)] = run_cases(TrackNReader(adapter) if track == "N" else adapter, track, cases, golds,
+                                           itemised=False)
+    return validity(reports)
+
+
 def _run(args) -> int:
     from scripts.rtbench import GENERATOR_VERSION
     from scripts.rtbench.adapters import ADAPTERS, ZURVAN_ADAPTERS, TrackNReader
@@ -95,16 +145,13 @@ def _run(args) -> int:
         print("refused: the Zurvan adapters are Track S only (spec §8); Track N is for systems that read prose",
               file=sys.stderr)
         return 2
-    d = Path(args.cases_dir) if args.cases_dir else _default_dir(args.split)
-    cases_p = d / f"{args.split}.cases.jsonl"
-    if not cases_p.exists():
-        print(f"no cases at {cases_p}; run `zurvan bench rtbench generate --split {args.split}` first", file=sys.stderr)
+    if args.split == "holdout" and args.limit:
+        print("refused: --limit on the holdout would expose per-case results by differencing runs", file=sys.stderr)
+        return 2
+    loaded = _load_split(args.split, args.cases_dir)
+    if loaded is None:
         return 1
-    registration = _registration(args.split, cases_p)
-    if registration == "MISMATCH":
-        print(f"refused: {cases_p} does not match the registered rtbench_{args.split} digest", file=sys.stderr)
-        return 1
-    cases, golds = _load(cases_p), _load(d / f"{args.split}.gold.jsonl")
+    cases, golds, registration = loaded
     if args.limit:
         cases = cases[:args.limit]
     tmp = None
@@ -128,8 +175,8 @@ def _run(args) -> int:
                   date=datetime.now().date().isoformat())
     j, _ = write_report(report, args.report_dir or HOME / "reports")
     s = report["score"]
-    print(f"{report['adapter']} Track {args.track} {args.split} ({registration}): headline {s['headline']:.3f}, "
-          f"control {s['control']:.3f}, errors {report['errors']}")
+    print(f"{report['adapter']} Track {args.track} {args.split} ({registration}): headline {_f(s['headline'])}, "
+          f"control {_f(s['control'])}, errors {report['errors']}")
     print("  " + "  ".join(f"{t} {s['by_type'][t]['accuracy']:.3f}" for t in TYPES if t in s["by_type"]))
     print(f"  report: {j}")
     return 0
@@ -155,6 +202,12 @@ def dispatch(args) -> int:
         return 0
     if args.action == "run":
         return _run(args)
+    if args.action == "validity":
+        out = validity_command(args)
+        for c in out["checks"]:
+            print(f"{'PASS' if c['ok'] else 'FAIL'}  {c['check']}: {c['value']}")
+        print("validity:", "PASS" if out["pass"] else "FAIL")
+        return 0 if out["pass"] else 1
     rep = json.loads(Path(args.path).read_text(encoding="utf-8"))
     print(_markdown(rep, rep.get("split") == "holdout"), end="")
     return 0
