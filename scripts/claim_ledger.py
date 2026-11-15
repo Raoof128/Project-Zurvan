@@ -230,6 +230,28 @@ def _refuse_if_erased(row, claim_id):
         raise cs.ClaimRefused("CLAIM_ERASED", f"{claim_id} was erased; erasure is final")
 
 
+def _refuse_if_ended(s, row, claim_id, *, allow=()):
+    """A correction targets a claim that has not already been ended by one
+    (RTBench finding, Raouf 2026-11-15). Superseding a superseded claim forked the
+    chain into two current successors; superseding a retracted one overwrote the
+    retraction; retracting a retracted one minted an empty revision. `allow` keeps
+    the deliberate case: retracting a superseded claim ("replaced, and later found
+    never to have been true")."""
+    status = row["status"]
+    if status not in ("superseded", "retracted") or status in allow:
+        return
+    detail = f"{claim_id} is {status}, not current"
+    if status == "superseded":
+        heads = [r[0] for r in s.conn.execute(
+            "SELECT from_claim FROM relations WHERE to_claim = ? AND kind = 'supersedes'",
+            (claim_id,))]
+        if heads:
+            detail += f"; it was superseded by {', '.join(heads)} (correct that claim instead)"
+    else:
+        detail += "; record a new value with `claim add`"
+    raise cs.ClaimRefused("CLAIM_NOT_CURRENT", detail)
+
+
 # ----------------------------------------------------------------- pages
 
 def _refuse_if_edited(claim_id, root):
@@ -344,6 +366,7 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
         if prev is None:
             raise cs.ClaimRefused("UNKNOWN_CLAIM", old_id)
         _refuse_if_erased(prev, old_id)
+        _refuse_if_ended(s, prev, old_id)
         if expected_rev is not None and int(expected_rev) != prev["rev"]:
             raise cs.ClaimRefused("CLAIM_CONFLICT",
                                   f"{old_id} is at rev {prev['rev']}, expected {expected_rev}")
@@ -372,6 +395,9 @@ def retract(claim_id, *, reason, basis, actor, method, expected_rev=None, root=N
         # The basis says why it was WITHDRAWN; confidence_basis says why it was
         # believed, so it stays, and the retraction basis goes in the reason.
         why = f"{reason} (retraction basis: {', '.join(basis)})" if basis else reason
+        prev = s.latest(claim_id)
+        if prev is not None and prev["status"] != "erased":
+            _refuse_if_ended(s, prev, claim_id, allow=("superseded",))
         rev = _next(s, claim_id, event="retract", status="retracted", actor=actor,
                     method=method, reason=why, expected_rev=expected_rev)["rev"]
     _write_pages(root, claim_id)

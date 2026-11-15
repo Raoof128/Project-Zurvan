@@ -1,0 +1,8 @@
+{
+  "generator_version": "rtbench-2",
+  "gold_sha256": "00f05ee6b8808b9222c418b3127a9d1c38ac58e617728a115b277922b08c309f",
+  "n_items": 200,
+  "note": "Regenerate with `zurvan bench rtbench generate --split dev2`; DEV2_SEEDS = range(2000, 2200).",
+  "sha256": "adeb2eabccf2164fdab2c4d3c779a75b175e5cf46d94c288c31b16d4abc8e36f",
+  "split": "dev2"
+}

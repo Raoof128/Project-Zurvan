@@ -264,6 +264,14 @@ MCP writes are always `method=agent` with `actor=mcp:<client name>`; an MCP call
 Every write records `actor` (from the operation's caller/writer attribution), `method`, and a `reason` for every event
 except `assert` and `migration`. A supersede/retract without a reason is refused.
 
+**A correction targets a current claim (Raouf, 15 Nov 2026; found by RTBench, IOU-Z2-5).** `supersede` refuses a
+claim that is already `superseded` or `retracted`, and `retract` refuses one that is already `retracted`, with
+`CLAIM_NOT_CURRENT` and no revision minted; the refusal names the superseding claim to correct instead. Before this,
+superseding a superseded claim without `expected_rev` forked the chain into two current claims for one fact, and
+superseding a retracted claim overwrote the retraction. Two cases stay allowed on purpose: retracting a `superseded`
+claim (it was replaced, and later found never to have been true), and superseding or retracting an `orphaned` claim
+(that is how a claim whose evidence is gone gets corrected). `erase` is unaffected: it accepts any non-erased claim.
+
 ### 7.4 Evidence re-resolution (job 1)
 
 For each evidence row, against the current source bytes:

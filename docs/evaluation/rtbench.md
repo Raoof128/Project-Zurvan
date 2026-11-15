@@ -58,17 +58,26 @@ present, or keeps every value without corrections, passes questions far from the
 |---|---|---|---|
 | `dev` | 200, seeds 1000-1199 | regenerate anywhere: `zurvan bench rtbench generate --split dev` | `eval/datasets.json` `rtbench_dev` (DEV), `eval/rtbench_dev.manifest.json` |
 | `holdout` | 200, private seeds | `~/.zurvan/instruments/` only (0700 / 0600), never in git | `eval/datasets.json` `rtbench_holdout` (HOLDOUT), whole-file digests only |
+| `dev2` | 200, seeds 2000-2199, generator `rtbench-2` | `zurvan bench rtbench generate --split dev2` | `rtbench_dev2` (DEV), `eval/rtbench_dev2.manifest.json` |
+| `holdout2` | 200, private seeds, generator `rtbench-2` | `~/.zurvan/instruments/rtbench_holdout2/` (0700 / 0600) | `rtbench_holdout2` (HOLDOUT), whole-file digests only |
 
-A holdout run reports scores only, never an item, in the report or on stdout.
+**Generators.** `rtbench-1` (the `dev`/`holdout` splits) only erases a statement that is still believed; it is
+frozen, and a test regenerates its dev split to the registered digest. `rtbench-2` (`dev2`/`holdout2`) also erases
+**dead history**, a value superseded or retracted long before: the common erasure request. Its status history
+survives (superseded until the erase tick, erased from it), its content is `[erased]` at every tick, and no
+question names it. Spec §13.
+
+A holdout run (any split named `holdout*`) reports scores only, never an item, in the report or on stdout.
 
 ## Running
 
 ```bash
 zurvan bench rtbench generate --split dev
 zurvan bench rtbench run --adapter oracle|overwrite|append_only|zurvan|zurvan_abort_after_claim \
-                         --track S|N --split dev|holdout [--limit N]
+                         --track S|N --split dev|holdout|dev2|holdout2 [--limit N]
 zurvan bench rtbench report ~/.zurvan/reports/rtbench-<adapter>-<track>-<split>-<stamp>.json
 zurvan bench rtbench validity --split dev     # spec §6.5: oracle 1.000, both baselines <= 0.60, no errors
+zurvan bench rtbench validity --split dev2
 ```
 
 A run refuses a split whose cases **or gold** file does not match its registered digest; the holdout runs only as
@@ -113,12 +122,40 @@ operation fails *after* its claim write has landed, Zurvan's `reconcile` adopts 
 mutation's rows join belief at its resolution revision). RTBench counts that as believing a failed change. Zurvan's
 default adapter fails before the claim write; both rows are reported so the difference is visible.
 
-**Found by this benchmark:** `claim_ledger.supersede` refuses an erased claim but, without `expected_rev`, accepts
-superseding a claim that is already superseded. That forks the chain into two current claims for one fact, and
-`retract` likewise accepts a retracted claim. In the adopted-abort run this is why there were no refusals: the
-benchmark's next supersede of the original claim was accepted. Recorded as a Z2 follow-up, not changed here.
+**Found by this benchmark, and fixed (15 Nov 2026):** `claim_ledger.supersede` refused only an erased claim; without
+`expected_rev` it accepted superseding a claim that was already superseded, forking the chain into two current
+claims for one fact, and `retract` accepted an already-retracted claim. Both now refuse with `CLAIM_NOT_CURRENT`
+(Z2 spec §7.3; `tests/test_z2_not_current.py`). Retracting a superseded claim stays allowed on purpose.
 
-## Not done here
+Re-measured after the fix (dev, `rtbench-1`, 15 Nov 2026): **zurvan 1.000** on every type, unchanged; **zurvan,
+failed writes adopted 0.883** (Q1 0.794, Q2 0.958, Q3 0.871, Q4 0.896, Q5 0.893, control 0.848) with **527
+refused writes** counted as errors: once `reconcile` has adopted a failed supersede, the benchmark's later
+corrections of the original claim are now refused instead of silently forking it. The 0.903 row above is the
+pre-fix measurement and stays recorded as such.
 
-Running Mem0, Zep, ChatGPT memory or any other product (Track N adapters for them need accounts and spend);
-publishing the benchmark; an LLM judge (optional, never the headline).
+## Recorded results, generator `rtbench-2` (dev2, 15 Nov 2026)
+
+| Adapter | Track | Headline (Q1-Q5) | Q1 | Q2 | Q3 | Q4 | Q5 | Control Q6 |
+|---|---|---|---|---|---|---|---|---|
+| oracle (scorer self-check) | S, N | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| overwrite | S, N | 0.323 | | | | | | |
+| append_only | S / N | 0.552 / 0.548 | | | | | | |
+| zurvan (Z2 claim ledger) | S | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| zurvan, failed writes adopted | S | 0.874 | 0.781 | 0.956 | 0.859 | 0.877 | 0.896 | 0.762 |
+
+Baseline rows come from `zurvan bench rtbench validity --split dev2` (headline only). 0 adapter errors except the
+adopted-abort row (661 refused writes, counted as errors). Sealed `holdout2` smoke run: overwrite 0.320, report
+item-free.
+
+## Future work (not done; Raouf, 15 Nov 2026)
+
+- **Chat-memory products on Track N.** Mem0, Zep, Letta, ChatGPT memory and similar products belong on Track N:
+  send each turn as a message in order, then ask each question and return the reply. Each needs an account and an
+  API key, and a full split is 200 cases of 8-60 sessions plus 10-30 questions each, so price a run with
+  `--limit 10` first and set a spend cap. Write each as an `Adapter` (see above) that takes its key from the
+  environment and never logs it; test it against a fake transport first. Not started: no keys, and spend is
+  Raouf's call.
+- **Publishing.** RTBench is in the (public) Zurvan repository; a standalone release (its own repository or a
+  dataset card) is Raouf's call, deferred on 15 Nov 2026. Only code, the dev splits and this guide would ever be
+  published; never a holdout seed or file.
+- An LLM judge (optional, never the headline).

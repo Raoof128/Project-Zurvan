@@ -40,7 +40,15 @@ def _one(rng, root, live):
         live.append(cl.add(f"claim {rng.randrange(10**6)}", SRC, rng.choice(QUOTES),
                            confidence=rng.choice(["low", "medium", "high"]), **common))
         return
-    target = rng.choice(live)
+    # A correction targets a CURRENT claim (2026-11-15: supersede/retract refuse an
+    # already-ended one, CLAIM_NOT_CURRENT). Recorded aborts may have been adopted
+    # by reconcile, so ask the ledger rather than trusting `live`.
+    believed = sorted(c for c, st in cl.current(root).items()
+                      if st.status in cl.CURRENT_STATUSES)
+    if not believed:
+        write_file_safely(str(root / "wiki" / f"n{rng.randrange(10**9)}.md"), "x\n")
+        return
+    target = rng.choice(believed)
     if kind == "supersede":
         live.append(cl.supersede(target, text=f"newer {rng.randrange(10**6)}", source=SRC,
                                  evidence=rng.choice(QUOTES), reason="newer", **common))
