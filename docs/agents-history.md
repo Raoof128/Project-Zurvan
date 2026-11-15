@@ -3,6 +3,22 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-15e (Australia/Sydney) — Z2 corrections target a current claim (`CLAIM_NOT_CURRENT`, the RTBench fork fixed); RTBench generator `rtbench-2` erases dead history (`dev2`/`holdout2` registered, validity PASS, Zurvan 1.000); repo kept PUBLIC by Raouf
+
+Raouf:
+- **Scope:** Raouf said "do these" to the five follow-ups of 2026-11-15d. Asked directly, he decided: **Project-Zurvan stays PUBLIC** (Claude found it public; memory said private since 2026-09-16; GitHub's `updatedAt` is 2026-11-03; the 2026-11-15d push went to it because visibility was not re-checked first); standalone RTBench publishing **not now**; chat-memory product runs **written up as future work** (no keys, spend is his call); Z1b's last 5 runs **kept** (Z1b stays open). IOU-Z2-1…4 follow as their own entries.
+- **Fix: a correction targets a current claim.** `claim_ledger.supersede` refuses a `superseded` or `retracted` claim and `retract` refuses a `retracted` one, with `CLAIM_NOT_CURRENT`, no revision minted; the refusal names the superseding claim to correct instead. Kept on purpose: retracting a superseded claim (the existing "since retracted" successor-page feature), and superseding/retracting an `orphaned` claim. `erase` unchanged. Z2 spec §7.3 amended.
+  - Tests: `tests/test_z2_not_current.py` (5; the 3 refusal tests seen failing first with "DID NOT RAISE").
+  - The G3 property test (`tests/test_z2_belief_property.py`) drew targets from every claim it ever added; it now draws only current ones, asked of the ledger (a reconciled abort can adopt a supersede). The property it checks is unchanged.
+- **RTBench `rtbench-2`** (spec §13): an erase may target a superseded or retracted statement (probability 0.6 when dead history exists; erase share 0.35). The oracle keeps the end status and gains `erased_at` (Q2 `erased` from that tick; content `[erased]` at every tick; Q5 never names an erased value). `rtbench-1` is frozen: its dev split still regenerates to the registered digest (`test_v1_is_frozen`).
+  - Splits `dev2` (seeds 2000-2199) and `holdout2` (200 `secrets` seeds avoiding both dev ranges, `~/.zurvan/instruments/rtbench_holdout2*`, 0700/0600) registered in `eval/datasets.json` as `rtbench_dev2` (DEV, sha256 `adeb2eab…`, gold `00f05ee6…`) and `rtbench_holdout2` (HOLDOUT, digests only); manifest `eval/rtbench_dev2.manifest.json`. Every `holdout*` split is sealed in the CLI.
+  - Validity on `dev2`, measured before registration: oracle 1.000 (S, N); overwrite 0.323 (S, N); append_only 0.552 (S) / 0.548 (N); 0 errors. PASS.
+  - Tests: `tests/test_rtbench_v2.py` (9, seen failing first on the missing `DEV2_SEEDS`), including a hand case H7 (superseded, then the dead statement erased) checked against both the oracle and the Zurvan adapter.
+- **Recorded runs** (Track S, 15 Nov 2026): `dev` zurvan **1.000** (unchanged by the fix); `dev` zurvan with failed writes adopted **0.883** (was 0.903) with **527 refused writes** counted as errors: the benchmark's later corrections of a claim that `reconcile` had already superseded are now refused instead of forking it; `dev2` zurvan **1.000** on every type; `dev2` with failed writes adopted **0.874** (661 refused writes); sealed `holdout2` smoke (overwrite) 0.320, report item-free.
+- **Files:** `scripts/claim_ledger.py`, `scripts/rtbench/{__init__,events,oracle,generate,cli}.py`, `tests/test_z2_not_current.py` (new), `tests/test_rtbench_v2.py` (new), `tests/test_z2_belief_property.py`, `eval/datasets.json`, `eval/rtbench_dev2.manifest.json` (new), `docs/evaluation/rtbench.md`, the Z2 and RTBench specs.
+- **Verification:** full suite on `main` at `5963859`: **4023 passed, 0 failed, 9 skipped** (57:53); RTBench 61 tests; `tests/test_z2_*` + claim tests 519 passed; `public_repo_guard.py` and `git diff --check` clean. No retrieval code changed (no `eval_search` re-run).
+- **Follow-ups:** IOU-Z2-1…4 (next entries). Z1b NOT closed (budget kept, Raouf 2026-11-15). Chat-memory adapters and standalone publishing: Raouf's call. Rotate the sudo password.
+
 ### 2026-11-15d (Australia/Sydney) — IOU-Z2-5 closed: RTBench, a system-neutral record-time benchmark; Zurvan 1.000 on dev Track S, both naive baselines under the 0.60 bar (`validity` PASS); the benchmark found a Z2 supersede fork
 
 Raouf:

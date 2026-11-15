@@ -279,6 +279,9 @@ pub struct SearchState {
     /// hybrid call, after hydration and before the result is returned.
     #[cfg(test)]
     pub(crate) after_hydrate: Mutex<Option<Box<dyn Fn() + Send>>>,
+    /// Deterministic barrier, run once, between scoring and hydration.
+    #[cfg(test)]
+    pub(crate) before_hydrate: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 
 /// The query model: not tried yet, loaded, or failed at a time (and retried
@@ -310,6 +313,8 @@ impl SearchState {
             load_model: Arc::new(|| locate_model().and_then(|d| Embedder::load(&d)).map(Arc::new)),
             #[cfg(test)]
             after_hydrate: Mutex::new(None),
+            #[cfg(test)]
+            before_hydrate: Mutex::new(None),
         }
     }
 
@@ -468,6 +473,10 @@ impl SearchState {
         let mut k = limit;
         let hits = loop {
             let top = cache.top_k(&qv, &kw, k);
+            #[cfg(test)]
+            if let Some(barrier) = self.before_hydrate.lock().unwrap().take() {
+                barrier();
+            }
             let hits = if top.is_empty() { Ok(Vec::new()) } else { pool.with_conn(|conn| hydrate(conn, &cache, &top))? };
             let Ok(hits) = hits else { break hits };
             let hidden: Vec<bool> = hits.iter().map(|h| crate::claims::page_is_hidden(&self.cfg.root, &h.source_path)).collect();
@@ -760,8 +769,15 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_micros(300));
                 }
             });
+            // Run until the storm has made enough calls, not for a fixed 3 s: on a
+            // loaded host (the full Python suite alongside) a call that follows a
+            // promote rebuilds the vector cache, and 3 s gave 42 calls, failing
+            // the `calls > 50` sanity check, never the mixing assertion
+            // (2026-11-16). The cap keeps a stuck run bounded.
             let t0 = std::time::Instant::now();
-            while t0.elapsed() < std::time::Duration::from_secs(3) {
+            while (calls < 200 || t0.elapsed() < std::time::Duration::from_secs(3))
+                && t0.elapsed() < std::time::Duration::from_secs(60)
+            {
                 for word in ["alpha", "beta"] {
                     let q = format!("{word} entry {}", calls % N);
                     calls += 1;
@@ -808,6 +824,34 @@ mod tests {
         assert!(s.contains("superseded"), "a promote after hydration is reported: {s}");
         // The generation now at the path IS 2: the old stamp would have said so.
         assert_eq!(st.meta.index(&cfg).unwrap().built_from_revision, Some(2));
+    }
+
+    /// 2026-11-16: the storm test above cannot catch an unpinned hydration
+    /// connection (its race window is microseconds; mutation-checked). This one
+    /// promotes deterministically between scoring and hydration: same chunk ids,
+    /// different text. The hits must come from the generation that was scored.
+    #[test]
+    fn hydration_reads_the_scored_generation_even_if_promoted_in_between() {
+        let (_d, cfg) = mock_store();
+        let st = SearchState::new(cfg.clone());
+        let promote_to = cfg.clone();
+        *st.before_hydrate.lock().unwrap() = Some(Box::new(move || {
+            let tmp = promote_to.search_db.with_extension("next");
+            let texts: Vec<String> = DOCS.iter().map(|(_, _, t)| format!("REPLACED {t}")).collect();
+            let chunks: Vec<Chunk> = DOCS
+                .iter()
+                .zip(&texts)
+                .map(|((id, p, _), t)| Chunk { chunk_id: id, source_path: p, heading: Some("H"), text: t, indexed_at: "2026-10-19T00:00:00", vector: mock(t) })
+                .collect();
+            search_db(&tmp, "mock", "deterministic_hash", &chunks, &[("built_from_revision", "2")]);
+            fs::rename(&tmp, &promote_to.search_db).unwrap();
+        }));
+        let r = st.search("ledger", true, 3, &|_, _| {}).unwrap();
+        assert!(!r.hits.is_empty());
+        assert!(r.hits.iter().all(|h| !h.text.starts_with("REPLACED")), "hydrated from the promoted file: {:?}",
+                r.hits.iter().map(|h| &h.text).collect::<Vec<_>>());
+        let Served::Index(m) = &r.served else { panic!("hybrid serves an index") };
+        assert_eq!(m.built_from_revision, Some(1));
     }
 
     #[test]
