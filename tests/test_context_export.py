@@ -8,9 +8,21 @@ import sys
 
 
 def _patch_roots(monkeypatch, tmp_path):
-    """Redirect PROJECT_ROOT in context_export and wiki_merge to tmp_path."""
+    """Redirect PROJECT_ROOT in context_export and wiki_merge to tmp_path, and the
+    write barrier with it (ZURVAN_ROOT): since IOU-Z2-3 (2026-11-15) a synthesis is
+    written through `write_file_safely`, inside an operation (see `_saving`)."""
     monkeypatch.setattr(_context_export, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(_wiki_merge, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("ZURVAN_ROOT", str(tmp_path))
+    monkeypatch.setenv("ZURVAN_CONFIG_DIR", str(tmp_path / ".cfg"))
+
+
+def _saving(tmp_path):
+    """One operation around a `--save`, as the CLI provides."""
+    from scripts import knowledge_revision as kr
+    (tmp_path / "data").mkdir(exist_ok=True)
+    kr.ensure_schema(tmp_path)
+    return kr.operation(writer="test", root=tmp_path)
 
 def test_search_memory(capsys, monkeypatch, tmp_path):
     # Was a FIXED-name page written into the LIVE store and `os.remove`d. The
@@ -67,7 +79,8 @@ def test_save_writes_synthesis_file(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "save_kw_test.md").write_text("save_unique_kw_abc123")
 
-    export_context("save_unique_kw_abc123", save=True)
+    with _saving(tmp_path):
+        export_context("save_unique_kw_abc123", save=True)
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
     assert len(syntheses) == 1
@@ -79,7 +92,8 @@ def test_save_synthesis_has_required_frontmatter(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "fm_kw_test.md").write_text("fm_unique_kw_xyz789")
 
-    export_context("fm_unique_kw_xyz789", save=True)
+    with _saving(tmp_path):
+        export_context("fm_unique_kw_xyz789", save=True)
 
     content = list((tmp_path / "wiki" / "syntheses").glob("*.md"))[0].read_text()
     assert "type: synthesis" in content
@@ -94,8 +108,10 @@ def test_save_no_overwrite_microsecond_collision(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "ow_kw_test.md").write_text("overwrite_kw_unique123")
 
-    export_context("overwrite_kw_unique123", save=True)
-    export_context("overwrite_kw_unique123", save=True)
+    with _saving(tmp_path):
+        export_context("overwrite_kw_unique123", save=True)
+    with _saving(tmp_path):
+        export_context("overwrite_kw_unique123", save=True)
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
     assert len(syntheses) == 2
@@ -119,7 +135,8 @@ def test_search_save_writes_synthesis_file(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "search_save_kw.md").write_text("search_save_unique_kw_xyz")
 
-    search_memory("search_save_unique_kw_xyz", save=True)
+    with _saving(tmp_path):
+        search_memory("search_save_unique_kw_xyz", save=True)
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
     assert len(syntheses) == 1
@@ -219,7 +236,8 @@ def test_save_with_marp_format_writes_canonical_markdown(tmp_path, monkeypatch):
     (tmp_path / "wiki" / "log.md").write_text("")
     (tmp_path / "wiki" / "marp_save.md").write_text("marp_save_kw_unique999")
 
-    export_context("marp_save_kw_unique999", save=True, fmt="marp")
+    with _saving(tmp_path):
+        export_context("marp_save_kw_unique999", save=True, fmt="marp")
 
     syntheses = list((tmp_path / "wiki" / "syntheses").glob("*.md"))
     assert len(syntheses) == 1

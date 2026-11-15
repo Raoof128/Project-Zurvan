@@ -131,17 +131,28 @@ def _save_synthesis(topic: str, markdown_content: str, source_paths: list) -> No
     # Keyword search returns absolute paths; store them repo-relative so the
     # tracked wiki page never leaks machine-specific absolute paths.
     rel_sources = [_trace_source_path(str(p)) for p in source_paths]
+    # IOU-Z2-3: name the claims this snapshot cites, so `claim impact` and
+    # `claim stale-derived` can flag it when one stops being current.
+    from scripts.claim_impact import claim_ids_for_paths
+    try:
+        cited = claim_ids_for_paths(source_paths)
+    except Exception:  # noqa: BLE001 - provenance is best effort; never lose the synthesis
+        cited = []
     fm = (
         f'---\n'
         f'type: synthesis\n'
         f'query: "{safe_topic}"\n'
         f'sources: {", ".join(rel_sources)}\n'
-        f'created_at: {datetime.datetime.now().isoformat()}\n'
+        + (f'claims: {", ".join(cited)}\n' if cited else '')
+        + f'created_at: {datetime.datetime.now().isoformat()}\n'
         f'tags: synthesis, query-derived\n'
         f'---\n\n'
     )
-    with open(candidate, "w", encoding="utf-8") as f:
-        f.write(fm + markdown_content)
+    # Through the write barrier (it was a raw open(), so the CLI's operation
+    # recorded the page as an external change).
+    from scripts.safe_write import write_file_safely
+    if not write_file_safely(candidate, fm + markdown_content):
+        raise ValueError(f"refused to write a synthesis outside the store: {candidate}")
     append_log_save(slug)
 
 
