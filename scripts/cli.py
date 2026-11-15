@@ -1255,6 +1255,11 @@ def _main():
                 elif rev.state != kr.CLEAN:
                     print("drift:      UNRECORDED — the store is SUSPECT; "
                           "reconcile first (the next write will not record it)")
+                elif kr.scope_change():
+                    old, new = kr.scope_change()
+                    print(f"drift:      not comparable — the knowledge scope changed (v{old} "
+                          f"to v{new}); the next write records the new baseline (an edit made "
+                          "in this window cannot be told apart and is absorbed into it)")
                 elif kr.mutations_in(kr.ACTIVE):
                     print("drift:      UNRECORDED — an operation is in flight; "
                           "the change may be its own writes")
