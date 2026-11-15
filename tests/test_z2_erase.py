@@ -136,6 +136,8 @@ def test_erase_cli(root):
     assert res.returncode == 0, res.stderr
     out = json.loads(res.stdout)
     assert out["rev"] == 2 and "not guaranteed removed" in out["bound"]
+    assert {"ledger_metadata", "time_machine"} <= {
+        r["kind"] for r in out["residue"]}
     assert cl.current(root)[cid].status == "erased"
 
 

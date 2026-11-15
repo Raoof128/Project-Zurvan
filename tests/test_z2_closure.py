@@ -33,6 +33,8 @@ MATRIX = {
         (_MIG, "test_unparseable_imported_as_unknown_not_dropped"),
         (_MIG, "test_whitespace_only_quote_is_moved_normalised_not_orphaned"),
         (_MIG, "test_parse_both_shapes"),
+        (_MIG, "test_quote_without_a_source_is_imported_and_orphaned_not_a_crash"),
+        (_MIG, "test_migrate_cli_real_run_reports_and_keeps_files_beside_the_store"),
     ],
     "G3": [  # historical/current views reconstruct
         ("test_z2_belief_property.py", "test_as_of_revision_replays_every_recorded_current_view"),
@@ -54,6 +56,8 @@ MATRIX = {
         (_EV, "test_gone_when_file_removed"),
         (_VER, "test_apply_orphans_then_restores"),
         (_VER, "test_ambiguous_never_orphans"),
+        (_MIG, "test_a_quote_matching_twice_after_normalising_is_ambiguous_not_orphaned"),
+        (_VER, "test_apply_never_orphans_a_claim_whose_volume_is_unmounted"),
     ],
     "G6": [  # no silent overwrite
         (_LED, "test_supersede_links_and_ends_old"),
@@ -71,11 +75,17 @@ MATRIX = {
         (_ERA, "test_erase_rewrites_pages_without_the_text"),
         (_ERA, "test_erase_lists_snapshots_holding_copies"),
         ("test_z2_store.py", "test_chain_survives_content_erasure"),
+        (_ERA, "test_a_store_keeps_its_migration_files_beside_itself_not_in_the_real_home"),
+        (_ERA, "test_erase_lists_the_log_line_and_the_migration_report"),
+        (_ERA, "test_erase_reports_a_hand_edit_it_had_to_overwrite"),
+        (_WR, "test_reextraction_of_a_source_with_an_erased_claim_is_refused"),
     ],
     "G8": [  # crash safety
         (_REC, "test_crash_mid_claim_write_then_reconcile"),
         (_REC, "test_reconcile_does_not_crash_on_sqlite"),
         (_REC, "test_a_torn_claims_store_needs_review"),
+        (_REC, "test_a_reader_names_a_hot_journal_instead_of_crashing_or_going_empty"),
+        (_REC, "test_reconcile_rolls_back_a_hot_journal_left_by_a_crashed_claim_write"),
     ],
     "G9": [  # writers routed
         (_WR, "test_only_renderer_writes_wiki_claims"),

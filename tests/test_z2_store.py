@@ -192,3 +192,9 @@ def test_second_writer_blocks_then_busy(root):
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_the_claims_lock_waits_thirty_seconds_by_default():
+    # Test gap from the final review: the 30 s CLAIMS_BUSY default was untested.
+    import inspect
+    assert inspect.signature(cs.acquire_for_operation).parameters["timeout_s"].default == 30.0
