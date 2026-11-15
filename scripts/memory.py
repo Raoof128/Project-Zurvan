@@ -25,6 +25,14 @@ def append_to_log(action: str, details: str):
     entry = f"\n- **{timestamp}**: {action} - {details}"
     append_file_safely(log_path, entry)
 
+def append_claim_log(claim_id: str, source: str) -> None:
+    """The `Claim Added` line, for every claim writer (MCP, `memory.add_claim`,
+    `zurvan claim add`). Resolved at call time, like the claim ledger."""
+    from scripts.knowledge_scope import store_root
+    log_path = str(store_root() / "wiki" / "log.md")
+    entry = f"\n- **{datetime.now().isoformat()}**: Claim Added - Claim {claim_id} from {source}"
+    append_file_safely(log_path, entry)
+
 def _make_note_slug(name: str) -> str:
     """Lowercase hyphenated slug for note/decision filenames (different from wiki-page slugs)."""
     name = name.lower().replace(" ", "-")
@@ -290,7 +298,7 @@ def add_claim_detailed(text: str, source: str, evidence: str, confidence: str,
     except ValueError as e:
         print(f"Error: {e}.")
         return False, f"INVALID: {e}"
-    append_to_log("Claim Added", f"Claim {claim_id} from {source}")
+    append_claim_log(claim_id, source)
     from scripts import claim_pages
     print(f"Created {claim_pages.page_path(claim_ledger.current()[claim_id])}")
     return True, None

@@ -175,3 +175,14 @@ def test_valid_dates_and_slug_accepted(root):
     cid = _add(root, valid_from="2026-11-09", valid_until="2026-11-16T00:00:00+11:00",
                project="acme")
     assert cl.current(root)[cid].valid_from == "2026-11-09"
+
+
+# Deferred minor, fixed 2026-11-15: `zurvan claim add` wrote no `Claim Added`
+# line to wiki/log.md, while memory.add_claim (the MCP path) did.
+def test_cli_claim_add_logs_like_the_mcp_path(root):
+    res = _cli(root, "add", "--text", "logged fact", "--source", SRC, "--evidence", Q,
+               "--confidence", "high")
+    assert res.returncode == 0, res.stderr
+    cid = next(iter(cl.current(root)))
+    log = (root / "wiki" / "log.md").read_text(encoding="utf-8")
+    assert f"Claim Added - Claim {cid} from {SRC}" in log
