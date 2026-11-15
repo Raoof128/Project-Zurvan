@@ -761,6 +761,14 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
                                     "action": "raw model output; delete by hand if required"})
             except OSError:
                 pass
+    try:   # IOU-Z2-3: snapshots built from the claim may quote it
+        from scripts.claim_impact import impact
+        for art in impact(claim_id, root):
+            residue.append({"kind": "derived_artifact", "where": art["path"],
+                            "action": f"a {art['kind'].replace('_', ' ')} built from this claim; "
+                                      "it is a snapshot and is not rewritten: edit or delete by hand"})
+    except Exception:  # noqa: BLE001 - the residue report is best effort
+        pass
     residue.append({"kind": "ledger_metadata", "where": str(cs.db_path(base)),
                     "action": "kept by design: claim id, legacy id, project slug, actors, "
                               "timestamps and revision events (the hash chain needs them)"})

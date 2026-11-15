@@ -122,6 +122,11 @@ def register(subparsers) -> None:
     mg.add_argument("--legacy-dir", dest="legacy_dir")
     mg.add_argument("--report", dest="report_path")
     sub.add_parser("doctor", help="Chain, integrity, invisible rows, dangling cids, edited pages")
+    im = sub.add_parser("impact", help="Derived artifacts (syntheses, packs, reports) citing a claim")
+    im.add_argument("claim_id")
+    im.add_argument("--json", action="store_true")
+    sd = sub.add_parser("stale-derived", help="Derived artifacts citing a claim that is no longer current")
+    sd.add_argument("--json", action="store_true")
     rg = sub.add_parser("regenerate", help="Rewrite pages from the ledger")
     rg.add_argument("claim_id", nargs="?")
     rg.add_argument("--all", action="store_true")
@@ -146,6 +151,21 @@ def _print_state(s, as_json):
         print(json.dumps(asdict(s), sort_keys=True, default=str))
         return
     print(f"{s.claim_id} rev {s.rev} [{s.status}] {s.confidence or '-'}: {s.text}")
+
+
+def _dependents(claim_id) -> None:
+    """IOU-Z2-3: say what was built from a claim that just stopped being current.
+    Flagged, never rewritten (design 2026-11-15-z2-iou-1-4 §1)."""
+    try:
+        from scripts.claim_impact import impact
+        n = len(impact(claim_id))
+    except Exception:  # noqa: BLE001 - a notice must never fail the write
+        return
+    if n:
+        word = "artifact cites" if n == 1 else "artifacts cite"
+        print(f"note: {n} derived {word} {claim_id} (syntheses, evidence packs, reports are "
+              f"snapshots and are not rewritten); list them: zurvan claim impact {claim_id}",
+              file=sys.stderr)
 
 
 def dispatch(args) -> int:
@@ -173,10 +193,12 @@ def dispatch(args) -> int:
                                expected_rev=args.expected_rev, confidence=args.confidence,
                                basis=args.basis, tags=args.tags)
             print(json.dumps({"claim_id": new, "supersedes": args.claim_id}))
+            _dependents(args.claim_id)
         elif action == "retract":
             rev = cl.retract(args.claim_id, reason=args.reason, basis=args.basis, actor=actor,
                              method=args.method, expected_rev=args.expected_rev)
             print(json.dumps({"claim_id": args.claim_id, "rev": rev}))
+            _dependents(args.claim_id)
         elif action == "revise":
             rev = cl.revise(args.claim_id, reason=args.reason, actor=actor, method=args.method,
                             expected_rev=args.expected_rev, text=args.text,
@@ -226,6 +248,7 @@ def dispatch(args) -> int:
         elif action == "erase":
             out = cl.erase(args.claim_id, reason_class=args.reason_class, actor=actor)
             print(json.dumps(out, sort_keys=True))
+            _dependents(args.claim_id)
         elif action == "migrate":
             from scripts import claim_migrate
             out = claim_migrate.migrate(dry_run=args.dry_run, legacy_dir=args.legacy_dir,
@@ -236,10 +259,33 @@ def dispatch(args) -> int:
         elif action == "doctor":
             from scripts import claim_store
             report = claim_store.doctor()
+            try:   # informational (IOU-Z2-3): never a failure
+                from scripts.claim_impact import stale_derived
+                report["stale_derived"] = len(stale_derived())
+            except Exception as exc:  # noqa: BLE001
+                report["stale_derived"] = f"unavailable: {exc}"
             print(json.dumps(report, sort_keys=True, default=str))
             healthy = (report["chain_ok"] and report["integrity"] in ("ok", "absent")
                        and not report["dangling_cids"])
             return 0 if healthy else 1
+        elif action == "impact":
+            from scripts.claim_impact import impact
+            if args.claim_id not in cl.current():
+                raise ClaimRefused("UNKNOWN_CLAIM", args.claim_id)
+            hits = impact(args.claim_id)
+            if args.json:
+                print(json.dumps(hits, sort_keys=True))
+            else:
+                for h in hits:
+                    print(f"{h['kind']}\t{h['path']}")
+        elif action == "stale-derived":
+            from scripts.claim_impact import stale_derived
+            rows = stale_derived()
+            if args.json:
+                print(json.dumps(rows, sort_keys=True))
+            else:
+                for r in rows:
+                    print(f"{r['claim_id']}\t{r['status']}\t{r['kind']}\t{r['path']}")
         elif action == "regenerate":
             if not args.claim_id and not args.all:
                 print("Error: USAGE: give a claim id or --all", file=sys.stderr)

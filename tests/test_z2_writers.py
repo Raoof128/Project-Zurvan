@@ -195,6 +195,7 @@ REVIEWED = {
     "report_export.py": "reads for reports",
     "review_audit.py": "reads for review",
     "review_index.py": "reads for review",
+    "claim_impact.py": "reads only: matches derived artifacts to claim pages (IOU-Z2-3)",
     "run_reliability_gauntlet.py": "reads for the gauntlet",
 }
 
