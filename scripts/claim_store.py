@@ -160,6 +160,27 @@ def _pragmas(conn) -> None:
     conn.execute("PRAGMA secure_delete = ON")
 
 
+def _is_hot_journal(exc, path) -> bool:
+    """A read-only connection cannot roll back a crashed writer's journal."""
+    return (getattr(exc, "sqlite_errorname", "") == "SQLITE_READONLY_ROLLBACK"
+            or Path(f"{path}-journal").exists() and "readonly" in str(exc))
+
+
+def roll_back_hot_journal(path) -> bool:
+    """Let SQLite roll back a journal a crashed writer left behind. SQLite does
+    it only for a HOT journal (no live writer holds a lock), so this can never
+    undo a transaction still in progress. True if a journal was there."""
+    journal = Path(f"{path}-journal")
+    if not journal.exists():
+        return False
+    conn = sqlite3.connect(str(path), isolation_level=None)
+    try:
+        conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+    finally:
+        conn.close()
+    return True
+
+
 def connect(root=None, *, readonly: bool = False) -> sqlite3.Connection:
     """Open the store. Read-only never creates it; read-write creates the schema.
 
@@ -169,7 +190,17 @@ def connect(root=None, *, readonly: bool = False) -> sqlite3.Connection:
     path = db_path(root)
     if readonly:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None)
-        _pragmas(conn)
+        try:
+            _pragmas(conn)
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        except sqlite3.OperationalError as exc:
+            conn.close()
+            if _is_hot_journal(exc, path):
+                raise ClaimRefused(
+                    "CLAIMS_STORE_RECOVERY_NEEDED",
+                    f"{path.name}-journal was left by a write that never finished; "
+                    "run `zurvan knowledge reconcile` to roll it back") from None
+            raise
         return conn
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), isolation_level=None)
@@ -395,6 +426,7 @@ def reconcile_ok(path, planned_pages=()) -> bool:
     exists. Used by `knowledge_reconcile`, whose text parser cannot read SQLite.
     """
     try:
+        roll_back_hot_journal(path)        # a crash mid-transaction leaves one
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, isolation_level=None)
     except sqlite3.Error:
         return False
