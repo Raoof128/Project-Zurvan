@@ -36,6 +36,10 @@ class ZurvanAdapter(Adapter):
         if abort_mode not in ("before_claim", "after_claim"):
             raise ValueError(abort_mode)
         self.work_dir = Path(work_dir)
+        if self.work_dir.exists() and any(self.work_dir.iterdir()):
+            # Case stores are numbered from 1 on every run: a leftover claim in a
+            # reused directory would be read back as this run's belief.
+            raise ValueError(f"work dir {self.work_dir} is not empty; give an empty or new one")
         self.abort_mode = abort_mode
         self.name = "zurvan" if abort_mode == "before_claim" else "zurvan_abort_after_claim"
         self._n = 0

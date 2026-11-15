@@ -68,7 +68,12 @@ zurvan bench rtbench generate --split dev
 zurvan bench rtbench run --adapter oracle|overwrite|append_only|zurvan|zurvan_abort_after_claim \
                          --track S|N --split dev|holdout [--limit N]
 zurvan bench rtbench report ~/.zurvan/reports/rtbench-<adapter>-<track>-<split>-<stamp>.json
+zurvan bench rtbench validity --split dev     # spec §6.5: oracle 1.000, both baselines <= 0.60, no errors
 ```
+
+A run refuses a split whose cases **or gold** file does not match its registered digest; the holdout runs only as
+a registered split, and never with `--limit` (differencing two limits would expose one case's results). A Zurvan run
+refuses a non-empty `--work-dir`.
 
 ## Writing an adapter for another system
 
@@ -85,7 +90,8 @@ class MySystem(Adapter):
 
 The runner calls `reset`, feeds every item in order, then asks every question. A chat-memory product belongs on
 Track N: send each turn as a message, ask each question, return the reply. An exception from `ingest` or `answer` is
-counted as an error and a wrong answer, never a crash.
+counted as an error and a wrong answer, never a crash. A Track N set answer (Q1) may come back as prose: `none`
+scores as the empty set and items split on a comma that is not a thousands separator (`4,210 tonnes, 100 staff`).
 
 ## Recorded results (dev, 15 Nov 2026, generator `rtbench-1`)
 

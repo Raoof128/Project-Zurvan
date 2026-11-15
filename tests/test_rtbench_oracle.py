@@ -6,8 +6,10 @@ def test_oracle_imports_nothing_from_zurvan():                       # R2
     tree = ast.parse(pathlib.Path("scripts/rtbench/oracle.py").read_text())
     mods = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
            {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    assert not {m for m in mods if m and (m.startswith("scripts.claim") or m.startswith("scripts.knowledge")
-                                         or m == "scripts" or m.startswith("scripts.") and not m.startswith("scripts.rtbench"))}
+    rel = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.level]
+    allowed = {"scripts.rtbench", "scripts.rtbench.canon"}
+    assert not rel, "relative imports would hide what the oracle uses"
+    assert not {m for m in mods if m and m.startswith("scripts") and m not in allowed}, mods
 
 def A(t, sid, slot, value, vf=None, vu=None):
     return {"t": t, "type": "assert", "sid": sid, "slot": slot, "value": value, "valid_from": vf, "valid_until": vu}
@@ -71,3 +73,15 @@ def test_boundary_ticks():
     tl = fold(H1)
     assert q(tl, type="Q3", t=1, slot="k1") == "100 tonnes"
     assert q(tl, type="Q3", t=tl.final_tick, slot="k1") == q(tl, type="Q6", slot="k1")
+
+
+H6 = [A(1, "s1", "k1", "100 tonnes"), S(2, "s1", "s2", "k1", "200 tonnes"), S(3, "s2", "s3", "k1", "300 tonnes"),
+      {"t": 4, "type": "retract", "sid": "s3", "reason": "r"}]
+
+
+def test_hand_case_double_supersede_then_retract():                       # R3 (sixth case; Review Focus 1)
+    tl = fold(H6)
+    assert [q(tl, type="Q3", t=t, slot="k1") for t in (1, 2, 3, 4)] == ["100 tonnes", "200 tonnes", "300 tonnes", "none"]
+    assert [q(tl, type="Q2", t=4, sid=s) for s in ("s1", "s2", "s3")] == ["superseded", "superseded", "retracted"]
+    assert q(tl, type="Q1", t=3) == ["s3"] and q(tl, type="Q1", t=4) == []
+    assert q(tl, type="Q5", slot="k1", value="200 tonnes") == "yes"

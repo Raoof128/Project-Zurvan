@@ -22,14 +22,20 @@ MATRIX = {
            "tests/test_rtbench_oracle.py::test_hand_case_erase_after_belief",
            "tests/test_rtbench_oracle.py::test_hand_case_abort_is_never_believed",
            "tests/test_rtbench_oracle.py::test_hand_case_bitemporal",
-           "tests/test_rtbench_oracle.py::test_hand_case_revise_and_open_interval"],
+           "tests/test_rtbench_oracle.py::test_hand_case_revise_and_open_interval",
+           "tests/test_rtbench_oracle.py::test_hand_case_double_supersede_then_retract"],
     "R4": ["tests/test_rtbench_render.py::test_round_trip_reproduces_every_answer"],
     "R5": ["tests/test_rtbench_adapters.py::test_oracle_scores_full_marks_on_both_tracks"],
-    "R6": ["tests/test_rtbench_adapters.py::test_baselines_stay_under_the_bar_on_both_tracks"],
+    "R6": ["tests/test_rtbench_adapters.py::test_baselines_stay_under_the_bar_on_both_tracks",
+           "tests/test_rtbench_review_fixes.py::test_validity_needs_every_report_and_no_errors",
+           "tests/test_rtbench_review_fixes.py::test_validity_runs_from_the_cli"],
     "R7": ["tests/test_rtbench_zurvan.py::test_zurvan_runs_a_generated_sample"],
     "R8": ["tests/test_rtbench_zurvan.py::test_abort_reconciles_in_temp_root"],
     "R9": ["tests/test_rtbench_closure.py::test_holdout_is_registered_by_whole_file_digest_only",
-           "tests/test_rtbench_cli.py::test_holdout_report_has_no_items"],
+           "tests/test_rtbench_cli.py::test_holdout_report_has_no_items",
+           "tests/test_rtbench_review_fixes.py::test_a_sealed_cli_run_leaves_no_items",
+           "tests/test_rtbench_review_fixes.py::test_an_edited_gold_file_is_refused",
+           "tests/test_rtbench_review_fixes.py::test_limit_is_refused_on_holdout"],
 }
 
 def test_every_acceptance_row_names_tests_that_exist():
