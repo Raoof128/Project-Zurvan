@@ -3,6 +3,34 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-15b (Australia/Sydney) — Z2 follow-ups: all final-review minors fixed, IOU-Z2-7 and -8 closed on the live store, two security findings fixed; G5's live counts now reconcile
+
+Raouf:
+- **Scope:** Raouf said "proceed do all fixes" after the Z2 migration (entry 2026-11-15). Work on branch `z2-fixes` (13 fix commits plus 2 test commits), fast-forwarded to `main` at `f5fe668`.
+- **Fixes, each with a test that failed first:**
+  - **Hot journal (crash safety):** a claim writer killed mid-transaction leaves `claims.sqlite-journal`. Read-only readers then failed with `SQLITE_READONLY_ROLLBACK`, and `reconcile_ok` returned False, so the store could never be reconciled. Readers now refuse `CLAIMS_STORE_RECOVERY_NEEDED` naming the fix; reconcile lets SQLite roll a hot journal back first (`0eb16cb`).
+  - **IOU-Z2-7:** migration classed a quote matching twice after whitespace normalisation as `changed` and orphaned it; `verify` calls it `ambiguous`, which never orphans. Migration now agrees: `ambiguous`, imported asserted and unanchored (`ff2f32b`).
+  - **MCP `zurvan_claim_add`** named every refusal as a bad quote. It now names the code (`MIGRATION_REQUIRED`, `CLAIMS_STORE_SUSPECT`, `CLAIMS_BUSY`…) and keeps the verbatim hint only for `EVIDENCE_REJECTED` (`43deed2`).
+  - **Quadratic commands:** `conflicts`, `regenerate` and `verify --apply` re-read the ledger once per claim; `claim conflicts` took 18 s on 556 claims. One read per command now (`9682024`). `verify` also reads each source once per run instead of once per claim (`acaec5e`).
+  - **Test-store isolation:** migration defaults and erase's legacy-copy lookup used the real `~/.zurvan/z2` for ANY store; a test store could have stubbed a page of the live frozen copy (the fixture id `claim-dummy-001` existed in both). `claim_store.private_dir` keeps `~/.zurvan/z2` for the store in this checkout and puts any other store's files in `<store>/.zurvan-z2/` (gitignored) (`58e7b1e`).
+  - **Erase residue** now also lists the `wiki/log.md` line, migration reports naming the claim, the metadata the ledger keeps by design, and any hand edit the rewrite had to overwrite (`58e7b1e`, `e3e4a68`).
+  - **Erase and re-extraction:** erase blanked the extraction key, so re-extracting the source recreated the erased claim. The security review then found two MEDIUM issues in my first fix (`b2cbde6`): keeping the raw key kept the model's own claim id, and a re-extraction would rewrite the raw JSON, summary and concepts with the erased fact. Final fix (`f8c2a19`): the key becomes the tombstone `erased:<sha256 of the file>`, and `extract_source` refuses that exact file (`ExtractionRefused`) **before the model call** and before any write.
+  - **Retract** wrote its basis over the claim's `confidence_basis`; it now goes into the retraction reason (`b2cbde6`). A successor page now marks a replaced claim that was later retracted ("since retracted"), and retract refreshes it, never over a hand edit (`e3e4a68`).
+  - **Unmounted disks:** `verify --apply` orphaned claims whose source sits on a disk that is not mounted. `resolve` now says `volume not mounted: /Volumes/X` and verify leaves them alone (`skipped_unmounted`) (`f8c2a19`).
+  - **`zurvan claim add`** wrote no `Claim Added` log line (the MCP path did); one helper now serves both (`1367640`). The full suite caught that an in-process smoke test then wrote that line into the checkout's own `wiki/log.md`; the test now spies it (`f5fe668`).
+  - **`knowledge status`** reported a scope-version change as an outside edit; it now names the scope change and states the bound (`79d7f1c`).
+  - **Graph parser:** a frontmatter list item containing a colon (a tag `client: acme`) became a junk key; list items are skipped. No key an edge or node field reads can change (`8c6690c`).
+  - **Test gaps closed:** a real (non-dry) `claim migrate` CLI run, erase CLI residue, the 30 s lock default. The Z2 closure matrix names the new tests under G2, G5, G7 and G8.
+- **Live store (IOU-Z2-7, IOU-Z2-8):**
+  - `clm_d4782cf842887bc4` and `clm_e04c67df1d37b828` (risk report §3.1) restored to `asserted` with `claim revise`, each re-anchored to a longer quote that occurs exactly once (the §3.1 passage; the first occurrence is the executive summary). This is the designed evidence path, not a restore by assertion.
+  - `claim-dummy-001` (`clm_ce29e757eafa54c4`), a 2026-05-30 test fixture page in the real store with no source, retracted.
+  - Live `claim verify`: 515 intact, 7 moved, 5 changed, 26 gone, 0 ambiguous; integrity 0.944. The broken counts now equal the migration's (27 gone, 7 changed) minus the source-less fixture and the two restored claims. **G5's live criterion is met** after the fix; it was not met at the migration itself, and that entry stands.
+- **Retrieval:** `index search` 459,113 chunks; graph 15,784 nodes / 22,103 edges; both CURRENT at 3471. `eval_search --hybrid` (RETIRED instrument, legacy capture): Top-1 0.72, Top-3 0.74, MRR 0.737, the same 13 failing items as this morning's post-migration run; none newly failing. The comparison is against this morning's report at revision 3452, not a fresh "before" (no ranking code changed). Report `~/.zurvan/reports/z2-fixes-eval-after-20261115.json`.
+- **Rust MCP:** no Rust file changed; the installed binary (`b241648c…`) stands. Its write tools run the Python on `main` per call, so the fixes are live without a restart.
+- **Skills:** user-level `zurvan` skill (Claude Code and Codex, identical) gained the erase, re-extraction, unmounted-disk and error-code behaviour. The repo's tracked copy (`.claude/skills/zurvan/SKILL.md`) gained a Z2 claims section (`2756d60`).
+- **Verification:** branch suite 3933 passed / 4 failed (the four worktree-only failures: no live wiki, graph or index) after one run that caught the smoke-test write above; `bash scripts/check.sh` on `main`: all 25 gates passed, exit 0: gate 0 Boundary red team 27/27, gate 1 guard passed, gate 2 pytest **3941 passed / 0 failed / 9 skipped** (37:05), gate 5 index 459,113 chunks healthy, gate 6 Top-1 72% / Top-3 74% (legacy capture, UNVERIFIED; the eval took ~55 min on a disk-bound host); store CLEAN at 3471, search and graph COHERENT+CURRENT. `public_repo_guard.py` and `git diff --check` before each commit.
+- **Follow-ups:** IOU-Z2-1…6 unchanged (entry 2026-11-15). Z1b still NOT closed. Rotate the sudo password.
+
 ### 2026-11-15 (Australia/Sydney) — Z2 claim ledger merged to `main` and the live store migrated: 551 claims in `data/claims.sqlite`, 0 provenance mismatches; retrieval unchanged; first run crashed and was restored; G5's live criterion NOT met exactly
 
 Raouf:
