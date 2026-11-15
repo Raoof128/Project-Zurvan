@@ -25,6 +25,20 @@
       "sha256": "711e10ac98d6ff50acef91864c99458ac3260267f9b04a647a56281a557f33fb",
       "n_items": 80,
       "suite_id": "bedc01c1dce53b46"
+    },
+    "rtbench_dev": {
+      "state": "DEV",
+      "sha256": "58d4828445cb18b00a64448b679b5b91d8a3aa4eaeea0c75a1e23961418e23f6",
+      "gold_sha256": "53a5e834738c4ae941fc4e0038d8a43b2de4ee7ca3dfff315aa5c571c7feb423",
+      "n_items": 200,
+      "generator_version": "rtbench-1"
+    },
+    "rtbench_holdout": {
+      "state": "HOLDOUT",
+      "sha256": "75c07f1764f3014ed01b4a6edaf4ed241fbf34134783ab18caf3e15eaef58d4b",
+      "gold_sha256": "74cca8748cc9640b688d579c36c9c1a67da4d3ef289c6c9c66ece320ceed0314",
+      "n_items": 200,
+      "generator_version": "rtbench-1"
     }
   }
 }
