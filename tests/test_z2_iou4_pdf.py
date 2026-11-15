@@ -129,3 +129,36 @@ def test_a_quote_on_two_pages_is_refused_at_anchor(root):                  # I2 
         _add(root, "is in Halden")
     assert exc.value.code == "EVIDENCE_AMBIGUOUS"
     assert cl.current(root) == {}
+
+
+def test_normalised_verify_never_matches_across_a_page_break(root):
+    """Deferred minor (2026-11-15f): whitespace normalisation turned the form feed
+    between pages into a space, so a quote split over two pages after an edit was
+    `moved_normalised` instead of `changed`."""
+    cid = _add(root, "Orrin Mill produced 4,210")
+    sel = cl.current(root)[cid].evidence[0]["selector"]
+    _pdf(root / PDF, [COVER, "Output of Orrin Mill", "produced 4,210 tonnes in 2025.", PLACE])
+    assert ce.resolve(sel, PDF, "pdf_pages@1", root)[0] == "changed"
+    _pdf(root / PDF, [COVER, "Orrin Mill  produced 4,210 tonnes.", PLACE])     # same page, new spacing
+    outcome, detail = ce.resolve(sel, PDF, "pdf_pages@1", root)
+    assert outcome == "moved_normalised" and "page 2" in detail
+
+
+def test_extraction_from_a_pdf_uses_the_page_reader_when_every_quote_fits(root):
+    """Deferred minor (2026-11-15f): extraction always recorded the page-less
+    `extract_text@1`. A claim whose quotes each occur once in the per-page text now
+    gets `pdf_pages@1` (and so a page); otherwise it keeps `extract_text@1`, which is
+    what the model read (PyMuPDF, normalised)."""
+    from scripts.extract import evidence_reader
+    path = str(root / PDF)
+    assert evidence_reader(path, ["produced 4,210 tonnes"]) == "pdf_pages@1"
+    assert evidence_reader(path, ["produced 4,210 tonnes", "is in Halden"]) == "pdf_pages@1"
+    assert evidence_reader(path, ["report.\nOrrin Mill"]) == "extract_text@1"          # spans a page
+    assert evidence_reader(path, ["Orrin Mill"]) == "extract_text@1"                    # occurs twice
+    assert evidence_reader(str(root / "notes.md"), ["x"]) == "extract_text@1"           # not a PDF
+
+
+def test_extraction_passes_the_chosen_reader_to_the_ledger():
+    src = (REPO / "scripts" / "extract.py").read_text(encoding="utf-8")
+    assert 'reader="extract_text@1", claim_type' not in src
+    assert "evidence_reader(" in src

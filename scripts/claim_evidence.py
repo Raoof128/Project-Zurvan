@@ -219,7 +219,18 @@ def resolve(selector: dict, source_ref: str, reader: str, root, cache=None) -> t
         if len(ctx) == 1:
             return "moved", where(ctx[0], " (by context)")
         return "ambiguous", f"{len(hits)} matches, {len(ctx)} with the recorded context"
-    norm_hits = _occurrences(_norm(text), _norm(exact))
+    if was is not None:
+        # Per page: `_norm` would turn the form feed between pages into a space and
+        # let a quote match across a page break (deferred minor 2026-11-15f).
+        needle = _norm(exact)
+        norm_hits = [n for n, page in enumerate(text.split(PAGE_BREAK), 1)
+                     for _ in _occurrences(_norm(page), needle)]
+        if len(norm_hits) == 1:
+            now = norm_hits[0]
+            return "moved_normalised", (f"page {was}" + (f" -> page {now}" if now != was else "")
+                                        + ", found after whitespace normalisation")
+    else:
+        norm_hits = _occurrences(_norm(text), _norm(exact))
     if len(norm_hits) == 1:
         return "moved_normalised", "found after whitespace normalisation"
     if len(norm_hits) > 1:

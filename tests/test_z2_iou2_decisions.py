@@ -191,3 +191,40 @@ def test_cross_project_supersession_is_refused(store):                     # I5
     r = zurvan(store, "decision", "supersede", a.stem, "--by", b.stem, "--reason", "r")
     assert r.returncode == 1 and "DECISION_PROJECT_MISMATCH" in r.stderr
     assert kr.current(store).revision == before
+
+
+def test_the_status_section_says_superseded_and_carries_the_note(store):
+    """Deferred minor (2026-11-15f): the body's `## Status` line kept the old status and
+    the note was appended at the end of the page."""
+    old, new = _decide(store, "Status old"), _decide(store, "Status new")
+    with old.open("a", encoding="utf-8") as f:
+        f.write("\n## Notes\nlater text\n")
+    assert zurvan(store, "decision", "supersede", old.stem, "--by", new.stem, "--reason", "why").returncode == 0
+    text = old.read_text(encoding="utf-8")
+    status = text.split("\n## Status\n", 1)[1].split("\n## ", 1)[0]
+    assert status.splitlines()[0] == "superseded"
+    assert "accepted" not in status
+    assert f"Superseded by [[{new.stem}]]" in status
+    assert text.rstrip().endswith("later text"), "the note sits under ## Status, not at the end"
+
+
+def test_history_lists_every_predecessor_of_a_merge(store):
+    """Deferred minor (2026-11-15f): `decision history` followed only the first
+    `supersedes` entry, so one of two merged predecessors was invisible."""
+    a, b, c = _decide(store, "Merge left"), _decide(store, "Merge right"), _decide(store, "Merged")
+    assert zurvan(store, "decision", "supersede", a.stem, "--by", c.stem, "--reason", "r").returncode == 0
+    assert zurvan(store, "decision", "supersede", b.stem, "--by", c.stem, "--reason", "r").returncode == 0
+    r = zurvan(store, "decision", "history", c.stem)
+    assert r.returncode == 0, r.stderr
+    slugs = [l.split()[0] for l in r.stdout.splitlines() if l.strip()]
+    assert sorted(slugs[:2]) == sorted([a.stem, b.stem]) and slugs[2] == c.stem
+
+
+def test_a_relative_page_path_resolves_against_the_store_not_the_cwd(store):
+    """Deferred minor (2026-11-15f): `wiki/decisions/x.md` resolved against the working
+    directory (the CLI runs with cwd=REPO here), so a valid store path was UNKNOWN."""
+    old, new = _decide(store, "Rel old"), _decide(store, "Rel new")
+    rel_old = old.relative_to(store).as_posix()
+    r = zurvan(store, "decision", "supersede", rel_old, "--by", new.stem, "--reason", "r")
+    assert r.returncode == 0, r.stderr
+    assert _fm(old)[0]["superseded_by"].strip().strip('"') == new.stem

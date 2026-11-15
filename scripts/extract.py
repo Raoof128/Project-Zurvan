@@ -20,6 +20,29 @@ class ExtractionRefused(RuntimeError):
     the erased fact back into the raw JSON, summary and concepts."""
 
 
+def evidence_reader(filepath, quotes, cache=None) -> str:
+    """The evidence reader for one extracted claim (deferred minor 2026-11-15f).
+
+    The model read `extract_text` (PyMuPDF, normalised), so that reader always
+    admits its quotes. For a PDF, `pdf_pages@1` (pypdf, per page) also records the
+    page, so it is used when EVERY quote occurs exactly once in that text; a quote
+    the two extractors render differently, or one on two pages, keeps
+    `extract_text@1` rather than being refused."""
+    if not str(filepath).lower().endswith(".pdf"):
+        return "extract_text@1"
+    from scripts import claim_evidence as ce
+    cache = {} if cache is None else cache
+    if "text" not in cache:
+        try:
+            cache["text"] = ce.PAGE_BREAK.join(ce._pdf_pages(filepath))
+        except Exception:  # noqa: BLE001 - an unreadable PDF keeps the extraction reader
+            cache["text"] = None
+    text = cache["text"]
+    if text and quotes and all(len(ce._occurrences(text, q)) == 1 for q in quotes):
+        return ce.PDF_READER
+    return "extract_text@1"
+
+
 def source_identity(filepath: str, source_text: str) -> tuple[str, str]:
     """`(source_id, content_hash)`: the id names the content, not the path.
 
@@ -215,6 +238,7 @@ def extract_source(filepath):
     # Claims (planned and conflict-checked above), through the Z2 ledger
     from scripts import claim_ledger
     from scripts.claim_spo import from_extraction
+    _pages = {}                                   # the PDF's per-page text, read once
     for rec in claim_records:
         claim = rec["claim"]
         evs = claim["evidence"]
@@ -222,7 +246,8 @@ def extract_source(filepath):
             claim["text"], source_ref, evs[0]["quote"],
             confidence=str(claim["confidence"]).strip().lower(),
             tags=list(claim.get("tags") or []), actor="extract", method="model_extraction",
-            reader="extract_text@1", claim_type=claim.get("claim_type"),
+            reader=evidence_reader(filepath, [e["quote"] for e in evs], _pages),
+            claim_type=claim.get("claim_type"),
             extraction_key=rec["key"], location_hint=evs[0].get("location"),
             extra_evidence=[(e["quote"], e.get("location")) for e in evs[1:]],
             spo=from_extraction(claim))    # IOU-Z2-1: optional; an invalid triple is dropped

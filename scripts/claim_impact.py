@@ -61,31 +61,57 @@ def _json(p: Path):
         return None
 
 
-def _packs(cfg: Path):
+def _foreign_projects(cfg: Path, base: Path) -> set:
+    """Registered project names whose store is NOT `base`.
+
+    Evidence packs and reports live in the shared config dir and name each item's
+    project. A path match from another registered store is not a citation of this
+    store's claim. An unregistered name cannot be told apart, so it is kept:
+    flagging a non-citation is cheap, missing a citation of a retracted claim is not.
+    """
+    reg = _json(cfg / "projects.json")
+    projects = reg.get("projects") if isinstance(reg, dict) else None
+    out = set()
+    for name, data in (projects or {}).items():
+        try:
+            if Path(data["path"]).resolve() != base.resolve():
+                out.add(name)
+        except (KeyError, TypeError, OSError):
+            continue
+    return out
+
+
+def _paths(rows, foreign, *keys) -> set:
+    return {_norm(next((r.get(k) for k in keys if r.get(k)), "")) for r in rows
+            if isinstance(r, dict) and r.get("project") not in foreign} - {""}
+
+
+def _packs(cfg: Path, foreign: set):
     d = cfg / "evidence-packs"
     for p in sorted(d.glob("*/items.json")) if d.is_dir() else []:
         items = _json(p)
         if isinstance(items, list):
             yield {"kind": "evidence_pack", "path": str(p.parent), "ids": set(),
-                   "paths": {_norm(i.get("source_path", "")) for i in items if isinstance(i, dict)} - {""}}
+                   "paths": _paths(items, foreign, "source_path")}
 
 
-def _reports(cfg: Path):
+def _reports(cfg: Path, foreign: set):
     d = cfg / "reports"
     for p in sorted(d.glob("*/report.json")) if d.is_dir() else []:
         rep = _json(p)
         if isinstance(rep, dict):
-            rows = [r for r in (rep.get("claims") or []) + (rep.get("citations") or []) if isinstance(r, dict)]
+            rows = (rep.get("claims") or []) + (rep.get("citations") or [])
             yield {"kind": "report", "path": str(p.parent), "ids": set(),
-                   "paths": {_norm(r.get("source_path") or r.get("path") or "") for r in rows} - {""}}
+                   "paths": _paths(rows, foreign, "source_path", "path")}
 
 
 def derived_artifacts(root=None):
     base = ks.store_root(root)
     cfg = _config_dir()
+    foreign = _foreign_projects(cfg, base)
     yield from _syntheses(base)
-    yield from _packs(cfg)
-    yield from _reports(cfg)
+    yield from _packs(cfg, foreign)
+    yield from _reports(cfg, foreign)
 
 
 def _page_index(root) -> dict:
