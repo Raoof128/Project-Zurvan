@@ -522,14 +522,20 @@ def test_claim_add_forwards_the_evidence_quote(monkeypatch):
     """The evidence quote is what the claim writer validates verbatim.
     Z2: `claim add` writes through the claim ledger (scripts/claim_cli.py)."""
     from scripts import claim_ledger
+    from scripts import memory
     spy = Spy("clm_0000000000000000")
     monkeypatch.setattr(claim_ledger, "add", spy)
+    # The command also appends a `Claim Added` log line (2026-11-15); this test
+    # runs the CLI in-process on the real store root, so that write is spied too.
+    log = Spy(None)
+    monkeypatch.setattr(memory, "append_claim_log", log)
 
     run_cli(monkeypatch, "claim", "add", "--text", "T", "--source", "s.md",
             "--evidence", "a verbatim quote", "--confidence", "high")
 
     assert spy.args[:3] == ("T", "s.md", "a verbatim quote")
     assert spy.calls[0][1]["confidence"] == "high"
+    assert log.args == ("clm_0000000000000000", "s.md")
 
 
 def test_claim_add_exits_nonzero_when_evidence_does_not_match(monkeypatch):
