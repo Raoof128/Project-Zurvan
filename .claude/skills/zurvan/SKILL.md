@@ -95,6 +95,27 @@ verbatim quote, **open questions** you hit. Skip what git history already says.
 Claims are rejected unless the evidence appears verbatim in the source — that is
 the no-fabrication rule in code.
 
+### Claims are a ledger (Z2, since 2026-11-15)
+
+`data/claims.sqlite` is an append-only, hash-chained ledger and the master;
+every `wiki/claims/*.md` page is generated from it. Never edit a claim page by
+hand or with `sed` (a hand edit is a conflict: `zurvan claim conflicts`, then
+`claim adopt`). Correct a claim instead of overwriting it:
+
+```bash
+zurvan claim supersede <clm_id> --text "..." --source "..." --evidence "<quote>" --reason "..."
+zurvan claim retract <clm_id> --reason "..." --basis agent_inference
+zurvan claim show <clm_id> [--as-of-revision N | --as-of-date D] --json
+zurvan claim history <clm_id>
+zurvan claim verify            # read-only; --apply orphans broken, restores healed
+zurvan claim erase <clm_id> --reason-class client_request   # text gone, history kept
+```
+
+Superseded, retracted, orphaned and erased claims leave search, context, the
+graph and the recall digest after the next `zurvan index search` and
+`zurvan graph rebuild`. Over MCP: `zurvan_claim_supersede`,
+`zurvan_claim_retract`, `zurvan_claim_show`, `zurvan_claim_history`.
+
 ## 5. Ingesting a source
 
 ```bash
