@@ -423,6 +423,19 @@ def tool_zurvan_decision_set_project(pages: List[str], project: str) -> str:
     return "\n".join([f"Set project to {project} on {len(changed)} page(s):"]
                      + [f"- {p}: was {old}" for p, old in changed])
 
+@_protocol_safe
+@enforce_read_only
+@mcp_operation
+def tool_zurvan_decision_supersede(old: str, new: str, reason: str) -> str:
+    """Link a decision as superseded by a newer one inside the ledger (IOU-Z2-2)."""
+    from scripts.memory import DecisionRefused, supersede_decision
+    try:
+        old_p, new_p = supersede_decision(old, new, reason)
+    except DecisionRefused as exc:
+        return f"Error: {exc.code}: {exc.detail}"
+    from pathlib import Path as _P
+    return f"Superseded {_P(old_p).stem} by {_P(new_p).stem}."
+
 CLAIM_SOURCE_ERROR = "Error: Source path fails safety checks (e.g. no absolute paths, no ../, no raw/ without flag)."
 
 

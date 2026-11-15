@@ -137,6 +137,16 @@ def _claim_text(path: Path) -> str:
     return ""
 
 
+def _superseded(path: Path) -> bool:
+    """True when a decision page is linked as superseded (`superseded_by:`)."""
+    try:
+        head = path.read_text(encoding="utf-8").split("\n---", 1)[0]
+    except OSError:
+        return False
+    return any(l.startswith("superseded_by:") and l.split(":", 1)[1].strip().strip('"')
+               for l in head.splitlines())
+
+
 def _matches(name: str, tokens: list[str], text: str, tags: list[str]) -> bool:
     if name in _norm(text):
         return True
@@ -155,6 +165,8 @@ def project_digest(project: str, root: Path | None = None) -> str:
     n_dec = n_claim = n_q = 0
 
     for path in sorted((root / "wiki" / "decisions").glob("*.md")):
+        if _superseded(path):     # IOU-Z2-2: a superseded decision leaves the digest (search keeps it)
+            continue
         title, tags = _frontmatter_title_tags(path)
         if _matches(name, tokens, title, tags):
             n_dec += 1
