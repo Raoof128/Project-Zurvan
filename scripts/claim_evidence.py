@@ -21,7 +21,9 @@ from pathlib import Path
 from scripts.claim_store import ClaimRefused
 from scripts.evidence_admission import EvidenceRejected, admit_quote
 
-READERS = ("utf8", "extract_text@1", "pdf_pages@1")
+READERS = ("utf8", "extract_text@1", "pdf_pages@1")     # text readers
+IMAGE_READER = "image_region@1"   # IOU-Z2-4b: Pillow, a rectangle of decoded pixels
+MEDIA_FRAGS = "http://www.w3.org/TR/media-frags/"
 PDF_READER = "pdf_pages@1"   # IOU-Z2-4: pypdf, one text per page, never merged or normalised
 PAGE_BREAK = "\f"           # joins the pages; a quote can never contain it
 RFC3778 = "http://tools.ietf.org/rfc/rfc3778"
@@ -182,9 +184,98 @@ def _read_cached(source_ref, reader, root, cache):
     return value
 
 
+def _parse_region(region) -> tuple:
+    try:
+        x, y, w, h = (int(v) for v in region)
+    except (TypeError, ValueError):
+        raise ClaimRefused("EVIDENCE_REJECTED", f"a region is four integers x,y,w,h, got {region!r}") from None
+    if x < 0 or y < 0 or w <= 0 or h <= 0:
+        raise ClaimRefused("EVIDENCE_REJECTED", f"region {x},{y},{w},{h} is empty or negative")
+    return x, y, w, h
+
+
+def _region_sha256(raw: bytes, region: tuple) -> str:
+    """sha256 of the region's decoded RGBA pixels (with its size), so a re-encoded
+    file with the same pixels still matches. Raises SourceUndecodable, or ValueError
+    when the region is not inside the image."""
+    import io
+    try:
+        from PIL import Image
+    except ImportError:
+        raise SourceUndecodable("the image_region@1 reader needs Pillow") from None
+    try:
+        with Image.open(io.BytesIO(raw)) as im:
+            im.load()
+            rgba = im.convert("RGBA")
+    except Exception as exc:  # noqa: BLE001 - Pillow raises many types on a bad file
+        raise SourceUndecodable(f"not a decodable image: {type(exc).__name__}") from None
+    x, y, w, h = region
+    if x + w > rgba.width or y + h > rgba.height:
+        raise ValueError(f"region {x},{y},{w},{h} is outside the {rgba.width}x{rgba.height} image")
+    crop = rgba.crop((x, y, x + w, y + h))
+    return hashlib.sha256(f"{w}x{h}:RGBA:".encode() + crop.tobytes()).hexdigest()
+
+
+def _decoder() -> str:
+    import PIL
+    return f"Pillow {PIL.__version__}"
+
+
+def anchor_region(source_ref: str, region, root, now: str) -> dict:
+    """IOU-Z2-4b: describe a rectangle of an image as a W3C FragmentSelector
+    conforming to Media Fragments 1.0 (`xywh=pixel:x,y,w,h`). No quote, no capsule:
+    the claim's text says what the region shows."""
+    x, y, w, h = _parse_region(region)
+    try:
+        raw = _path(source_ref, root).read_bytes()
+    except OSError as exc:
+        raise ClaimRefused("EVIDENCE_REJECTED", f"source unreadable: {exc.strerror or exc}") from None
+    try:
+        digest = _region_sha256(raw, (x, y, w, h))
+    except SourceUndecodable as exc:
+        raise ClaimRefused("EVIDENCE_REJECTED", str(exc)) from None
+    except ValueError as exc:
+        raise ClaimRefused("EVIDENCE_REJECTED", str(exc)) from None
+    return {"selector": {
+                "FragmentSelector": {"conformsTo": MEDIA_FRAGS, "value": f"xywh=pixel:{x},{y},{w},{h}"},
+                "state": {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                          "captured_at": now, "region_sha256": digest, "decoder": _decoder()}},
+            "capsule": None}
+
+
+def _resolve_region(selector: dict, source_ref: str, root, cache) -> tuple:
+    key = (source_ref, IMAGE_READER)
+    if cache is not None and key in cache:
+        raw = cache[key]
+    else:
+        try:
+            raw = _path(source_ref, root).read_bytes()
+        except OSError as exc:
+            mount = unmounted_volume(source_ref, root)
+            return "gone", f"{UNMOUNTED}: {mount}" if mount else f"{type(exc).__name__}: {exc.strerror or exc}"
+        if cache is not None:
+            cache[key] = raw
+    state = selector.get("state") or {}
+    if hashlib.sha256(raw).hexdigest() == state.get("sha256"):
+        return "intact", None
+    value = (selector.get("FragmentSelector") or {}).get("value", "")
+    try:
+        region = tuple(int(v) for v in value.split(":", 1)[1].split(","))
+        digest = _region_sha256(raw, region)
+    except (IndexError, ValueError) as exc:
+        return "changed", f"region not in the image: {exc}"
+    except SourceUndecodable as exc:
+        return "changed", str(exc)
+    if digest == state.get("region_sha256"):
+        return "moved", "file changed; region pixels unchanged"
+    return "changed", "region pixels changed"
+
+
 def resolve(selector: dict, source_ref: str, reader: str, root, cache=None) -> tuple:
     """(outcome, detail). Never raises for an unreadable or undecodable source.
     `cache`: a dict shared across one run, so each source is read once."""
+    if reader == IMAGE_READER:
+        return _resolve_region(selector, source_ref, root, cache)
     try:
         raw, text = _read_cached(source_ref, reader, root, cache)
     except SourceUnavailable as exc:

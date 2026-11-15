@@ -193,6 +193,7 @@ def _store_evidence(conn, source, a, reader, location_hint=None):
     reader = _reader_for(source, reader)
     capsule = a.get("capsule")
     return {"source_ref_cid": cs.put_content(conn, "source_ref", source),
+            "locator_kind": "media_region" if reader == ce.IMAGE_READER else "text_quote",
             "selector_cid": cs.put_content(conn, "selector",
                                            json.dumps(a["selector"], sort_keys=True)),
             "capsule_cid": cs.put_content(conn, "capsule", capsule) if capsule is not None else None,
@@ -311,8 +312,9 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
         extraction_key=None, legacy_id=None, observed_at_legacy=None,
         observed_at_legacy_source=None, location_hint=None, status="asserted",
         extra_evidence=(), root=None, _migrating=False, _unanchored=False,
-        _normalised=False, spo=None) -> str:
+        _normalised=False, spo=None, region=None) -> str:
     _check_vocab(confidence, basis, method)
+    _check_region(evidence, region, extra_evidence)
     triple = _spo(spo)
     _check_time("valid_from", valid_from)
     _check_time("valid_until", valid_until)
@@ -326,9 +328,15 @@ def add(text, source, evidence, *, confidence, basis=(), tags=(), valid_from=Non
                        observed_at_legacy_source=observed_at_legacy_source,
                        location_hint=location_hint, status=status,
                        extra_evidence=extra_evidence, unanchored=_unanchored,
-                       normalised=_normalised, triple=triple)
+                       normalised=_normalised, triple=triple, region=region)
     _write_pages(root, claim_id)
     return claim_id
+
+
+def _check_region(evidence, region, extra_evidence=()):
+    """IOU-Z2-4b: a claim cites a quote OR an image region, never both, never neither."""
+    if region is not None and (evidence is not None or extra_evidence):
+        raise ValueError("cite a quote (evidence) or an image region, not both")
 
 
 def _spo(spo):
@@ -343,9 +351,12 @@ def _add_in(s, text, source, evidence, *, confidence, basis, tags, valid_from, v
             project, actor, method, reader, claim_type, extraction_key, legacy_id,
             observed_at_legacy, observed_at_legacy_source, location_hint, status,
             relations=None, extra_evidence=(), unanchored=False, normalised=False,
-            triple=None) -> str:
+            triple=None, region=None) -> str:
     quotes = ([(evidence, location_hint)] if evidence is not None else []) + list(extra_evidence)
-    if unanchored:
+    if region is not None:
+        reader = ce.IMAGE_READER
+        anchored = [(ce.anchor_region(source, region, s.root, cs._now()), location_hint)]
+    elif unanchored:
         # Migration only: a legacy quote whose source is gone or changed keeps its
         # provenance (source + quote) without a fingerprint it never had.
         anchored = [({"selector": {"TextQuoteSelector": {"exact": q, "prefix": "", "suffix": ""},
@@ -401,8 +412,9 @@ def _spo_values(conn, row) -> tuple:
 
 def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_from=None,
               expected_rev=None, confidence="high", basis=(), tags=None, reader="utf8",
-              root=None, spo=None) -> str:
+              root=None, spo=None, region=None) -> str:
     _require_reason(reason)
+    _check_region(evidence, region)
     triple = _spo(spo)
     _check_vocab(confidence, basis, method)
     _check_time("valid_from", valid_from)
@@ -423,7 +435,7 @@ def supersede(old_id, *, text, source, evidence, reason, actor, method, valid_fr
                          actor=actor, method=method, reader=reader, claim_type=None,
                          extraction_key=None, legacy_id=None, observed_at_legacy=None,
                          observed_at_legacy_source=None, location_hint=None,
-                         status="asserted", triple=triple)
+                         status="asserted", triple=triple, region=region)
         s.conn.execute("UPDATE claims SET scope_project = (SELECT scope_project FROM claims"
                        " WHERE claim_id = ?) WHERE claim_id = ?", (old_id, new_id))
         _next(s, old_id, event="supersede", status="superseded", actor=actor, method=method,
@@ -533,7 +545,7 @@ def _state(conn, row, rows_by_claim) -> ClaimState:
                                  "selector": json.loads(sel) if sel else None,
                                  "capsule": cs.get_content(conn, e["capsule_cid"]),
                                  "location_hint": cs.get_content(conn, e["location_hint_cid"]),
-                                 "reader": e["reader"]})
+                                 "reader": e["reader"], "locator_kind": e["locator_kind"]})
             break
     tags = cs.get_content(conn, row["tags_cid"])
     return ClaimState(claim_id=row["claim_id"], rev=row["rev"], status=row["status"],
