@@ -158,6 +158,8 @@ def dispatch(args) -> int:
                          basis=args.basis, tags=args.tags, valid_from=args.valid_from,
                          valid_until=args.valid_until, project=args.project, actor=actor,
                          method=args.method)
+            from scripts.memory import append_claim_log
+            append_claim_log(cid, args.source)
             state = cl.current().get(cid)
             print(f"Created {cp.page_path(state) if state else cid}")
             print(json.dumps({"claim_id": cid}))
