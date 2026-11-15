@@ -312,14 +312,20 @@ def supersede_decision(old: str, new: str, reason: str) -> tuple:
             hint = f"; it was superseded by {fm['superseded_by']}" if fm.get("superseded_by") else ""
             raise DecisionRefused("DECISION_NOT_CURRENT",
                                   f"the {role} decision {page.stem} is {fm.get('status') or 'ended'}{hint}")
-    if op.stem in _chain_slugs(np_.stem):
-        raise DecisionRefused("DECISION_CYCLE", f"{np_.stem} already descends from {op.stem}")
+    # No other cycle is possible: both decisions must be current, and every
+    # ancestor in a chain is superseded.
+    po, pn = fo.get("project"), fn.get("project")
+    if po and pn and po != pn:
+        # One mutation, one subject (`declare_store_project`); final review I5.
+        raise DecisionRefused("DECISION_PROJECT_MISMATCH",
+                              f"{op.stem} is in project {po} and {np_.stem} in {pn}")
     old_text, new_text = op.read_text(encoding="utf-8"), np_.read_text(encoding="utf-8")
     of, orest = _split_front(op, old_text)
     nf, nrest = _split_front(np_, new_text)
     of = _set_field(_set_field(of, "status", "superseded"), "superseded_by", np_.stem)
     earlier = [x.strip() for x in fn.get("supersedes", "").split(",") if x.strip()]
-    nf = _set_field(nf, "supersedes", ", ".join(earlier + [op.stem]))
+    # A retry after a failed write finds `supersedes` already naming old: never twice.
+    nf = _set_field(nf, "supersedes", ", ".join(earlier + ([] if op.stem in earlier else [op.stem])))
     note = (f"\nSuperseded by [[{np_.stem}]] on {datetime.now().date().isoformat()}: "
             f"{' '.join(str(reason).split())}\n")
     if "\n## Status" not in orest:
@@ -327,15 +333,14 @@ def supersede_decision(old: str, new: str, reason: str) -> tuple:
     from scripts.knowledge_revision import declare_store_project
     if fo.get("project"):
         declare_store_project(fo["project"])
-    for page, content in ((op, of + orest.rstrip("\n") + "\n" + note), (np_, nf + nrest)):
+    # The NEW page first (final review I4): if the old page's write then fails, old
+    # is still current and a retry completes the link (see the idempotent
+    # `supersedes` above). Old first would leave old superseded with no way back.
+    for page, content in ((np_, nf + nrest), (op, of + orest.rstrip("\n") + "\n" + note)):
         if not write_file_safely(str(page), content):
             raise OSError(f"failed to securely write {page}")
     append_to_log("Decision Superseded", f"{op.stem} -> {np_.stem}: {' '.join(str(reason).split())}")
     return str(op), str(np_)
-
-
-def _chain_slugs(slug: str) -> list:
-    return [s for s, _ in decision_chain(slug)]
 
 
 def decision_chain(ref: str) -> list:

@@ -191,3 +191,78 @@ def test_cli_propose_refuses_the_mock_provider(root, tmp_path):
     r = _zurvan(root, "structure", "--propose", "--out", str(tmp_path / "p.jsonl"), ZURVAN_LLM_PROVIDER="mock")
     assert r.returncode == 1 and "PROVIDER_REQUIRED" in r.stderr
     assert not (tmp_path / "p.jsonl").exists()
+
+
+# ---- final review fixes (2026-11-15) ----
+
+def test_erase_blanks_the_subject_and_object_everywhere(root):            # C1
+    cid = _op(root, lambda: cl.add("Jane's salary", SRC, Q1, confidence="high",
+                                   spo=("Jane Roe", "has_value", {"value": "98000", "unit": "USD"}), root=root, **W))
+    _op(root, lambda: cl.revise(cid, reason="unit", spo=("Jane Roe", "has_value", {"value": "98001", "unit": "USD"}),
+                                root=root, **W))
+    _op(root, lambda: cl.erase(cid, reason_class="personal_data", actor="local:test", root=root))
+    st = cl.current(root)[cid]
+    assert (st.subject, st.predicate, st.object) == (None, None, None)
+    page = next((root / "wiki" / "claims").glob("*.md")).read_text(encoding="utf-8")
+    assert "Jane" not in page and "98000" not in page and "98001" not in page
+    import sqlite3
+    db = (root / "data" / "claims.sqlite").read_bytes()
+    assert b"Jane_Roe" not in db and b"98000" not in db and b"98001" not in db
+    for r in range(1, 4):
+        old = cl.as_of_revision(r, root).claims.get(cid)
+        assert old is None or (old.subject, old.object) == (None, None)
+    conn = cs.connect(root)
+    try:
+        assert cs.chain_ok(conn)[0]
+    finally:
+        conn.close()
+
+
+def test_non_ascii_entity_names_are_entities():                            # I3
+    assert spo.entity_id("Müller AG") == "ent:Müller_AG"
+    assert spo.entity_id("حاجی") == "ent:حاجی"
+    with pytest.raises(ValueError):
+        spo.entity_id("!!!")
+
+
+def test_history_shows_the_triple(root):                                    # spec §3.2
+    cid = _op(root, lambda: cl.add("Orrin is in Halden", SRC, Q2, confidence="high", root=root, **W))
+    _op(root, lambda: cl.revise(cid, reason="S-P-O", spo=("Orrin Mill", "located_in", {"entity": "Halden"}),
+                                root=root, **W))
+    h = cl.history(cid, root)
+    assert h[0]["predicate"] is None and h[1]["predicate"] == "located_in"
+    assert h[1]["subject"] == "ent:Orrin_Mill" and h[1]["object"] == {"entity": "ent:Halden"}
+
+
+@pytest.mark.parametrize("problem", ["stale_rev", "no_rev", "orphaned", "duplicate", "hand_edit"])
+def test_apply_refuses_before_any_write(root, tmp_path, problem):           # I1
+    from scripts import claim_structure as cst
+    from scripts import claim_pages as cp
+    a = _op(root, lambda: cl.add("Orrin produced 4210 t", SRC, Q1, confidence="high", root=root, **W))
+    b = _op(root, lambda: cl.add("Orrin is in Halden", SRC, Q2, confidence="high", root=root, **W))
+    good = {"claim_id": a, "rev": 1, "approved": True, "subject": "Orrin Mill", "predicate": "has_value",
+            "object": {"value": "4210"}}
+    bad = {"claim_id": b, "rev": 1, "approved": True, "subject": "Orrin Mill", "predicate": "located_in",
+           "object": {"entity": "Halden"}}
+    if problem == "stale_rev":
+        _op(root, lambda: cl.revise(b, reason="r", confidence="low", root=root, **W))
+    elif problem == "no_rev":
+        del bad["rev"]
+    elif problem == "orphaned":
+        _op(root, lambda: cl._orphan(b, reason="gone", root=root, **W))
+        bad["rev"] = 2
+    elif problem == "duplicate":
+        bad = dict(good)
+    elif problem == "hand_edit":
+        page = cp.page_path(cl.current(root)[b], root)
+        page.write_text(page.read_text(encoding="utf-8") + "my note\n", encoding="utf-8")
+    p = tmp_path / "p.jsonl"
+    p.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n")
+    before = kr.current(root).revision
+    pages = {q: q.read_bytes() for q in (root / "wiki" / "claims").glob("*.md")}
+    with pytest.raises((ValueError, cs.ClaimRefused)):
+        with kr.operation(writer="test", root=root):
+            cst.apply(p, actor="local:test", root=root)
+    assert kr.current(root).revision == before and kr.current(root).state != kr.SUSPECT
+    assert {q: q.read_bytes() for q in (root / "wiki" / "claims").glob("*.md")} == pages
+    assert cl.current(root)[a].predicate is None
