@@ -173,7 +173,8 @@ def anchor_normalised(source_ref: str, quote: str, reader: str, root, now: str) 
     needle = _norm(quote).strip()
     hits = _occurrences(norm_text, needle)
     if len(hits) != 1:
-        raise ClaimRefused("EVIDENCE_REJECTED",
+        # More than one match is `ambiguous` (spec §7.4), not a lost quote.
+        raise ClaimRefused("EVIDENCE_AMBIGUOUS" if hits else "EVIDENCE_REJECTED",
                            f"normalised quote found {len(hits)} times (need exactly 1)")
     start = idx[hits[0]]
     last = idx[hits[0] + len(needle) - 1]
