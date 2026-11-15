@@ -137,3 +137,61 @@ def test_erase_cli(root):
     out = json.loads(res.stdout)
     assert out["rev"] == 2 and "not guaranteed removed" in out["bound"]
     assert cl.current(root)[cid].status == "erased"
+
+
+# Final-review minors, fixed 2026-11-15. (1) erase looked for frozen legacy
+# copies in the REAL ~/.zurvan/z2 whatever store it ran on, and migrate wrote
+# there by default: a test store could stub a page of the live frozen copy (the
+# fixture id claim-dummy-001 exists in both). (2) The residue report omitted the
+# `Claim Added` line in wiki/log.md and the migration report, both naming the
+# claim and its source.
+LEGACY = f"""---
+type: claim
+confidence: "high"
+source: "{SRC}"
+---
+
+# Claim
+{TEXT}
+
+## Evidence
+> {Q}
+
+**Source**: [[{SRC}]]
+"""
+
+
+def _migrated(root, monkeypatch, tmp_path_factory):
+    from scripts import claim_migrate as cm
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    real = home / ".zurvan" / "z2" / "claims-legacy-20990101"
+    real.mkdir(parents=True)
+    (real / "claim-00000001.md").write_text("THE LIVE FROZEN COPY\n", encoding="utf-8")
+    (root / "wiki" / "claims" / "claim-00000001.md").write_text(LEGACY, encoding="utf-8")
+    (root / "wiki" / "log.md").write_text(
+        f"- **2026-05-30T17:00:47**: Claim Added - Claim 00000001 from {SRC}\n", encoding="utf-8")
+    kr.bootstrap(root)
+    with kr.operation(writer="test", root=root):
+        cm.migrate(root=root)
+    (cid,) = cl.current(root)
+    return cid, real / "claim-00000001.md"
+
+
+def test_a_store_keeps_its_migration_files_beside_itself_not_in_the_real_home(
+        root, monkeypatch, tmp_path_factory):
+    cid, live_copy = _migrated(root, monkeypatch, tmp_path_factory)
+    assert sorted(p.name for p in live_copy.parent.parent.iterdir()) == ["claims-legacy-20990101"]
+    out = _erase(root, cid)
+    assert live_copy.read_text(encoding="utf-8") == "THE LIVE FROZEN COPY\n"
+    stubs = [r for r in out["residue"] if r["kind"] == "legacy_copy"]
+    assert len(stubs) == 1 and str(root) in stubs[0]["where"]
+
+
+def test_erase_lists_the_log_line_and_the_migration_report(root, monkeypatch,
+                                                           tmp_path_factory):
+    cid, _ = _migrated(root, monkeypatch, tmp_path_factory)
+    kinds = {r["kind"]: r for r in _erase(root, cid)["residue"]}
+    assert kinds["log_line"]["where"] == str(root / "wiki" / "log.md")
+    assert "migration-report-" in kinds["migration_report"]["where"]
+    assert "project slug" in kinds["ledger_metadata"]["action"]
