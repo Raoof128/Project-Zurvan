@@ -27,6 +27,9 @@ CONTEXT = 32          # TextQuoteSelector prefix/suffix length
 CAPSULE = 64          # capsule context each side
 
 _WS = re.compile(r"\s+")
+# Directories whose children are mount points of removable or network disks.
+MOUNT_PARENTS = ("/Volumes", "/mnt", "/media")
+UNMOUNTED = "volume not mounted"
 
 
 class SourceUnavailable(Exception):
@@ -106,11 +109,31 @@ def _norm(s: str) -> str:
     return _WS.sub(" ", s)
 
 
+def unmounted_volume(source_ref: str, root) -> str | None:
+    """The missing mount point (e.g. `/Volumes/Archive`) when the source lives on
+    a disk that is not mounted, else None. Such a source is unavailable, not
+    lost, and must never orphan a claim."""
+    path = _path(source_ref, root)
+    for parent in MOUNT_PARENTS:
+        try:
+            rel = path.relative_to(parent)
+        except ValueError:
+            continue
+        if rel.parts:
+            mount = Path(parent) / rel.parts[0]
+            if not mount.exists():
+                return str(mount)
+    return None
+
+
 def resolve(selector: dict, source_ref: str, reader: str, root) -> tuple:
     """(outcome, detail). Never raises for an unreadable or undecodable source."""
     try:
         raw, text = read_source(source_ref, reader, root)
     except SourceUnavailable as exc:
+        mount = unmounted_volume(source_ref, root)
+        if mount:
+            return "gone", f"{UNMOUNTED}: {mount}"
         return "gone", str(exc)
     except SourceUndecodable as exc:
         return "changed", str(exc)

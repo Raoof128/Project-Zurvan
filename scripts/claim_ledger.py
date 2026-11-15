@@ -572,9 +572,23 @@ ERASE_BOUND = ("erasure removes the claim from the live store and its derived vi
                "rollback-journal and freed filesystem blocks are not overwritten.")
 
 
+ERASED_KEY = "erased:"
+
+
+def source_has_erased_claim(file_sha: str, root=None) -> bool:
+    """True if a claim extracted from the file with this sha256 was erased."""
+    conn = _connect_ro(root)
+    if conn is None:
+        return False
+    try:
+        return conn.execute("SELECT 1 FROM content WHERE kind = 'extraction_key' AND body = ?",
+                            (ERASED_KEY + file_sha,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
 def _claim_cids(conn, claim_id) -> list:
-    # The extraction key (sha256 of the source bytes + the model's claim id) holds
-    # no content and is KEPT: blanking it let re-extraction recreate the claim.
+    # The extraction key is not blanked here: erase turns it into a tombstone.
     cids = []
     for row in conn.execute("SELECT text_cid, reason_cid, tags_cid"
                             " FROM revisions WHERE claim_id = ?", (claim_id,)):
@@ -647,6 +661,16 @@ def erase(claim_id, *, reason_class, actor, root=None, legacy_dir=None,
         cids = _claim_cids(s.conn, claim_id)
         s.conn.execute(f"UPDATE content SET body = NULL, erased_at = ?, erase_reason_class = ?"
                        f" WHERE cid IN ({','.join('?' * len(cids))})", [now, reason_class, *cids])
+        # An extraction key `<sha256 of the file>:<model claim id>` becomes the
+        # tombstone `erased:<sha256 of the file>`: the model's id may be
+        # descriptive, and the tombstone lets extraction refuse that exact file.
+        for (kcid,) in s.conn.execute(
+                "SELECT DISTINCT extraction_key_cid FROM revisions WHERE claim_id = ?"
+                " AND extraction_key_cid IS NOT NULL", (claim_id,)).fetchall():
+            key = cs.get_content(s.conn, kcid) or ""
+            s.conn.execute("UPDATE content SET body = ?, erased_at = ?, erase_reason_class = ?"
+                           " WHERE cid = ?",
+                           (ERASED_KEY + key.split(":", 1)[0], now, reason_class, kcid))
         rev = _next(s, claim_id, event="erase", status="erased", actor=actor, method=method,
                     reason=f"erased: {reason_class}", expected_rev=None)["rev"]
     conn = cs.connect(base)
@@ -750,6 +774,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     targets = sorted(claim_ids) if claim_ids else sorted(now)
     counts = {o: 0 for o in ce.OUTCOMES}
     per_claim, written, skipped, details = {}, [], [], {}
+    unmounted = []
     for cid in targets:
         state = now.get(cid)
         if state is None or state.status == "erased":
@@ -770,6 +795,10 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
         if not apply:
             continue
         cls = _outcome_class(outcomes)
+        if cls == "broken" and any((d["detail"] or "").startswith(ce.UNMOUNTED)
+                                   for d in details[cid]):
+            unmounted.append(cid)            # unavailable, not lost: never orphan
+            continue
         if cls in ("broken", "anchored"):
             from scripts import claim_pages
             if claim_pages.has_unadopted_edit(cid, base, now):
@@ -796,7 +825,7 @@ def verify(claim_ids=None, *, apply: bool = False, root=None) -> dict:
     anchored = sum(counts[o] for o in _ANCHORED)
     return {"counts": counts, "integrity_rate": (anchored / total) if total else None,
             "claims": per_claim, "details": details, "written": written,
-            "skipped_edited": skipped,
+            "skipped_edited": skipped, "skipped_unmounted": unmounted,
             "disclaimer": VERIFY_DISCLAIMER}
 
 

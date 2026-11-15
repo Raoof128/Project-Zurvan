@@ -134,3 +134,31 @@ def test_apply_skips_a_claim_whose_page_has_an_unadopted_edit(root):
     out = _verify(root, apply=True)
     assert out["written"] == [] and out["skipped_edited"] == [cid]
     assert page.read_text(encoding="utf-8") == edited
+
+
+# Deferred minor, fixed 2026-11-15: a source on an external disk that is not
+# mounted resolved `gone`, and `verify --apply` orphaned the claim. A missing
+# volume is not lost evidence: the claim is reported and left alone.
+def test_apply_never_orphans_a_claim_whose_volume_is_unmounted(tmp_path, monkeypatch):
+    from scripts import claim_evidence as ce
+    root = tmp_path / "store"
+    monkeypatch.setenv("ZURVAN_ROOT", str(root))
+    (root / "data").mkdir(parents=True)
+    (root / "wiki" / "claims").mkdir(parents=True)
+    kr.ensure_schema(root)
+    volumes = tmp_path / "Volumes"
+    disk = volumes / "Archive"
+    (disk / "notes").mkdir(parents=True)
+    src = disk / "notes" / "n.md"
+    src.write_text("the archived fact is here\n", encoding="utf-8")
+    monkeypatch.setattr(ce, "MOUNT_PARENTS", (str(volumes),))
+    with kr.operation(writer="test", root=root):
+        cid = cl.add("archived", str(src), "the archived fact is here", confidence="high",
+                     actor="a", method="human", root=root)
+    import shutil
+    shutil.rmtree(disk)                                     # the disk is unplugged
+    with kr.operation(writer="test", root=root):
+        out = cl.verify(apply=True, root=root)
+    assert cl.current(root)[cid].status == "asserted"
+    assert out["skipped_unmounted"] == [cid]
+    assert "not mounted" in out["details"][cid][0]["detail"]
