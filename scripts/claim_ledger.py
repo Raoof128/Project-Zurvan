@@ -179,10 +179,18 @@ def _latest_row(conn, claim_id, vis):
 
 
 def _anchor(root, source, quote, reader):
-    return ce.anchor(source, quote, reader, root, cs._now())
+    return ce.anchor(source, quote, _reader_for(source, reader), root, cs._now())
+
+
+def _reader_for(source, reader):
+    """IOU-Z2-4: a PDF cited with the default reader is read page by page."""
+    if reader == "utf8" and str(source).lower().endswith(".pdf"):
+        return ce.PDF_READER
+    return reader
 
 
 def _store_evidence(conn, source, a, reader, location_hint=None):
+    reader = _reader_for(source, reader)
     capsule = a.get("capsule")
     return {"source_ref_cid": cs.put_content(conn, "source_ref", source),
             "selector_cid": cs.put_content(conn, "selector",
