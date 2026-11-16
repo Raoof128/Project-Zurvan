@@ -250,6 +250,7 @@ class DecisionRefused(ValueError):
 
 _STATUS_LINE = re.compile(r"^status:.*$", re.M)
 _ENDED_STATUSES = ("superseded", "rejected", "deprecated")
+_STATUS_WORDS = ("accepted", "proposed", "decided") + _ENDED_STATUSES
 
 
 def _decision_page(ref: str) -> Path:
@@ -307,7 +308,10 @@ def _status_section_superseded(body: str, old_status: str, note: str) -> str:
     section, rest = (after, "") if nxt == -1 else (after[:nxt + 1], after[nxt + 1:])
     lines = section.rstrip("\n").split("\n")
     first = next((i for i, l in enumerate(lines) if l.strip()), None)
-    if first is not None and lines[first].strip().strip('"').lower() == old_status.lower():
+    word = lines[first].strip().strip('"').lower() if first is not None else None
+    # The body line may disagree with the frontmatter (a legacy page marked
+    # `superseded` above but `accepted` below): any bare status word is replaced.
+    if word is not None and (word == old_status.lower() or word in _STATUS_WORDS):
         lines[first] = "superseded"
     else:
         lines.insert(0, "superseded")
