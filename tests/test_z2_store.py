@@ -54,7 +54,7 @@ def test_pragmas_on_every_connection(root):
             assert c.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
             assert c.execute("PRAGMA secure_delete").fetchone()[0] == 1
             assert c.execute("PRAGMA foreign_keys").fetchone()[0] == 1
-            assert c.execute("PRAGMA user_version").fetchone()[0] == 1
+            assert c.execute("PRAGMA user_version").fetchone()[0] == cs.SCHEMA_VERSION
         finally:
             c.close()
     for suffix in ("-wal", "-shm", "-journal"):
