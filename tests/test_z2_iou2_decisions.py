@@ -251,3 +251,16 @@ def test_a_rejected_decision_still_refuses(store):
     zurvan(store, "knowledge", "reconcile")
     r = zurvan(store, "decision", "supersede", old.stem, "--by", new.stem, "--reason", "r")
     assert r.returncode == 1 and "DECISION_NOT_CURRENT" in r.stderr
+
+
+def test_a_repaired_page_whose_body_status_disagrees_loses_the_stale_word(store):
+    """Found on the live store 2026-11-16: a legacy page said `status: superseded` in
+    frontmatter but `accepted` under `## Status`; the link kept both words."""
+    old, new = _decide(store, "Body old"), _decide(store, "Body new")
+    old.write_text(old.read_text(encoding="utf-8").replace('status: "accepted"', "status: superseded"),
+                   encoding="utf-8")
+    zurvan(store, "knowledge", "reconcile")
+    assert zurvan(store, "decision", "supersede", old.stem, "--by", new.stem, "--reason", "r").returncode == 0
+    status = old.read_text(encoding="utf-8").split("\n## Status\n", 1)[1]
+    words = [l for l in status.splitlines() if l.strip()]
+    assert words[0] == "superseded" and "accepted" not in words
