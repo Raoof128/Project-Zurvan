@@ -12,6 +12,25 @@
 
 ---
 
+## Current status (November 2026)
+
+This README describes the feature set up to Phase 18. Later work is recorded in [CHANGELOG.md](CHANGELOG.md) and summarised for contributors in [CLAUDE.md](CLAUDE.md). The main additions since then:
+
+- **Boundary**, an egress gate that runs first in the quality gate.
+- **A knowledge ledger and a claim ledger** (`zurvan claim ...`, `zurvan decision supersede`): revisions, evidence selectors and supersession links.
+- **A Rust MCP server** in `rust/zurvan-mcp`, alongside the Python one.
+- **Evaluation hygiene.** Z1a is closed. Z1b, the sealed evaluation, is not closed.
+
+Known limits:
+
+- The 50-item retrieval instrument was readable in this repository's history between 30 May and 13 September 2026 and is marked `RETIRED` in `eval/datasets.json`. Scores on it are not held-out results.
+- The knowledge base is not in this repository. `wiki/` holds placeholders only.
+- Most of the code was written with AI coding assistants working under the rules in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md). `CHANGELOG.md`, `docs/agents-history.md` and `docs/superpowers/` are their working logs and plans, kept as the project record.
+
+`zurvan` in the examples below is [`scripts/zurvan`](scripts/zurvan): run it by path or put it on your `PATH`.
+
+---
+
 ## What it does
 
 Zurvan turns raw documents (Markdown, PDF, plain text, images) into a **linked, searchable, git-friendly wiki** — then exposes that wiki to AI agents via a local MCP server.
@@ -127,7 +146,7 @@ Client setup guides: [Claude Code](docs/mcp/claude-code.md) · [Cursor](docs/mcp
 
 Open the repo root as an Obsidian vault for a colour-coded graph view and seamless Markdown editing.
 
-1. Open Obsidian → **Open folder as vault** → select `Zurvan/`
+1. Open Obsidian → **Open folder as vault** → select this repository's folder
 2. The vault excludes `data/`, `scripts/`, `tests/`, and `raw/` automatically
 
 **Graph colour groups** (pre-configured in `.obsidian/graph.json`):
@@ -270,7 +289,7 @@ Full design details: [Architecture Overview](docs/ARCHITECTURE.md) · [Workflows
 bash scripts/check.sh
 ```
 
-Runs 22 stages: unit tests · extraction gauntlet · wiki audit · retrieval eval · graph tests · MCP smoke · evidence/report/publication pipeline · review workbench.
+Runs gates 0 to 25: the Boundary egress gate, the public-repo guard, the test suite, the extraction gauntlet, the wiki audit, the retrieval evaluation, graph tests, the MCP smoke test, the evidence, report and publication pipeline, and the review workbench. `scripts/check.sh` is the authoritative list.
 
 **Current:** 4,109 tests in the suite (collected 17 Nov 2026). The result of each full run on `main` is recorded in the [changelog](CHANGELOG.md). See [Testing Guide](docs/TESTING.md).
 

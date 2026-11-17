@@ -12,7 +12,9 @@ export ZURVAN_EMBED_PROVIDER=mock
 bash scripts/check.sh
 ```
 
-### What `check.sh` Does (22 stages)
+### What `check.sh` Does
+
+The list below describes the original 22 stages. `scripts/check.sh` now runs gates 0 to 25 and is the authoritative list.
 1. **Public Repo Guard**: Ensures no absolute paths, tokens, or private files are tracked.
 2. **Pytest Suite** (4,109 tests as of 17 Nov 2026): Runs all unit and integration tests in the `tests/` directory.
 3. **Reliability Gauntlet**: Processes sample raw files (PDF, MD, TXT) to verify the ingest/extract pipeline doesn't crash on messy data.
