@@ -70,7 +70,7 @@ To compare the two servers on your own store (read-only; writes use throwaway
 stores the harness creates and removes):
 
 ```bash
-python scripts/mcp_parity.py --root ~/Desktop/Raouf/Zurvan --only listing,status,graph,search_hybrid
+python scripts/mcp_parity.py --root <repo> --only listing,status,graph,search_hybrid
 ```
 
 The console and the report (`~/.zurvan/parity/<time>.json`) carry case ids,

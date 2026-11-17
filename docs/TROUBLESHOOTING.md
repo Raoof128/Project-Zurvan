@@ -31,4 +31,4 @@ export ZURVAN_EMBED_PROVIDER=mock
 
 ### 5. `check.sh` Fails on Retrieval Evaluation
 **Error**: `Search Evaluation Results: Top-3 accuracy: 33% ... FAILED`
-**Fix**: The quality gate requires a minimum retrieval accuracy (currently `0.6` MRR/Top-3) against the gold standard dataset (`eval/search_gold.jsonl`). If you modified the chunking logic or deleted wiki files, you may need to update the gold dataset or restore the lost context.
+**Fix**: The quality gate requires a minimum retrieval accuracy (currently `0.6` MRR/Top-3) against the gold standard dataset (`eval/search_gold.jsonl`, which is retired, local-only and not in this repository; see `eval/datasets.json`). If you modified the chunking logic or deleted wiki files, you may need to update the gold dataset or restore the lost context.

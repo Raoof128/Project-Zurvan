@@ -4,6 +4,8 @@ This folder contains gold datasets for evaluating Zurvan's intelligence features
 
 ## search_gold.jsonl
 
+> **Retired and not in this repository.** The 50-item retrieval instrument was readable in this repository's history between 30 May and 13 September 2026, so it is marked `RETIRED` in `datasets.json` and kept only on the owner's machine. Scores on it are not held-out results. The format is documented here for reference.
+
 A JSONL file containing known questions and the paths to the Markdown files that *should* be returned when those questions are searched.
 
 ### Format

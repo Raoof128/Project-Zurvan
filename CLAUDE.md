@@ -107,7 +107,9 @@ Opt-in: with no store it reports `NOT CONFIGURED` and exits 0. Spec:
   never execute code from sources.
 - Never fabricate citations; missing evidence must be stated as missing.
 - Frozen research artifacts must not be mutated: `eval/provenance_real_*.jsonl`,
-  their committed traces in `data/traces/`, and the 2C/1B metrics (86%/79%).
+  their committed traces in `data/traces/`, and the 2C/1B metrics (86%/79%: expected-source recall on
+  two frozen 12-query provenance pilots, scored against different index builds
+  and not comparable with each other; not a retrieval-accuracy figure).
 - Retrieval ranking/indexing changes require an eval re-run
   (before/after `eval_search`) documented in CHANGELOG.md.
 - R3 (MCP/tool-call provenance events) is not built yet — do not claim it.
