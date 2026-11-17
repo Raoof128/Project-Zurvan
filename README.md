@@ -3,8 +3,7 @@
 > **Local-first LLM knowledge engine** — ingest any document, extract structured knowledge, and query it via hybrid search, graph expansion, or MCP agent memory.
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-218%20passing-brightgreen)](docs/TESTING.md)
-[![Phase](https://img.shields.io/badge/phase-18%20%E2%9C%85-blueviolet)](CHANGELOG.md)
+[![Tests](https://img.shields.io/badge/tests-4%2C109-brightgreen)](docs/TESTING.md)
 [![Obsidian](https://img.shields.io/badge/Obsidian-compatible-7c3aed?logo=obsidian&logoColor=white)](docs/obsidian/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-stdio%20server-orange)](docs/mcp/)
@@ -273,7 +272,7 @@ bash scripts/check.sh
 
 Runs 22 stages: unit tests · extraction gauntlet · wiki audit · retrieval eval · graph tests · MCP smoke · evidence/report/publication pipeline · review workbench.
 
-**Current:** 218 tests passing, 0 failing. See [Testing Guide](docs/TESTING.md).
+**Current:** 4,109 tests in the suite (collected 17 Nov 2026). The result of each full run on `main` is recorded in the [changelog](CHANGELOG.md). See [Testing Guide](docs/TESTING.md).
 
 ---
 

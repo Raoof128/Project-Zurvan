@@ -3,6 +3,18 @@
 Older `AGENTS.md` change entries, moved here verbatim on 2026-07-04 to keep the
 constraints file small. Newest entries live in [../AGENTS.md](../AGENTS.md).
 
+### 2026-11-16 (Australia/Sydney) — The "flaky" Rust search test was starvation, not a race; fixed, plus a deterministic guard the old test lacked
+
+Raouf:
+- **Scope:** Raouf said "Proceed" after 2026-11-15f; the open question it recorded (is `hybrid_never_mixes_generations_under_promotion` flaky because of a real race?) needed no decision from him.
+- **Root cause:** the failure at `rust/zurvan-mcp/src/search.rs:778` was the test's own sanity check `calls > 50` ("the storm ran (42 calls)"), not the mixing assertion. The storm ran for a fixed 3 s; under load each call after a promote rebuilds the vector cache, so too few calls happened. Evidence: 0/15 failures idle; 11/12 failures with 12 copies in parallel, every one `the storm ran (N calls)`; instrumentation that printed every mixed hit printed none in any run.
+- **Fix (test only):** the storm now runs until 200 calls (at least 3 s, at most 60 s). 12/12 pass in parallel.
+- **The old test could not catch the regression it names:** with hydration mutated to read from an unpinned connection, it still passed (its race window is microseconds). New deterministic test `hydration_reads_the_scored_generation_even_if_promoted_in_between`, using a new `#[cfg(test)]` `before_hydrate` barrier: it promotes a file with the same chunk ids and different text between scoring and hydration, and requires the hits to come from the scored generation. Under the same mutation it fails (hits read `REPLACED ...`); restored, it passes. No production code changed, so the installed MCP binary is unaffected.
+- **Files:** `rust/zurvan-mcp/src/search.rs` (tests and a test-only hook).
+- **Verification:** `cargo test --no-fail-fast` 121 + 10 + 5 passed; `cargo clippy --all-targets` clean; the mutation checks above; `public_repo_guard.py` and `git diff --check` clean.
+- **Pushed (Raouf: "commit and push and update all logs", 2026-11-16):** `origin/main` `2f85989..` this commit, 11 commits covering 2026-11-15e, 2026-11-15f and 2026-11-16. The remote `Raoof128/Project-Zurvan` is PUBLIC (Raouf's choice, 2026-11-15); before the push: `gh repo view` checked, no path under `wiki/`, `raw/`, `sources/`, `data/` or any holdout in the range, `public_repo_guard.py` passed. The untracked `docs/superpowers/specs/2026-11-01-ingest-fidelity-design.md` (another session's draft) was not committed.
+- **Follow-ups:** unchanged from 2026-11-15f (S-P-O backfill, decision linking, IOU-Z2-4b, Z6, Z1b). Rotate the sudo password.
+
 ### 2026-11-15f (Australia/Sydney) — IOU-Z2-1…4 built (S-P-O, decision supersession, retraction propagation by report, PDF page locators); nothing run on live data; image/media locators stay open as IOU-Z2-4b
 
 Raouf:
