@@ -37,9 +37,9 @@ def _revision(root):
 
 
 def _add(root):
-    res = zurvan(root, "add", "--text", "Sarabi week 9", "--source", SRC,
+    res = zurvan(root, "add", "--text", "Acme week 9", "--source", SRC,
                  "--evidence", "Week 9 totals 52 days", "--confidence", "high",
-                 "--tags", "haji")
+                 "--tags", "acme")
     assert res.returncode == 0, res.stderr
     return json.loads(res.stdout.strip().splitlines()[-1])["claim_id"]
 
@@ -58,7 +58,7 @@ def test_supersede_cli_requires_reason(root):
 
 def test_supersede_retract_revise_cli(root):
     cid = _add(root)
-    res = zurvan(root, "supersede", cid, "--text", "Sarabi week 10", "--source", SRC,
+    res = zurvan(root, "supersede", cid, "--text", "Acme week 10", "--source", SRC,
                  "--evidence", "Week 10 totals 58 days", "--reason", "week closed",
                  "--valid-from", "2026-11-16")
     assert res.returncode == 0, res.stderr
@@ -94,11 +94,11 @@ def test_read_commands_open_no_operation(root):
 def test_conflicts_adopt_regenerate_cli(root):
     cid = _add(root)
     page = root / "wiki" / "claims" / f"{cid}.md"
-    page.write_text(page.read_text(encoding="utf-8").replace("Sarabi week 9", "Sarabi wk 9"),
+    page.write_text(page.read_text(encoding="utf-8").replace("Acme week 9", "Acme wk 9"),
                     encoding="utf-8")
     assert cid in zurvan(root, "conflicts").stdout
     assert zurvan(root, "adopt", cid, "--reason", "typo").returncode == 0
-    assert "Sarabi wk 9" in json.loads(zurvan(root, "show", cid, "--json").stdout)["text"]
+    assert "Acme wk 9" in json.loads(zurvan(root, "show", cid, "--json").stdout)["text"]
     page.write_text(page.read_text(encoding="utf-8") + "\nnote\n", encoding="utf-8")
     assert zurvan(root, "regenerate", cid, "--force").returncode == 0
     assert zurvan(root, "conflicts").stdout.strip() == ""

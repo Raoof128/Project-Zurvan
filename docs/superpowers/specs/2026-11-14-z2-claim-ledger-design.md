@@ -30,7 +30,7 @@ Four fronts, run in parallel; sub-agent reports were checked against their cited
 | Confidence | 537 high (536 quoted + 1 unquoted), 11 medium; **0** with a stated basis |
 | Decisions | 853; 6 `superseded`; **75 (8.8%)** say in prose that they replace/supersede/correct something, **0** link to what (upper bound: keyword match) |
 
-Live example: `wiki/claims/` holds "Sarabi timesheet … totals 52 days, $9,140.70" (14 Nov). Next week it is false, and
+Live example: `wiki/claims/` holds "Acme timesheet … totals 40 days, $1,234.50" (14 Nov). Next week it is false, and
 the only tool today is a second, contradicting claim.
 
 ### 2.2 Prior art (ten products, primary docs/source, current versions)
@@ -81,7 +81,7 @@ keeps an `orphaned` state when evidence disappears.
   and start/end-time qualifiers for status and valid time; **nanopublications** for "a new signed record per change,
   the original left in place"; **XTDB v2** for as-of semantics (valid time defaults to *"as of now"*, system time to
   *"as best known"*).
-- **Law, day one:** GDPR Art. 2(2)(c) and Privacy Act s 16 exempt purely personal use, but **client material (Haji)
+- **Law, day one:** GDPR Art. 2(2)(c) and Privacy Act s 16 exempt purely personal use, but **client material
   is not personal use**. GDPR Art. 16/17, APP 13 and EDPB Guidelines 02/2025 (para 103–106: design for erasure early;
   rectification by a later cancelling record; keep personal data out of what the immutable chain cannot lose) require
   that claim text and quotes be erasable while history stays append-only.
@@ -92,7 +92,7 @@ keeps an `orphaned` state when evidence disappears.
    command re-checks every claim and answers *intact / moved / changed / gone*. The 31 broken claims of §2.1 are
    found, named and marked, never silently kept as "high".
 2. **Correct without losing.** Supersede and retract are new revisions recording who decided, on what basis and why.
-   The old revision stays readable. The Sarabi totals become a chain, not a contradiction.
+   The old revision stays readable. The Acme totals become a chain, not a contradiction.
 3. **Ask what Zurvan believed at any point.** Every revision is bound to the knowledge-ledger revision that committed
    it (plus wall time), so the store's belief at revision R is reconstructable exactly, and agrees with a Z0 snapshot
    taken at R.

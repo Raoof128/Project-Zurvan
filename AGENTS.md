@@ -88,6 +88,15 @@ See `CLAUDE.md` for the agent quickstart (commands, layout).
 Newest first. Entries older than the most recent two are archived **verbatim** in
 [docs/agents-history.md](docs/agents-history.md); append new entries here per the change protocol.
 
+### 2026-11-17 (Australia/Sydney) — Synthetic names in fixtures and one spec example; README test count brought up to date
+
+Raouf:
+- **Scope:** tests, one design spec, two code comments, README and testing guide. No behaviour change.
+- **Summary:** Test fixtures, the Z2 claim-ledger spec's worked example and two comments used a real client's name and two real timesheet totals as sample data. They are replaced with synthetic ones (`Acme`, `$1,234.50`, `$1,400.00`) in the tracked tree. The values remain in git history; removing them there needs a history rewrite, which was not done. The README badge and the testing guide still said 218 tests and Phase 18: the badge now shows the collected count (4,109), the stale phase badge is gone, and the README points at the changelog for full-run results instead of asserting a pass count.
+- **Files:** `tests/test_z2_{cli,erase,ledger,migrate,not_current,pages,review_fixes,store}.py`, `tests/test_graph_build.py`, `scripts/graph_build.py` (comment), `docs/superpowers/specs/2026-11-14-z2-claim-ledger-design.md`, `docs/agents-history.md`, `README.md`, `docs/TESTING.md`, `AGENTS.md`, this file.
+- **Verification:** `tests/test_z2_*.py` and `tests/test_claim*.py` 468 passed; the nine edited test files 111 passed; `pytest --collect-only` 4,109 tests collected; `public_repo_guard.py` passed; `git grep` for the old name and figures returns nothing. The full suite and `check.sh` were NOT run: this was done in a fresh clone with no wiki, graph or index.
+- **Follow-ups:** Decide whether to rewrite history to remove the old values (a force-push; every existing clone must re-sync).
+
 ### 2026-11-16b (Australia/Sydney) — Z2 IOU close-out: the 7 review minors fixed, IOU-Z2-4b (image region locators, claims schema v2) built, 15 decision supersessions linked and 110 S-P-O triples applied on the live store
 
 Raouf:
@@ -100,15 +109,3 @@ Raouf:
 - **Verification:** merged main full suite 4099 passed, 1 failed (`test_z2_store.py::test_pragmas_on_every_connection` asserted `user_version == 1`; now reads `SCHEMA_VERSION`), 9 skipped; then the Z2 tests 487 passed and the decision/memory tests 74 passed after the last fix. In a worktree `test_cli_subcommands_work_from_foreign_cwd` fails because the worktree has no `wiki/` (passes on main). `public_repo_guard.py` and `git diff --check` pass.
 - **Pushed** (Raouf: "do all commit and push", 2026-11-16): `origin/main` `a3fd1c8..` this commit, 7 commits of 2026-11-16b, to the PUBLIC repo (`gh repo view`: isPrivate false); no path under wiki/raw/sources/data or any instrument/holdout; `public_repo_guard.py` passed; the outgoing diff carries no client name. Boundary still flags 4 INSTRUMENT spans in `CHANGELOG.md`/`docs/agents-history.md` that were already committed and pushed before this entry (same span ids in `HEAD`); none is added here; Raouf to inspect with `zurvan boundary explain`. The untracked ingest-fidelity design was not committed.
 - **Follow-ups:** the 427 claims without a triple wait for Z3 (sentence splitting); unlinked prose supersessions above are for a human or Z7; Z6 regeneration of derived artifacts; video/audio regions; Z1b (budget kept); `zurvan index search` + `graph rebuild` after this entry. Rotate the sudo password.
-
-### 2026-11-16 (Australia/Sydney) — The "flaky" Rust search test was starvation, not a race; fixed, plus a deterministic guard the old test lacked
-
-Raouf:
-- **Scope:** Raouf said "Proceed" after 2026-11-15f; the open question it recorded (is `hybrid_never_mixes_generations_under_promotion` flaky because of a real race?) needed no decision from him.
-- **Root cause:** the failure at `rust/zurvan-mcp/src/search.rs:778` was the test's own sanity check `calls > 50` ("the storm ran (42 calls)"), not the mixing assertion. The storm ran for a fixed 3 s; under load each call after a promote rebuilds the vector cache, so too few calls happened. Evidence: 0/15 failures idle; 11/12 failures with 12 copies in parallel, every one `the storm ran (N calls)`; instrumentation that printed every mixed hit printed none in any run.
-- **Fix (test only):** the storm now runs until 200 calls (at least 3 s, at most 60 s). 12/12 pass in parallel.
-- **The old test could not catch the regression it names:** with hydration mutated to read from an unpinned connection, it still passed (its race window is microseconds). New deterministic test `hydration_reads_the_scored_generation_even_if_promoted_in_between`, using a new `#[cfg(test)]` `before_hydrate` barrier: it promotes a file with the same chunk ids and different text between scoring and hydration, and requires the hits to come from the scored generation. Under the same mutation it fails (hits read `REPLACED ...`); restored, it passes. No production code changed, so the installed MCP binary is unaffected.
-- **Files:** `rust/zurvan-mcp/src/search.rs` (tests and a test-only hook).
-- **Verification:** `cargo test --no-fail-fast` 121 + 10 + 5 passed; `cargo clippy --all-targets` clean; the mutation checks above; `public_repo_guard.py` and `git diff --check` clean.
-- **Pushed (Raouf: "commit and push and update all logs", 2026-11-16):** `origin/main` `2f85989..` this commit, 11 commits covering 2026-11-15e, 2026-11-15f and 2026-11-16. The remote `Raoof128/Project-Zurvan` is PUBLIC (Raouf's choice, 2026-11-15); before the push: `gh repo view` checked, no path under `wiki/`, `raw/`, `sources/`, `data/` or any holdout in the range, `public_repo_guard.py` passed. The untracked `docs/superpowers/specs/2026-11-01-ingest-fidelity-design.md` (another session's draft) was not committed.
-- **Follow-ups:** unchanged from 2026-11-15f (S-P-O backfill, decision linking, IOU-Z2-4b, Z6, Z1b). Rotate the sudo password.

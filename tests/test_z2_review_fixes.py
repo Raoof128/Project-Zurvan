@@ -173,7 +173,7 @@ def test_valid_time_and_project_are_validated(root, kw):
 
 def test_valid_dates_and_slug_accepted(root):
     cid = _add(root, valid_from="2026-11-09", valid_until="2026-11-16T00:00:00+11:00",
-               project="haji")
+               project="acme")
     assert cl.current(root)[cid].valid_from == "2026-11-09"
 
 

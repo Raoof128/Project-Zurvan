@@ -119,10 +119,10 @@ def test_row_hash_never_contains_body(root):
     conn = cs.connect(root)
     claim_id = cs.new_claim_id()
     cs.insert_claim(conn, claim_id, "m000000000001")
-    stored = _rev(conn, claim_id, body="SECRET-XYZ", tags=["haji"],
+    stored = _rev(conn, claim_id, body="SECRET-XYZ", tags=["acme"],
                   extraction_key="deadbeef:claim-1")
     for row in conn.execute("SELECT * FROM revisions"):
-        assert not any("SECRET-XYZ" in str(v) or "haji" in str(v) or "deadbeef" in str(v)
+        assert not any("SECRET-XYZ" in str(v) or "acme" in str(v) or "deadbeef" in str(v)
                        for v in row)
     before = stored["row_hash"]
     conn.execute("UPDATE content SET body = 'EDITED' WHERE cid = ?", (stored["text_cid"],))

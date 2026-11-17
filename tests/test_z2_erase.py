@@ -11,9 +11,9 @@ from scripts import claim_store as cs
 from scripts import knowledge_revision as kr
 
 SRC = "wiki/sources/client.md"
-BODY = "HajiClientSecretContext the client owes 4812 dollars TrailingSecretContext\n"
+BODY = "AcmeClientSecretContext the client owes 4812 dollars TrailingSecretContext\n"
 Q = "the client owes 4812 dollars"
-TEXT = "Haji client owes 4812 dollars"
+TEXT = "Acme client owes 4812 dollars"
 
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def root(tmp_path, monkeypatch):
 
 def _add(root, **kw):
     with kr.operation(writer="test", root=root):
-        return cl.add(TEXT, SRC, Q, confidence="high", tags=["hajiclienttag"], actor="local:t",
+        return cl.add(TEXT, SRC, Q, confidence="high", tags=["acmeclienttag"], actor="local:t",
                       method="human", root=root, **kw)
 
 
@@ -58,8 +58,8 @@ def test_erased_text_absent_from_db_bytes(root):
     cid = _add(root)
     _erase(root, cid)
     raw = cs.db_path(root).read_bytes()
-    for fragment in (b"4812", b"HajiClientSecretContext", b"TrailingSecretContext",
-                     b"hajiclienttag", b"client.md", b"owes"):
+    for fragment in (b"4812", b"AcmeClientSecretContext", b"TrailingSecretContext",
+                     b"acmeclienttag", b"client.md", b"owes"):
         assert fragment not in raw, fragment
     assert not cs.db_path(root).with_name("claims.sqlite-journal").exists()
 

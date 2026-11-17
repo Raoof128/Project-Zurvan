@@ -140,7 +140,7 @@ def test_a_legacy_claim_whose_source_id_is_the_stem_still_links_once():
 
 def test_a_list_item_with_a_colon_is_not_read_as_a_key():
     # Z2 final-review minor, fixed 2026-11-15: a generated claim page's tag
-    # `  - "client: haji"` became a junk key `- "client`.
-    fm, _ = parse_frontmatter('---\ntype: "claim"\ntags:\n  - "client: haji"\n'
+    # `  - "client: acme"` became a junk key `- "client`.
+    fm, _ = parse_frontmatter('---\ntype: "claim"\ntags:\n  - "client: acme"\n'
                               '- "source: x"\nmeta:\n  nested: kept\n---\nbody\n')
     assert fm == {"type": "claim", "tags": "", "meta": "", "nested": "kept"}

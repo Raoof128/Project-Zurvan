@@ -25,19 +25,19 @@ def root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _add(root, text="Sarabi week 9", quote="Week 9 totals 52 days", **kw):
+def _add(root, text="Acme week 9", quote="Week 9 totals 52 days", **kw):
     with kr.operation(writer="test", root=root):
         return cl.add(text, SRC, quote, confidence="high", actor="local:test",
                       method="human", root=root, **kw)
 
 
 def test_add_writes_a_generated_page(root):
-    cid = _add(root, tags=["haji"])
+    cid = _add(root, tags=["acme"])
     page = root / "wiki" / "claims" / f"{cid}.md"
     fm, body = parse_frontmatter(page.read_text(encoding="utf-8"))
     assert fm["type"] == "claim" and fm["claim_id"] == cid and fm["authority"] == "structured"
     assert fm["status"] == "asserted" and fm["confidence"] == "high"
-    assert "# Claim\nSarabi week 9" in body and "> Week 9 totals 52 days" in body
+    assert "# Claim\nAcme week 9" in body and "> Week 9 totals 52 days" in body
     assert f"**Source**: [[{SRC}]]" in body and "## History" in body
     assert cp.has_unadopted_edit(cid, root) is False
 
@@ -64,20 +64,20 @@ def test_render_hostile_text_round_trips(root):
 def test_status_banner_and_supersedes_line(root):
     old = _add(root)
     with kr.operation(writer="test", root=root):
-        new = cl.supersede(old, text="Sarabi week 10", source=SRC,
+        new = cl.supersede(old, text="Acme week 10", source=SRC,
                            evidence="Week 10 totals 58 days", reason="week closed",
                            actor="local:test", method="human", root=root)
     now = cl.current(root)
     old_page = cp.page_path(now[old], root).read_text(encoding="utf-8")
     new_page = cp.page_path(now[new], root).read_text(encoding="utf-8")
     assert "> **STATUS: SUPERSEDED** — week closed" in old_page
-    assert "Supersedes: Sarabi week 9" in new_page
+    assert "Supersedes: Acme week 9" in new_page
 
 
 def test_hand_edit_listed_in_conflicts(root):
     cid = _add(root)
     page = cp.page_path(cl.current(root)[cid], root)
-    page.write_text(page.read_text(encoding="utf-8").replace("Sarabi week 9", "Sarabi wk9"),
+    page.write_text(page.read_text(encoding="utf-8").replace("Acme week 9", "Acme wk9"),
                     encoding="utf-8")
     assert cp.has_unadopted_edit(cid, root) is True
     assert cp.conflicts(root) == [cid]
@@ -110,11 +110,11 @@ def test_supersede_refuses_when_page_has_unadopted_edit(root):
 def test_adopt_turns_edit_into_revise(root):
     cid = _add(root)
     page = cp.page_path(cl.current(root)[cid], root)
-    page.write_text(page.read_text(encoding="utf-8").replace("Sarabi week 9", "Sarabi wk 9"),
+    page.write_text(page.read_text(encoding="utf-8").replace("Acme week 9", "Acme wk 9"),
                     encoding="utf-8")
     with kr.operation(writer="test", root=root):
         rev = cp.adopt(cid, actor="local:test", reason="typo fix in Obsidian", root=root)
-    assert rev == 2 and cl.current(root)[cid].text == "Sarabi wk 9"
+    assert rev == 2 and cl.current(root)[cid].text == "Acme wk 9"
     assert cp.has_unadopted_edit(cid, root) is False
 
 

@@ -17,7 +17,7 @@ type: claim
 confidence: "high"
 source: "wiki/sources/s.md"
 tags:
-  - "haji"
+  - "acme"
 ---
 
 # Claim
@@ -58,7 +58,7 @@ MISSING = NORMAL.replace("wiki/sources/s.md", "wiki/sources/gone.md").replace(
     "Week 9 totals 52 days", "Source vanished")
 EDITED = NORMAL.replace("Week 9 totals 52 days", "Quote edited away").replace(
     "> totals 52 days", "> totals 99 days")
-EMPTY_PLUS_UPDATE = NORMAL.replace("Week 9 totals 52 days", "Both sites run from Sarabi-01").replace(
+EMPTY_PLUS_UPDATE = NORMAL.replace("Week 9 totals 52 days", "Both sites run from Acme-01").replace(
     "> totals 52 days", "> ") + "\n**Update 2026-09-27:** caveat closed.\n"
 UNPARSEABLE = "---\ntype: claim\n---\njust some words, no claim section\n"
 
@@ -99,7 +99,7 @@ def _migrate(root, tmp_path_factory, **kw):
 def test_parse_both_shapes():
     a = cm.parse_legacy_page("claim-00000001.md", NORMAL)
     assert (a.text, a.source, a.quote, a.confidence, a.tags) == (
-        "Week 9 totals 52 days", "wiki/sources/s.md", "totals 52 days", "high", ["haji"])
+        "Week 9 totals 52 days", "wiki/sources/s.md", "totals 52 days", "high", ["acme"])
     b = cm.parse_legacy_page("claim-00000002.md", EXTRACTED)
     assert (b.text, b.quote, b.claim_type, b.location, b.source) == (
         "Zurvan keeps a wiki", "keeps a persistent wiki", "fact", "line 1", "wiki/sources/s2.md")
@@ -137,7 +137,7 @@ def test_provenance_retained_for_every_parsed_page(root, tmp_path_factory):
     s1 = by_legacy["claim-00000001"]
     assert (s1.text, s1.evidence[0]["source"]) == ("Week 9 totals 52 days", "wiki/sources/s.md")
     assert s1.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == "totals 52 days"
-    assert s1.basis == ["legacy_unstated"] and s1.tags == ["haji"]
+    assert s1.basis == ["legacy_unstated"] and s1.tags == ["acme"]
     assert json.loads(report.read_text())["provenance_mismatches"] == []
 
 

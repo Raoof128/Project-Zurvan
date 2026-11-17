@@ -19,9 +19,9 @@ from scripts import claim_store as cs
 from scripts import knowledge_revision as kr
 
 SRC = "wiki/sources/s.md"
-BODY = "Week 9 totals 52 days and $9,140.70.\nWeek 10 totals 58 days and $10,215.60.\n"
-Q9 = "totals 52 days and $9,140.70"
-Q10 = "totals 58 days and $10,215.60"
+BODY = "Week 9 totals 52 days and $1,234.50.\nWeek 10 totals 58 days and $1,400.00.\n"
+Q9 = "totals 52 days and $1,234.50"
+Q10 = "totals 58 days and $1,400.00"
 W = dict(actor="local:test", method="human")
 
 
@@ -41,12 +41,12 @@ def _op(root, fn):
         return fn()
 
 
-def _add(root, text="Sarabi totals 52 days"):
+def _add(root, text="Acme totals 52 days"):
     return _op(root, lambda: cl.add(text, SRC, Q9, confidence="high", basis=["primary_source"],
                                     root=root, **W))
 
 
-def _sup(root, cid, text="Sarabi totals 58 days"):
+def _sup(root, cid, text="Acme totals 58 days"):
     return _op(root, lambda: cl.supersede(cid, text=text, source=SRC, evidence=Q10,
                                           reason="newer sheet", root=root, **W))
 
@@ -72,7 +72,7 @@ def _refused(root, fn):
 def test_superseding_a_superseded_claim_is_refused_and_names_the_successor(root):
     a = _add(root)
     b = _sup(root, a)
-    err = _refused(root, lambda: cl.supersede(a, text="Sarabi totals 60 days", source=SRC,
+    err = _refused(root, lambda: cl.supersede(a, text="Acme totals 60 days", source=SRC,
                                               evidence=Q10, reason="again", root=root, **W))
     assert err.code == "CLAIM_NOT_CURRENT"
     assert b in str(err)
@@ -82,7 +82,7 @@ def test_superseding_a_superseded_claim_is_refused_and_names_the_successor(root)
 def test_superseding_a_retracted_claim_is_refused(root):
     a = _add(root)
     _ret(root, a)
-    err = _refused(root, lambda: cl.supersede(a, text="Sarabi totals 60 days", source=SRC,
+    err = _refused(root, lambda: cl.supersede(a, text="Acme totals 60 days", source=SRC,
                                               evidence=Q10, reason="back", root=root, **W))
     assert err.code == "CLAIM_NOT_CURRENT"
     assert "retracted" in str(err)

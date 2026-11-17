@@ -7,9 +7,9 @@ from scripts import claim_store as cs
 from scripts import knowledge_revision as kr
 
 SRC = "wiki/sources/s.md"
-BODY = "Week 9 totals 52 days and $9,140.70.\nWeek 10 totals 58 days and $10,215.60.\n"
-Q9 = "totals 52 days and $9,140.70"
-Q10 = "totals 58 days and $10,215.60"
+BODY = "Week 9 totals 52 days and $1,234.50.\nWeek 10 totals 58 days and $1,400.00.\n"
+Q9 = "totals 52 days and $1,234.50"
+Q10 = "totals 58 days and $1,400.00"
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _add(root, text="Sarabi totals 52 days", quote=Q9, **kw):
+def _add(root, text="Acme totals 52 days", quote=Q9, **kw):
     with kr.operation(writer="test", root=root) as op:
         cid = cl.add(text, SRC, quote, confidence="high", basis=["primary_source"],
                      actor="local:test", method="human", root=root, **kw)
@@ -31,11 +31,11 @@ def _add(root, text="Sarabi totals 52 days", quote=Q9, **kw):
 
 
 def test_add_then_current(root):
-    cid, rev = _add(root, tags=["haji"], valid_from="2026-11-09")
+    cid, rev = _add(root, tags=["acme"], valid_from="2026-11-09")
     state = cl.current(root)[cid]
     assert (state.rev, state.status, state.text, state.confidence) == (1, "asserted",
-                                                                        "Sarabi totals 52 days", "high")
-    assert state.basis == ["primary_source"] and state.tags == ["haji"]
+                                                                        "Acme totals 52 days", "high")
+    assert state.basis == ["primary_source"] and state.tags == ["acme"]
     assert state.valid_from == "2026-11-09" and state.valid_until is None
     assert state.evidence[0]["source"] == SRC
     assert state.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == Q9
@@ -45,7 +45,7 @@ def test_add_then_current(root):
 def test_supersede_links_and_ends_old(root):
     old, _ = _add(root, valid_from="2026-11-09")
     with kr.operation(writer="test", root=root):
-        new = cl.supersede(old, text="Sarabi totals 58 days", source=SRC, evidence=Q10,
+        new = cl.supersede(old, text="Acme totals 58 days", source=SRC, evidence=Q10,
                            reason="week 10 closed", actor="local:test", method="human",
                            valid_from="2026-11-16", root=root)
     now = cl.current(root)
@@ -74,17 +74,17 @@ def test_retract_keeps_history(root):
                          actor="local:test", method="human", root=root)
     assert rev == 2
     state = cl.current(root)[cid]
-    assert state.status == "retracted" and state.text == "Sarabi totals 52 days"
+    assert state.status == "retracted" and state.text == "Acme totals 52 days"
     assert [h["status"] for h in cl.history(cid, root)] == ["asserted", "retracted"]
 
 
 def test_revise_carries_unchanged_fields(root):
-    cid, _ = _add(root, tags=["haji"])
+    cid, _ = _add(root, tags=["acme"])
     with kr.operation(writer="test", root=root):
         cl.revise(cid, reason="note basis", basis=["primary_source", "direct_measurement"],
                   actor="local:test", method="human", root=root)
     s = cl.current(root)[cid]
-    assert s.rev == 2 and s.text == "Sarabi totals 52 days" and s.tags == ["haji"]
+    assert s.rev == 2 and s.text == "Acme totals 52 days" and s.tags == ["acme"]
     assert s.basis == ["primary_source", "direct_measurement"]
     assert s.evidence[0]["selector"]["TextQuoteSelector"]["exact"] == Q9   # inherited
 

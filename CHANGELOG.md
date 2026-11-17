@@ -1,5 +1,14 @@
 ## Change Log
 
+### 2026-11-17 (Australia/Sydney) — Synthetic names in fixtures and one spec example; README test count brought up to date
+
+Raouf:
+- **Scope:** tests, one design spec, two code comments, README and testing guide. No behaviour change.
+- **Summary:** Test fixtures, the Z2 claim-ledger spec's worked example and two comments used a real client's name and two real timesheet totals as sample data. They are replaced with synthetic ones (`Acme`, `$1,234.50`, `$1,400.00`) in the tracked tree. The values remain in git history; removing them there needs a history rewrite, which was not done. The README badge and the testing guide still said 218 tests and Phase 18: the badge now shows the collected count (4,109), the stale phase badge is gone, and the README points at the changelog for full-run results instead of asserting a pass count.
+- **Files:** `tests/test_z2_{cli,erase,ledger,migrate,not_current,pages,review_fixes,store}.py`, `tests/test_graph_build.py`, `scripts/graph_build.py` (comment), `docs/superpowers/specs/2026-11-14-z2-claim-ledger-design.md`, `docs/agents-history.md`, `README.md`, `docs/TESTING.md`, `AGENTS.md`, this file.
+- **Verification:** `tests/test_z2_*.py` and `tests/test_claim*.py` 468 passed; the nine edited test files 111 passed; `pytest --collect-only` 4,109 tests collected; `public_repo_guard.py` passed; `git grep` for the old name and figures returns nothing. The full suite and `check.sh` were NOT run: this was done in a fresh clone with no wiki, graph or index.
+- **Follow-ups:** Decide whether to rewrite history to remove the old values (a force-push; every existing clone must re-sync).
+
 ### 2026-11-16b (Australia/Sydney) — Z2 IOU close-out: the 7 review minors fixed, IOU-Z2-4b (image region locators, claims schema v2) built, 15 decision supersessions linked and 110 S-P-O triples applied on the live store
 
 Raouf:
@@ -104,7 +113,7 @@ Raouf:
   - **Unmounted disks:** `verify --apply` orphaned claims whose source sits on a disk that is not mounted. `resolve` now says `volume not mounted: /Volumes/X` and verify leaves them alone (`skipped_unmounted`) (`f8c2a19`).
   - **`zurvan claim add`** wrote no `Claim Added` log line (the MCP path did); one helper now serves both (`1367640`). The full suite caught that an in-process smoke test then wrote that line into the checkout's own `wiki/log.md`; the test now spies it (`f5fe668`).
   - **`knowledge status`** reported a scope-version change as an outside edit; it now names the scope change and states the bound (`79d7f1c`).
-  - **Graph parser:** a frontmatter list item containing a colon (a tag `client: haji`) became a junk key; list items are skipped. No key an edge or node field reads can change (`8c6690c`).
+  - **Graph parser:** a frontmatter list item containing a colon (a tag `client: acme`) became a junk key; list items are skipped. No key an edge or node field reads can change (`8c6690c`).
   - **Test gaps closed:** a real (non-dry) `claim migrate` CLI run, erase CLI residue, the 30 s lock default. The Z2 closure matrix names the new tests under G2, G5, G7 and G8.
 - **Live store (IOU-Z2-7, IOU-Z2-8):**
   - `clm_d4782cf842887bc4` and `clm_e04c67df1d37b828` (risk report §3.1) restored to `asserted` with `claim revise`, each re-anchored to a longer quote that occurs exactly once (the §3.1 passage; the first occurrence is the executive summary). This is the designed evidence path, not a restore by assertion.
